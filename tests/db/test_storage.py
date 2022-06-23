@@ -120,6 +120,7 @@ def test_find_objects(pool_and_model):
     assert next(found) == model.parts[0].parts[0]
     assert next(found, None) is None
 
+
 def test_find_objects_for_multiple_nested_parts(pool_and_model):
     pool, _ = pool_and_model
 
@@ -127,6 +128,16 @@ def test_find_objects_for_multiple_nested_parts(pool_and_model):
 
     assert {'part1-sub1', 'part2-sub1', 'part2-sub2'} == {found.name for found in found}
 
+
+def test_query_records_with_match(pool_and_model):
+    pool, _ = pool_and_model
+
+    objects = list(
+        query_records(pool, SubPartModel, (('name', 'match', 'part sub1'),), fields=('name',))
+    )
+
+    assert ['part1-sub1', 'part2-sub1'] == list(o['name'] for o in objects)
+ 
 
 def test_query_records(pool_and_model):
     pool, _ = pool_and_model
