@@ -723,20 +723,18 @@ def _build_where(field_and_ops:FieldOp) -> str:
     return ''
 
 def _build_order_by(order_by:Tuple[str,...]) -> str:
-    if order_by:
-        processed = [
-            ' '.join(field_exprs(item) if index == 0 else item for index, item in enumerate(line.split(' '))) 
-            for line in order_by 
-        ]
+    assert order_by
+    processed = [
+        ' '.join(field_exprs(item) if index == 0 else item for index, item in enumerate(line.split(' '))) 
+        for line in order_by 
+    ]
 
-        return join_line(
-            'ORDER BY',
-            tab_each_line(
-                processed, use_comma=True
-            )
+    return join_line(
+        'ORDER BY',
+        tab_each_line(
+            processed, use_comma=True
         )
-
-    return ''
+    )
 
 
 def _build_where_op(fields:str, op:str):
