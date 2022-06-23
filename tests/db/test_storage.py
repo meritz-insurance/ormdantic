@@ -38,6 +38,7 @@ class SubPartModel(PersistentModel, PartOfMixin[PartModel]):
 update_part_of_forward_refs(ContainerModel, locals())
 update_part_of_forward_refs(PartModel, locals())
 
+
 model = ContainerModel(id=UuidStr('@'), 
                         version='0.1.0',
                         name=FullTextSearchedStringIndex('sample'),
@@ -52,24 +53,33 @@ model = ContainerModel(id=UuidStr('@'),
                         ])
 
 
-def test_upsert_objects():
+@pytest.fixture
+def pool_and_model():
     with use_temp_database_pool_with_model(ContainerModel) as pool:
         upserted = upsert_objects(pool, model)
 
-        # multiple same object does not affect the database.
-        upserted = upsert_objects(pool, upserted)
-
-        where = build_where(get_identifer_of(upserted))
-
-        found = find_object(pool, ContainerModel, where)
-
-        assert upserted == found
+        yield pool, upserted
 
 
-def test_upsert_objects_with_exception():
-    with use_temp_database_pool_with_model(ContainerModel) as pool:
-        with pytest.raises(RuntimeError, match='PartOfMixin could not be saved directly.*'):
-            upsert_objects(pool, model.parts[0])
+
+def test_upsert_objects(pool_and_model):
+    pool, upserted = pool_and_model
+
+    # multiple same object does not affect the database.
+    upserted = upsert_objects(pool, upserted)
+
+    where = build_where(get_identifer_of(upserted))
+
+    found = find_object(pool, ContainerModel, where)
+
+    assert upserted == found
+
+
+def test_upsert_objects_with_exception(pool_and_model):
+    pool, _ = pool_and_model
+
+    with pytest.raises(RuntimeError, match='PartOfMixin could not be saved directly.*'):
+        upsert_objects(pool, model.parts[0])
 
 
 def test_delete_objects():
@@ -86,51 +96,47 @@ def test_delete_objects():
         assert found is None
 
 
-def test_find_object():
-    with use_temp_database_pool_with_model(ContainerModel) as pool:
-        upsert_objects(pool, model)
-        
-        with pytest.raises(RuntimeError, match='More than one object.*'):
-            find_object(pool, PartModel, tuple())
+def test_find_object(pool_and_model):
+    pool, _ = pool_and_model
 
-        found = find_object(pool, PartModel, build_where([('name', 'part1')]))
-        assert found == model.parts[0]
+    with pytest.raises(RuntimeError, match='More than one object.*'):
+        find_object(pool, PartModel, tuple())
 
-
-def test_find_objects():
-    with use_temp_database_pool_with_model(ContainerModel) as pool:
-        upsert_objects(pool, model)
-
-        found = find_objects(pool, PartModel, build_where([('_container_name', 'sample')]))
-
-        assert next(found) == model.parts[0]
-        assert next(found) == model.parts[1]
-        assert next(found, None) is None
-
-        found = find_objects(pool, SubPartModel, (('name', 'match', '+sub1 -part2'),))
-
-        assert next(found) == model.parts[0].parts[0]
-        assert next(found, None) is None
-
-def test_find_objects_for_multiple_nested_parts():
-    with use_temp_database_pool_with_model(ContainerModel) as pool:
-        upsert_objects(pool, model)
-
-        found = find_objects(pool, SubPartModel, tuple())
-
-        assert {'part1-sub1', 'part2-sub1', 'part2-sub2'} == {found.name for found in found}
+    found = find_object(pool, PartModel, build_where([('name', 'part1')]))
+    assert found == model.parts[0]
 
 
-def test_query_records():
-    with use_temp_database_pool_with_model(ContainerModel) as pool:
-        upsert_objects(pool, model)
+def test_find_objects(pool_and_model):
+    pool, _ = pool_and_model
 
-        objects = list(
-            query_records(pool, PartModel, tuple(), fields=('_container_name', 'name'))
-        )
+    found = find_objects(pool, PartModel, build_where([('_container_name', 'sample')]))
 
-        assert [
-            {'name':'part1', '_container_name':'sample'},
-            {'name':'part2', '_container_name':'sample'},
-        ] == objects
+    assert next(found) == model.parts[0]
+    assert next(found) == model.parts[1]
+    assert next(found, None) is None
+
+    found = find_objects(pool, SubPartModel, (('name', 'match', '+sub1 -part2'),))
+
+    assert next(found) == model.parts[0].parts[0]
+    assert next(found, None) is None
+
+def test_find_objects_for_multiple_nested_parts(pool_and_model):
+    pool, _ = pool_and_model
+
+    found = find_objects(pool, SubPartModel, tuple())
+
+    assert {'part1-sub1', 'part2-sub1', 'part2-sub2'} == {found.name for found in found}
+
+
+def test_query_records(pool_and_model):
+    pool, _ = pool_and_model
+
+    objects = list(
+        query_records(pool, PartModel, tuple(), fields=('_container_name', 'name'))
+    )
+
+    assert [
+        {'name':'part1', '_container_name':'sample'},
+        {'name':'part2', '_container_name':'sample'},
+    ] == objects
  

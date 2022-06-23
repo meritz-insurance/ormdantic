@@ -61,9 +61,6 @@ persons = find_objects(pool, Person, ('name', 'like', '%Stev%'))
  * support python 3.10+ only.
 
 ## TODO
- * support full text search relevance order.
-   - wheres = ('name,description', 'match', '+HELLO')
-
  * unwind on array object. (like mongodb's $unwind)
    - query_objects(... unwind=('codes',))
 
@@ -82,6 +79,3 @@ persons = find_objects(pool, Person, ('name', 'like', '%Stev%'))
 
  * separated 'part of' object
    - shared by content.
-
-      class Company:
-        memebers: List[Person]

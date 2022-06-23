@@ -218,7 +218,7 @@ def test_get_field_type_with_exception():
 
 def test_field_exprs():
     assert '*' == field_exprs('*')
-    assert ['*', '`f`', '`f`'] == list(field_exprs(['*', 'f', '`f`']))
+    assert ['*', '`f`', '`f`', 'T() as T'] == list(field_exprs(['*', 'f', '`f`', 'T() as T']))
 
 
 def test_get_materialized_fields():
@@ -563,9 +563,17 @@ def test_get_query_and_args_for_reading_for_matching():
 
     assert join_line(
         "SELECT",
-        "  `order`",
-        "FROM model_MyModel",
-        "WHERE MATCH (`order`,`name`) AGAINST (%(order_name)s IN BOOLEAN MODE)"
+        "  *",
+        "FROM (",
+        "  SELECT",
+        "    `order`,",
+        "    MATCH (`order`,`name`) AGAINST (%(order_name)s IN BOOLEAN MODE) as `__relevance`",
+        "  FROM model_MyModel",
+        "  WHERE",
+        "    MATCH (`order`,`name`) AGAINST (%(order_name)s IN BOOLEAN MODE)",
+        ") AS FOR_ORDER_BY",
+        "ORDER BY",
+        "  `__relevance` DESC"
     ) == sql
 
     assert {
@@ -582,9 +590,15 @@ def test_get_query_and_args_for_reading_for_order_by():
 
     assert join_line(
         "SELECT",
-        "  `order`",
-        "FROM model_MyModel",
-        "ORDER BY `order` desc,`name`"
+        "  *",
+        "FROM (",
+        "  SELECT",
+        "    `order`",
+        "  FROM model_MyModel",
+        ") AS FOR_ORDER_BY",
+        "ORDER BY",
+        "  `order` desc,",
+        "  `name`"
     ) == sql
 
 

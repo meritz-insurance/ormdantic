@@ -317,10 +317,15 @@ def _get_field_db_type(type_:Type) -> str:
 
 
 def _f(field:str) -> str:
+    field = field.strip()
+
     if field.startswith('`') and field.endswith('`'):
         return field
     
     if field == '*':
+        return field
+
+    if ' ' in field and '(' in field: # if field has function or "as" statement.
         return field
 
     return f'`{field}`'
@@ -533,9 +538,10 @@ def get_sql_for_inserting_parts_table(model_type:Type) -> Dict[Type, Tuple[str, 
 def _generate_json_table_for_part_of(json_path: str,
                                      is_collection: bool, fields: MaterializedFieldDefinitions) -> str:
     items = [
-        (_resolve_paths_for_part_of(paths, 
-            json_path + ('[*]' if is_collection else '') , 
-            is_collection_type_of(field_type)), field_name, field_type)
+        (
+            _resolve_paths_for_part_of(paths, json_path + ('[*]' if is_collection else '')), 
+            field_name, field_type
+        )
         for field_name, (paths, field_type) in fields.items()
     ]
 
@@ -601,7 +607,7 @@ def _validate_json_paths(paths:Tuple[str], is_collection:bool):
         raise RuntimeError('Invalid path expression. collection type should end with $.')
 
 
-def _resolve_paths_for_part_of(paths:Tuple[str, ...], json_path:str, is_collection:bool = False) -> List[str]:
+def _resolve_paths_for_part_of(paths:Tuple[str, ...], json_path:str) -> List[str]:
     if paths[0] == '..':
         resolved = [*paths[1:]]
     else:
@@ -620,8 +626,13 @@ def get_query_and_args_for_reading(type_:Type[ModelT], fields:Tuple[str,...] | s
     # unwind = _make_tuple(unwind)
     order_by = convert_tuple(order_by)
 
-    where = _fill_empty_fields_for_match(where, 
-                                         get_materialized_fields_for_full_text_search(type_))
+    where = _fill_empty_fields_for_match(
+        where, 
+        get_materialized_fields_for_full_text_search(type_))
+
+    if match_where := _has_match_in(where):
+        order_by = order_by + (f"{_RELEVANCE_FIELD} DESC",)
+        fields = fields + (_build_match(match_where[0]) + f" as {field_exprs(_RELEVANCE_FIELD)}",)
 
     return (
         _get_sql_for_reading(
@@ -629,6 +640,10 @@ def get_query_and_args_for_reading(type_:Type[ModelT], fields:Tuple[str,...] | s
             tuple((f, o) for f, o, _ in where), order_by), 
         _build_args(where)
     )
+
+
+def _has_match_in(where:Where):
+    return next(filter(lambda w: w[1].lower() == 'match', where), None)
 
 
 def _fill_empty_fields_for_match(where:Where, fields:Iterable[str]) -> Where:
@@ -642,17 +657,30 @@ def _fill_empty_fields_for_match(where:Where, fields:Iterable[str]) -> Where:
 
 @functools.lru_cache
 def _get_sql_for_reading(type_:Type, fields:Tuple[str,...], field_ops:FieldOp, order_by: Tuple[str, ...]) -> str:
-    return join_line(
+
+    sql = join_line(
         'SELECT',
         tab_each_line(
             field_exprs(fields),
             use_comma=True
         ),
         f'FROM {get_table_name(type_)}',
-        _build_where(field_ops),
-        _build_order_by(order_by)
+        _build_where(field_ops)
     )
 
+    if order_by:
+        sql = join_line(
+            'SELECT',
+            '  *',
+            'FROM (',
+            tab_each_line(
+                sql
+            ),
+            ') AS FOR_ORDER_BY',
+            _build_order_by(order_by)
+        )
+
+    return sql
 
 def get_query_and_args_for_updating(model:PersistentModel, where:Where):
     query_args = _build_args(where)
@@ -685,8 +713,11 @@ def _build_args(where:Where) -> Dict[str, Any]:
 
 def _build_where(field_and_ops:FieldOp) -> str:
     if field_and_ops:
-        return 'WHERE ' + ' AND '.join(
-            _build_where_op(field, op) for field, op in field_and_ops
+        return join_line(
+            'WHERE',
+            tab_each_line(
+                ' AND \n'.join(_build_where_op(field, op) for field, op in field_and_ops)
+            )
         )
 
     return ''
@@ -698,19 +729,29 @@ def _build_order_by(order_by:Tuple[str,...]) -> str:
             for line in order_by 
         ]
 
-        return 'ORDER BY ' + join_line(processed, new_line=False, use_comma=True)
+        return join_line(
+            'ORDER BY',
+            tab_each_line(
+                processed, use_comma=True
+            )
+        )
 
     return ''
 
 
 def _build_where_op(fields:str, op:str):
     if op == 'match':
-        variable = _get_parameter_variable_for_multiple_fields(fields)
-        field_items = field_exprs([f.strip() for f in fields.split(',')])
-
-        return f'MATCH ({join_line(field_items, new_line=False, use_comma=True)}) AGAINST (%({variable})s IN BOOLEAN MODE)'
+        return _build_match(fields)
     else:
         return f'{fields} {op} %({fields})s'
+
+
+def _build_match(fields:str):
+    variable = _get_parameter_variable_for_multiple_fields(fields)
+    field_items = field_exprs([f for f in fields.split(',')])
+
+    return f'MATCH ({join_line(field_items, new_line=False, use_comma=True)}) AGAINST (%({variable})s IN BOOLEAN MODE)'
+
 
 def _get_parameter_variable_for_multiple_fields(fields:str):
     variable = fields.replace(',', '_').replace(' ', '')
