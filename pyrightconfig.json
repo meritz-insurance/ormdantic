@@ -1,0 +1,17 @@
+{
+    "pythonVersion":"3.10",
+    "pythonPlatform": "Darwin",
+
+    "include": [
+        "ormdantic",
+        "tests"
+    ],
+
+    "exclude": [
+        "**/__pycache__"
+    ] ,
+
+    "reportMissingImports": true,
+    "reportPrivateUsage": "none",
+    "reportTypeshedErrors": "warning"
+}
