@@ -1,26 +1,29 @@
 from typing import (
     Type, Iterator, overload, Iterable, List, Tuple, cast, Dict, 
-    Any, DefaultDict
+    Any, DefaultDict, Optional, get_args, Set
 )
 from datetime import datetime, date
 from decimal import Decimal
 from collections import defaultdict
 import itertools
 import functools
-import inspect
 
 from pydantic import ConstrainedStr, ConstrainedDecimal
 from pymysql.cursors import DictCursor
 
 from ormdantic.util import is_derived_from, convert_tuple
+from ormdantic.util.hints import get_base_generic_type_of
 
 from ..util import get_logger
 from ..schema.base import (
-    ArrayIndexMixin, FullTextSearchedMixin, IdentifyingMixin, IndexMixin, 
-    MaterializedFieldDefinitions, ModelT, MaterializedMixin, PartOfMixin, 
-    UniqueIndexMixin, get_container_type, get_field_name_and_type, 
+    ArrayIndexMixin, PersistentModelT, ReferenceMixin, FullTextSearchedMixin, 
+    IdentifyingMixin, IndexMixin, 
+    StoredFieldDefinitions, PersistentModelT, StoredMixin, PartOfMixin, 
+    UniqueIndexMixin, get_container_type, 
     get_part_field_names, get_part_types, is_field_collection_type,
-    PersistentModel, is_collection_type_of
+    PersistentModel, is_collection_type_of, get_stored_fields,
+    get_stored_fields_for
+
 )
 
 _MAX_VAR_CHAR_LENGTH = 200
@@ -40,7 +43,7 @@ _JSON_PATH_FIELD = '__json_path'
 _PART_ORDER_FIELD = '__part_order'
 _RELEVANCE_FIELD = '__relevance'
 
-# for cjk full text search. It seemed to insert record is slow.
+# for cjk full text search (mroonga). It seemed to be slow that records are inserted in mroonga.
 # _ENGINE = r""" ENGINE=mroonga COMMENT='engine "innodb" DEFAULT CHARSET=utf8'"""
 _ENGINE = ""
 _FULL_TEXT_SEARCH_OPTION = r"""COMMENT 'parser "TokenBigramIgnoreBlankSplitSymbolAlphaDigit"'"""
@@ -51,9 +54,8 @@ FieldOp = Tuple[Tuple[str, str]]
 
 _logger = get_logger(__name__)
 
-def get_table_name(type_:Type[ModelT], postfix:str = ''):
+def get_table_name(type_:Type[PersistentModelT], postfix:str = ''):
     return f'model_{type_.__name__}{"_" + postfix if postfix else ""}' 
-
 
 
 @overload
@@ -74,13 +76,45 @@ def field_exprs(fields:str | Iterable[str], table_name:str='') -> str | Iterator
         return map(lambda f: field_exprs(f, table_name), fields)
 
 
+def as_field_expr(field:str, table_name:str, ns:str) -> str:
+    if ns:
+        return f'{field_exprs(field, table_name)} AS {field_exprs(_add_namespace(field, ns))}'
+    else:
+        return f'{field_exprs(field, table_name)}'
+
+
+
 def join_line(*lines:str | Iterable[str], 
               new_line: bool = True, use_comma: bool = False) -> str:
     sep = (',' if use_comma else '') + ('\n' if new_line else '')
 
     return (
-        sep.join(line for line in itertools.chain(*[[l] if isinstance(l, str) else l for l in lines]) if line) 
+        sep.join(
+            line 
+            for line in itertools.chain(*[[l] if isinstance(l, str) else l for l in lines]) 
+            if line
+        ) 
     )
+
+
+def _alias_table(old_table:str, table_name:str) -> str:
+    old_table = old_table.strip()
+
+    if old_table.startswith('(') and old_table.endswith(')'):
+        old_table = old_table[1:-1]
+
+    if ' ' in old_table:
+        return join_line(
+            f"(",
+            tab_each_line(
+                old_table
+            ),
+            f")",
+            f"AS {table_name}"
+        )
+
+    return f"{old_table} as {table_name}"
+
 
 
 def tab_each_line(*statements:Iterable[str] | str, use_comma: bool = False) -> str:
@@ -89,21 +123,21 @@ def tab_each_line(*statements:Iterable[str] | str, use_comma: bool = False) -> s
     return join_line(['  ' + item for item in line.split('\n')], use_comma=False, new_line=True)
 
 
-def get_sql_for_creating_table(type_:Type[ModelT]):
-    materialized = get_materialized_fields(type_)
+def get_sql_for_creating_table(type_:Type[PersistentModelT]):
+    stored = get_stored_fields(type_)
 
     if issubclass(type_, PartOfMixin):
         # The container field will be saved in container's table.
         # but for the full text search fields, we need to save them in part's table 
-        # even it is in part's materialized fields.
-        part_materialized = get_materialized_fields_for_part_of(type_)
+        # even it is in part's stored fields.
+        part_stored = get_stored_fields_for_part_of(type_)
 
         yield _build_create_model_table_statement(
             get_table_name(type_, _PART_BASE_TABLE), 
             _get_part_table_fields(),
-            _get_table_materialized_fields(part_materialized, False),
+            _get_table_stored_fields(part_stored, False),
             _get_part_table_indexes(),
-            _get_table_indexes(materialized),
+            _get_table_indexes(part_stored),
         )
 
         part_table_name = get_table_name(type_, _PART_BASE_TABLE)
@@ -114,8 +148,8 @@ def get_sql_for_creating_table(type_:Type[ModelT]):
         container_table_name = get_table_name(container_type)
 
         part_fields = (_ROW_ID_FIELD, _ROOT_ROW_ID_FIELD, _CONTAINER_ROW_ID_FIELD, 
-                       *part_materialized.keys())
-        container_fields = tuple(set(materialized.keys()) - set(part_fields))
+                       *part_stored.keys())
+        container_fields = tuple(set(stored.keys()) - set(part_fields))
 
         joined_table = _build_join_table(
             (part_table_name, _CONTAINER_ROW_ID_FIELD), 
@@ -138,62 +172,33 @@ def get_sql_for_creating_table(type_:Type[ModelT]):
         yield _build_create_model_table_statement(
             get_table_name(type_), 
             _get_table_fields(),
-            _get_table_materialized_fields(materialized, True),
-            _get_table_indexes(materialized)
+            _get_table_stored_fields(stored, True),
+            _get_table_indexes(stored)
         )
 
-
-def get_materialized_fields_for_full_text_search(type_:Type[ModelT]):
-    materialized = get_materialized_fields(type_)
-
-    full_text_search_materialized = {
-        k:(paths, type_) for k, (paths, type_) in materialized.items() 
-        if is_derived_from(type_, FullTextSearchedMixin) 
-            or is_collection_type_of(type_, FullTextSearchedMixin)
-    }
-
-    return full_text_search_materialized
+    yield from _build_create_external_index_tables(type_)
 
 
-def get_materialized_fields_for_part_of(type_:Type[ModelT]):
-    materialized = get_materialized_fields(type_)
+def get_stored_fields_for_full_text_search(type_:Type[PersistentModelT]):
+    return get_stored_fields_for(type_, FullTextSearchedMixin)
 
-    part_materialized = {
-        k:(paths, type_) for k, (paths, type_) in materialized.items() 
-        if not _check_from_container(paths) 
+
+def get_stored_fields_for_part_of(type_:Type[PersistentModelT]):
+    return get_stored_fields_for(type_, 
+        lambda paths, type_: 
+            not _is_come_from_container_field(paths) 
             or is_derived_from(type_, FullTextSearchedMixin)
             or is_collection_type_of(type_, FullTextSearchedMixin)
-    }
-
-    return part_materialized
+    )
 
 
-def _check_from_container(paths:Tuple[str]) -> bool:
-    return paths and paths[0] == '..' 
+def _is_come_from_container_field(paths:Tuple[str,...]) -> bool:
+    return bool(paths and paths[0] == '..' and not paths[1].startswith('$'))
 
 
-def get_materialized_fields(type_:Type[ModelT]):
-    return _get_materialized_fields(cast(Type, type_))
+def get_stored_fields_for_external_index(type_:Type[PersistentModelT]):
+    return get_stored_fields_for(type_, ArrayIndexMixin)
 
-
-@functools.lru_cache()
-def _get_materialized_fields(type_:Type):
-    materialized : MaterializedFieldDefinitions = {
-        field_name:(_get_json_paths(type_, field_name, field_type), field_type)
-        for field_name, field_type 
-        in get_field_name_and_type(type_, 
-            lambda t: is_derived_from(t, MaterializedMixin))
-    }
-
-    for fields in reversed([cast(PersistentModel, base)._materialized_fields
-        for base in inspect.getmro(type_) if is_derived_from(base, PersistentModel)]):
-        materialized.update(fields)
-
-    for field, (paths, field_type) in materialized.items():
-        _validate_json_paths(paths, is_collection_type_of(field_type))
-
-    return materialized
-        
 
 def _build_create_model_table_statement(table_name:str, 
                                         *field_definitions: Iterator[str]) -> str:
@@ -219,7 +224,15 @@ def _build_create_part_of_model_view_statement(view_name:str, joined_table:str,
         ')'
     )
 
+def _build_create_external_index_tables(type_:Type):
+    for field_name, (_, field_type) in get_stored_fields_for_external_index(type_).items():
+        yield _build_create_model_table_statement(
+            get_table_name(type_, field_name), 
+            _get_external_index_table_fields(field_name, field_type),
+            _get_external_index_table_indexes(field_name, field_type),
+        )
 
+ 
 def _build_join_table(*table_names:Tuple[str, str]) -> str:
     table_iter = iter(table_names)
     main_table, main_index = next(table_iter)
@@ -229,7 +242,7 @@ def _build_join_table(*table_names:Tuple[str, str]) -> str:
     ref_index = field_exprs(main_index, main_table)
 
     for table, index_name in table_iter:
-        target_tables.append(f'  JOIN {field_exprs(table)} ON {field_exprs(index_name, table)} = {ref_index}')
+        target_tables.append(f'JOIN {field_exprs(table)} ON {field_exprs(index_name, table)} = {ref_index}')
 
     return join_line(target_tables)
 
@@ -239,6 +252,17 @@ def _get_table_fields() -> Iterator[str]:
     yield f'{field_exprs(_JSON_FIELD)} {_JSON_TYPE} {_JSON_CHECK.format(field_exprs(_JSON_FIELD))}'
 
 
+def _get_external_index_table_fields(field_name:str, field_type:Type) -> Iterator[str]:
+    # we don't need primary key, because there is no field which is for full text searching.
+    type = get_base_generic_type_of(field_type, ArrayIndexMixin)
+
+    param_type = get_args(type)[0]
+
+    yield f'{field_exprs(_ROW_ID_FIELD)} BIGINT'
+    yield f'{field_exprs(_ROOT_ROW_ID_FIELD)} BIGINT'
+    yield f'{field_exprs(field_name)} {_get_field_db_type(param_type)}'
+
+
 def _get_part_table_fields() -> Iterator[str]:
     yield f'{field_exprs(_ROW_ID_FIELD)} BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY'
     yield f'{field_exprs(_ROOT_ROW_ID_FIELD)} BIGINT'
@@ -246,12 +270,8 @@ def _get_part_table_fields() -> Iterator[str]:
     yield f'{field_exprs(_JSON_PATH_FIELD)} VARCHAR(255)'
 
 
-def _get_part_table_indexes() -> Iterator[str]:
-    yield f'KEY `{_ROOT_ROW_ID_FIELD}_index` ({field_exprs(_ROOT_ROW_ID_FIELD)})'
-
-
-def _get_table_materialized_fields(materialized:MaterializedFieldDefinitions, json_stored:bool = False) -> Iterator[str]:
-    for field_name, (paths, field_type) in materialized.items():
+def _get_table_stored_fields(stored_fields:StoredFieldDefinitions, json_stored:bool = False) -> Iterator[str]:
+    for field_name, (paths, field_type) in stored_fields.items():
         stored = '' if not json_stored else _generate_stored_for_json_path(paths, field_type)
         yield f"""{field_exprs(field_name)} {_get_field_db_type(field_type)}{stored}"""
 
@@ -262,15 +282,15 @@ def _get_view_fields(fields:Dict[str, Tuple[str, ...]]) -> Iterator[str]:
             yield f'{field_exprs(field_name, table_name)}'
 
 
-def _get_table_indexes(materialized:MaterializedFieldDefinitions) -> Iterator[str]:
-    for field_name, (_, field_type) in materialized.items():
+def _get_table_indexes(stored_fields:StoredFieldDefinitions) -> Iterator[str]:
+    for field_name, (_, field_type) in stored_fields.items():
         key_def = _generate_key_definition(field_type)
 
         if key_def: 
             yield f"""{key_def} `{field_name}_index` ({field_exprs(field_name)})"""
 
     full_text_searched_fields = set(
-        field_name for field_name, (_, field_type) in materialized.items()
+        field_name for field_name, (_, field_type) in stored_fields.items()
         if is_derived_from(field_type, FullTextSearchedMixin)
     )
 
@@ -281,6 +301,18 @@ def _get_table_indexes(materialized:MaterializedFieldDefinitions) -> Iterator[st
                 new_line=False, use_comma=True
             )
         }) {_FULL_TEXT_SEARCH_OPTION}'''
+
+
+def _get_part_table_indexes() -> Iterator[str]:
+    yield f'KEY `{_ROOT_ROW_ID_FIELD}_index` ({field_exprs(_ROOT_ROW_ID_FIELD)})'
+
+
+def _get_external_index_table_indexes(field_name:str, field_type:Type) -> Iterator[str]:
+    yield f"""KEY `{_ROW_ID_FIELD}_index` ({field_exprs(_ROW_ID_FIELD)})"""
+    yield f"""KEY `{field_name}_index` ({field_exprs(field_name)})"""
+
+    if is_derived_from(field_type, FullTextSearchedMixin):
+        yield f"""FULLTEXT INDEX `ft_index` ({field_exprs(field_name)}) {_FULL_TEXT_SEARCH_OPTION}"""
 
 
 def _get_field_db_type(type_:Type) -> str:
@@ -304,7 +336,7 @@ def _get_field_db_type(type_:Type) -> str:
     if issubclass(type_, date):
         return 'DATE'
 
-    if issubclass(type_, (str, MaterializedMixin)):
+    if issubclass(type_, (str, StoredMixin)):
         if issubclass(type_, ConstrainedStr):
             max_length = min(type_.max_length or _MAX_VAR_CHAR_LENGTH, _MAX_VAR_CHAR_LENGTH)
 
@@ -331,17 +363,6 @@ def _f(field:str) -> str:
     return f'`{field}`'
 
 
-def _get_json_paths(type_, field_name, field_type) -> Tuple[str,...]:
-    paths: List[str] = []
-
-    if is_derived_from(field_type, ArrayIndexMixin):
-        paths.extend([f'$.{field_name}[*]', '$'])
-    else:
-        paths.append(f'$.{field_name}')
-
-    return tuple(paths)
-
-
 def _generate_stored_for_json_path(json_paths: Tuple[str, ...], field_type:Type) -> str:
     if is_derived_from(field_type, IdentifyingMixin):
         # this value will be update by sql params.
@@ -365,26 +386,19 @@ def _generate_key_definition(type_:Type) -> str:
 
 
 def get_query_and_args_for_upserting(model:PersistentModel):
-    query_args = {'__json': model.json()}
+    query_args = {
+        f: getattr(model, f) for f in _get_identifying_fields(type(model))
+    }
 
-    materialized = get_materialized_fields(type(model))
-
-    for field_name, (_, field_type)  in materialized.items():
-        if is_derived_from(field_type, IdentifyingMixin):
-            query_args[field_name] = getattr(model, field_name)
+    query_args[_JSON_FIELD] = model.json()
 
     return _get_sql_for_upserting(cast(Type, type(model))), query_args
 
 
-def _get_identifying_fields(model_type:Type[ModelT]) -> Tuple[str]:
-    fields = []
-    materialized = get_materialized_fields(model_type)
+def _get_identifying_fields(model_type:Type[PersistentModelT]) -> Tuple[str]:
+    stored_fields = get_stored_fields_for(model_type, IdentifyingMixin)
 
-    for field_name, (_, field_type)  in materialized.items():
-        if is_derived_from(field_type, IdentifyingMixin):
-            fields.append(field_name)
-
-    return tuple(fields)
+    return tuple(field_name for field_name, _ in stored_fields.items())
             
 
 @functools.lru_cache
@@ -446,7 +460,7 @@ def _get_sql_for_upserting(model_type:Type):
 #   _order
 # 
 
-def get_sql_for_inserting_parts_table(model_type:Type) -> Dict[Type, Tuple[str, ...]]:
+def get_sql_for_upserting_parts_table(model_type:Type) -> Dict[Type, Tuple[str, ...]]:
     type_sqls : Dict[str, Tuple[str, str]] = {}
     part_types = get_part_types(model_type)
 
@@ -465,7 +479,7 @@ def get_sql_for_inserting_parts_table(model_type:Type) -> Dict[Type, Tuple[str, 
 
         sqls.append(delete_sql)
 
-        fields = get_materialized_fields_for_part_of(part_type)
+        fields = get_stored_fields_for_part_of(part_type)
 
         target_fields = tuple(itertools.chain(
             [_ROOT_ROW_ID_FIELD, _CONTAINER_ROW_ID_FIELD, _JSON_PATH_FIELD],
@@ -488,7 +502,8 @@ def get_sql_for_inserting_parts_table(model_type:Type) -> Dict[Type, Tuple[str, 
                 f')',
                 f'SELECT',
                 tab_each_line(
-                    _generate_select_field_of_json_table(target_fields, fields), use_comma=True
+                    _generate_select_field_of_json_table(target_fields, fields), 
+                    use_comma=True
                 ),
                 f'FROM (',
                 tab_each_line([
@@ -535,8 +550,64 @@ def get_sql_for_inserting_parts_table(model_type:Type) -> Dict[Type, Tuple[str, 
     return type_sqls
 
 
+def get_sql_for_upserting_external_index_table(model_type:Type) -> Iterator[str]:
+    for field_name, (json_paths, field_type) in get_stored_fields_for_external_index(model_type).items():
+
+        if json_paths[0] == '..':
+            root_path = '$[*]'
+            json_field = field_name
+            items = [(['$'], field_name, field_type) ]
+        else:
+            root_path = '$'
+            json_field = _JSON_FIELD
+            items = [(list(json_paths), field_name, field_type) ]
+
+        table_name = get_table_name(model_type, field_name)
+
+        # delete previous items.
+        yield join_line([
+            f'DELETE FROM {table_name}',
+            f'WHERE {field_exprs(_ROOT_ROW_ID_FIELD)} = %(__root_row_id)s'
+        ])
+
+        yield join_line(
+            f'INSERT INTO {table_name}',
+            f'(',
+            tab_each_line(
+                field_exprs([_ROOT_ROW_ID_FIELD, _ROW_ID_FIELD, field_name]),
+                use_comma=True
+            ),
+            f')',
+            f'SELECT',
+            tab_each_line(
+                field_exprs(_ROOT_ROW_ID_FIELD, '__ORG'),
+                field_exprs(_ROW_ID_FIELD, '__ORG'),
+                field_exprs(field_name, '__EXT_JSON_TABLE'),
+                use_comma=True
+            ),
+            f'FROM',
+            tab_each_line(
+                f'{get_table_name(model_type)} AS __ORG',
+                join_line(
+                    'JSON_TABLE(',
+                    tab_each_line(
+                        field_exprs(json_field, '__ORG'),
+                        _generate_nested_json_table(root_path, items),
+                        use_comma=True
+                    ),
+                    ') AS __EXT_JSON_TABLE'
+                ),
+                use_comma=True
+            ),
+            f'WHERE',
+            tab_each_line(
+                f"""{field_exprs(_ROOT_ROW_ID_FIELD, '__ORG')} = %(__root_row_id)s"""
+            )
+        )
+
+
 def _generate_json_table_for_part_of(json_path: str,
-                                     is_collection: bool, fields: MaterializedFieldDefinitions) -> str:
+                                     is_collection: bool, fields: StoredFieldDefinitions) -> str:
     items = [
         (
             _resolve_paths_for_part_of(paths, json_path + ('[*]' if is_collection else '')), 
@@ -557,7 +628,7 @@ def _generate_json_table_for_part_of(json_path: str,
 
 
 def _generate_select_field_of_json_table(target_fields:Tuple[str,...], 
-                                         fields: MaterializedFieldDefinitions
+                                         fields: StoredFieldDefinitions
                                          ) -> Iterable[str]:
     for field_name in target_fields:
         if field_name in fields:
@@ -570,7 +641,8 @@ def _generate_select_field_of_json_table(target_fields:Tuple[str,...],
         yield field_exprs(field_name)
 
 
-def _generate_nested_json_table(first_path:str, items:Iterable[Tuple[List[str], str, Type]], depth:int = 0) -> str:
+def _generate_nested_json_table(first_path:str, 
+                                items: Iterable[Tuple[List[str], str, Type]], depth: int = 0) -> str:
     nested_items: DefaultDict[str, List[Tuple[List[str], str, Type]]] = defaultdict(list)
 
     columns = []
@@ -597,16 +669,6 @@ def _generate_nested_json_table(first_path:str, items:Iterable[Tuple[List[str], 
     )
 
 
-def _validate_json_paths(paths:Tuple[str], is_collection:bool):
-    if any(not (p == '..' or p.startswith('$.') or p == '$') for p in paths):
-        _logger.fatal('{paths} has one item which did not starts with .. or $.')
-        raise RuntimeError('Invalid path expression. the path must start with $')
-
-    if is_collection and paths[-1] != '$':
-        _logger.fatal('{paths} should end with $ for collection type')
-        raise RuntimeError('Invalid path expression. collection type should end with $.')
-
-
 def _resolve_paths_for_part_of(paths:Tuple[str, ...], json_path:str) -> List[str]:
     if paths[0] == '..':
         resolved = [*paths[1:]]
@@ -616,34 +678,63 @@ def _resolve_paths_for_part_of(paths:Tuple[str, ...], json_path:str) -> List[str
     return resolved
 
 
-def get_query_and_args_for_reading(type_:Type[ModelT], fields:Tuple[str,...] | str, where:Where, 
+# fields is the json key , it can contain '.' like product.name
+def get_query_and_args_for_reading(type_:Type[PersistentModelT], fields:Tuple[str,...] | str, where:Where, 
                                    *,
-                                   unwind: Tuple[str,...] | str = tuple(),
                                    order_by: Tuple[str, ...] | str = tuple(), 
                                    offset : None | int = None, 
-                                   limit : None | int = None):
+                                   limit : None | int = None,
+                                   unwind: Tuple[str, ...] | str = tuple(),
+                                   ns_types:Dict[str, Type[PersistentModelT]] | None = None,
+                                   main_type:Optional[Type[PersistentModelT]] = None,
+                                   for_count:bool = False
+                                   ):
+    '''
+        Get 'field' values of record which is all satified the where conditions.
+
+        if the fields which has collection of item, the fields can be unwound.
+        it means to duplicate the row after split array into each item.
+
+        *join : will indicate the some model which is joined.
+    '''
     fields = convert_tuple(fields)
-    # unwind = _make_tuple(unwind)
+
+    unwind = convert_tuple(unwind)
     order_by = convert_tuple(order_by)
 
     where = _fill_empty_fields_for_match(
-        where, 
-        get_materialized_fields_for_full_text_search(type_))
+        where, get_stored_fields_for_full_text_search(type_))
 
-    if match_where := _has_match_in(where):
-        order_by = order_by + (f"{_RELEVANCE_FIELD} DESC",)
-        fields = fields + (_build_match(match_where[0]) + f" as {field_exprs(_RELEVANCE_FIELD)}",)
+    ns_types = dict(
+        _build_namespace_types(
+            type_, ns_types or {},
+            _build_namespace_set(
+                _merge_fields_and_where_fields(fields, where))
+        )
+    )
 
     return (
         _get_sql_for_reading(
-            cast(Type, type_), fields, 
-            tuple((f, o) for f, o, _ in where), order_by), 
-        _build_args(where)
+            tuple(ns_types.items()), 
+            fields, 
+            tuple((f, o) for f, o, _ in where), 
+            order_by, offset, limit, 
+            unwind, 
+            cast(Type, main_type), for_count), 
+        _build_database_args(where)
     )
 
+    # first, we make a group for each table.
+    # name 
+    # person.name  
+    # person.age
+    # 
+    # {'':['name'] 'person': ['name', 'age']}
 
-def _has_match_in(where:Where):
-    return next(filter(lambda w: w[1].lower() == 'match', where), None)
+
+# check fields and where for requiring the join.
+def _merge_fields_and_where_fields(fields:Tuple[str,...], where:Where) -> Tuple[str, ...]:
+    return tuple(itertools.chain(fields, (w[0] for w in where)))
 
 
 def _fill_empty_fields_for_match(where:Where, fields:Iterable[str]) -> Where:
@@ -655,49 +746,147 @@ def _fill_empty_fields_for_match(where:Where, fields:Iterable[str]) -> Where:
     )
 
 
-@functools.lru_cache
-def _get_sql_for_reading(type_:Type, fields:Tuple[str,...], field_ops:FieldOp, order_by: Tuple[str, ...]) -> str:
+@functools.lru_cache()
+def _get_sql_for_reading(ns_types:Tuple[Tuple[str, Type]], 
+                         fields: Tuple[str, ...], 
+                         field_ops: FieldOp, 
+                         order_by: Tuple[str, ...],
+                         offset: int | None,
+                         limit: int | None,
+                         unwind: Tuple[str, ...],
+                         main_type: Type[PersistentModelT] | None,
+                         for_count: bool) -> str:
 
-    sql = join_line(
-        'SELECT',
-        tab_each_line(
-            field_exprs(fields),
-            use_comma=True
-        ),
-        f'FROM {get_table_name(type_)}',
-        _build_where(field_ops)
-    )
+    # we will build the core table which has _row_id and fields which
+    # is referenced from where clause or unwound.
+    # we will join the core tables for making a base table which
+    # contains the row_id of each table
 
-    if order_by:
-        sql = join_line(
-            'SELECT',
-            '  *',
-            'FROM (',
-            tab_each_line(
-                sql
-            ),
-            ') AS FOR_ORDER_BY',
-            _build_order_by(order_by)
+    # we expect that the where condition will be applied on the table
+    # joined on core tables. (base table)
+    # but, To apply the where condition on core table makes better performance.
+
+    # We extract the where conditions which be applied on core table.
+    # if the where condition does not have 'IS NULL' condition,
+    # and apply where condition on core table and make main_type as None
+    # for inner join.
+
+    core_query_and_fields : Dict[str, Tuple[str, Tuple[str,...]]] = {}
+    field_ops_list = list(field_ops)
+
+    main_table_ns = _get_main_table_namespace(main_type, ns_types)
+
+    join_keys = _find_join_keys(ns_types)
+
+    for ns, ns_type in ns_types:
+        field_ops, core_fields = _extract_fields_and_ops_for_core(
+            field_ops_list, ns)
+
+        core_fields += _extract_fields_for_join(join_keys, ns_type)
+        core_fields += _extract_fields_for_order_by(order_by, ns)
+
+        if field_ops:
+            main_table_ns = None
+
+        core_query_and_fields[ns] = _build_query_and_fields_for_core_table(
+            ns, ns_type, core_fields,
+            field_ops, _extract_fields(unwind, ns))
+
+    field_ops = tuple(field_ops_list)
+
+    if for_count:
+        query_for_base, _ = _build_query_for_base_table(
+            ns_types, core_query_and_fields, field_ops,
+            tuple(), None, None,
+            main_table_ns
         )
 
-    return sql
+        return _count_row_query(query_for_base)
+    else:
+        query_for_base, base_fields = _build_query_for_base_table(
+            ns_types, core_query_and_fields, field_ops,
+            order_by, offset, limit,
+            main_table_ns
+        )
 
-def get_query_and_args_for_updating(model:PersistentModel, where:Where):
-    query_args = _build_args(where)
-    query_args['__json'] = model.json()
+        return _get_populated_table_query_from_base(
+            query_for_base, base_fields, fields, ns_types)
+
+
+@functools.cache
+def _split_namespace(field:str) -> Tuple[str, str]:
+    if '.' in field:
+        index = field.rindex('.') 
+        return (field[:index], field[index+1:])
     
-    return _get_sql_for_updating(cast(Type, type(model)), tuple((f, o) for f, o, _ in where)), query_args
+    return ('', field)
 
 
-@functools.lru_cache
-def _get_sql_for_updating(type_:Type, field_ops:FieldOp):
-    return (
-        f'UPDATE {get_table_name(type_)} SET __json=%(__json)s {_build_where(field_ops)}'
-    )
+def _extract_fields_and_ops_for_core(
+        field_ops:List[Tuple[ str, str]], 
+        ns: str) -> Tuple[Tuple[Tuple[str, str], ...], List[str]]:
+
+    ns_field_ops = [fo for fo in field_ops if _split_namespace(fo[0])[0] == ns]
+
+    fields = [_ROW_ID_FIELD]
+
+    # update join fields
+        # we will join base table with each type's table by _ROW_ID _FIELD.
+    if any(fo[1].lower() == 'is null' for fo in ns_field_ops):
+        fields.extend(_split_namespace(f)[1] for f, o in ns_field_ops)
+        return tuple(), fields
+
+    for fo in ns_field_ops:
+        field_ops.remove(fo)
+
+    return tuple((_split_namespace(f)[1], o) for f,o in ns_field_ops), fields 
+
+
+def _extract_fields_for_order_by(order_by:Tuple[str], ns:str) -> List[str]:
+    fields = []
+
+    for f in order_by:
+        f = f.lower().replace('desc', '').replace('asc', '').strip()
+
+        field_ns, field = _split_namespace(f)
+
+        if field_ns == ns:
+            fields.append(field)
+
+    return fields
+
+
+def _extract_fields_for_join(join_keys:Dict[Tuple[Type, Type], Tuple[str, str]], ns_type:Type) -> List[str]:
+    fields = []
+
+    for (tl, tr), (kl, kr) in join_keys.items():
+        if tl is ns_type:
+            found = kl
+        else:
+            found = None
+
+        if tr is ns_type:
+            found = kr
+
+        if found and found not in fields:
+            fields.append(found)
+
+    return fields
+
+
+def _extract_fields(items:Iterable[str], ns:str) -> Tuple[str,...]:
+    if ns == '':
+        return tuple(item for item in items if '.' not in item)
+    else:
+        removed = ns + '.'
+        started = len(removed)
+
+        return tuple(item[started:] for item in items 
+            if item.startswith(removed) and '.' not in item[started:])
 
 
 def get_query_and_args_for_deleting(type_:Type, where:Where):
-    query_args = _build_args(where)
+    query_args = _build_database_args(where)
 
     return _get_sql_for_deleting(type_, tuple((f, o) for f, o, _ in where)), query_args
 
@@ -707,20 +896,28 @@ def _get_sql_for_deleting(type_:Type, field_and_value:FieldOp):
     return f'DELETE FROM {get_table_name(type_)} {_build_where(field_and_value)}'
 
 
-def _build_args(where:Where) -> Dict[str, Any]:
+def _build_database_args(where:Where) -> Dict[str, Any]:
     return {_get_parameter_variable_for_multiple_fields(field):value for field, _, value in where}
 
 
-def _build_where(field_and_ops:FieldOp) -> str:
+def _build_where(field_and_ops:FieldOp | Tuple[Tuple[str, str, str]]) -> str:
     if field_and_ops:
         return join_line(
             'WHERE',
             tab_each_line(
-                ' AND \n'.join(_build_where_op(field, op) for field, op in field_and_ops)
+                '\nAND '.join(_build_where_op(item) for item in field_and_ops)
             )
         )
 
     return ''
+
+
+def _build_limit_and_offset(limit:int| None, offset:int|None) -> str:
+    query = f'LIMIT {limit}' if limit else ''
+    query +=f'OFFSET {offset}' if offset else ''
+
+    return query
+
 
 def _build_order_by(order_by:Tuple[str,...]) -> str:
     assert order_by
@@ -737,16 +934,20 @@ def _build_order_by(order_by:Tuple[str,...]) -> str:
     )
 
 
-def _build_where_op(fields:str, op:str):
+def _build_where_op(fields_op:Tuple[str, str] | Tuple[str, str, str]) -> str:
+    field = fields_op[0]
+    op = fields_op[1]
+    variable = fields_op[2] if len(fields_op) == 3 else fields_op[0]
+
     if op == 'match':
-        return _build_match(fields)
+        return _build_match(fields_op[0], variable, variable)
     else:
-        return f'{fields} {op} %({fields})s'
+        return f'{field} {op} %({variable})s'
 
 
-def _build_match(fields:str):
-    variable = _get_parameter_variable_for_multiple_fields(fields)
-    field_items = field_exprs([f for f in fields.split(',')])
+def _build_match(fields:str, variable:str, table_name:str = ''):
+    variable = _get_parameter_variable_for_multiple_fields(variable)
+    field_items = field_exprs([f for f in fields.split(',')], table_name)
 
     return f'MATCH ({join_line(field_items, new_line=False, use_comma=True)}) AGAINST (%({variable})s IN BOOLEAN MODE)'
 
@@ -754,6 +955,7 @@ def _build_match(fields:str):
 def _get_parameter_variable_for_multiple_fields(fields:str):
     variable = fields.replace(',', '_').replace(' ', '')
     return variable
+
 
 def execute_and_get_last_id(cursor:DictCursor, sql:str, params:Dict[str, Any]) -> int:
     _logger.debug(sql)
@@ -764,4 +966,351 @@ def execute_and_get_last_id(cursor:DictCursor, sql:str, params:Dict[str, Any]) -
     assert row
 
     return row['inserted_id']
+
+
+def _build_query_and_fields_for_core_table(
+        ns:str, 
+        target_type: Type[PersistentModelT],
+        fields: List[str],
+        field_ops: Tuple[Tuple[str, str], ...],
+        unwind: Tuple[str, ...]) -> Tuple[str, Tuple[str, ...]]:
+    # in core table, following item will be handled.
+    # 1. unwind
+    # 2. where
+    # 3. match op
+    # 4. fields which is looked up from base table by field_ops.
+
+    matches = []
+    prefix_fields : DefaultDict[str, Dict[str, None]]= defaultdict(dict)
+
+    prefix_fields['__ORG'][_ROW_ID_FIELD] = None
+
+    for f in fields:
+        prefix_fields[_get_prefix_for_unwind(f, unwind)][f] = None
+
+    for f, op in field_ops:
+        if op == 'match':
+            matches.append(_build_match(f, f, '__ORG'))
+        else:
+            prefix_fields[_get_prefix_for_unwind(f, unwind)][f] = None
+
+    field_op_var = tuple(
+        (field_exprs(f, _get_prefix_for_unwind(f, unwind)), o, f)
+        for f, o in field_ops if o != 'match'
+    )
+
+    field_list = [] 
+
+    for prefix, sub_fields in prefix_fields.items():
+        field_list.extend(as_field_expr(f, prefix, ns) for f in sub_fields)
+
+    if matches:
+        field_list.append(
+            ' + '.join(matches) + f" as {field_exprs(_add_namespace(_RELEVANCE_FIELD, ns))}"
+        )
+        prefix_fields['__ORG'][_RELEVANCE_FIELD] = None
+
+    source = '\nLEFT JOIN '.join(
+        itertools.chain(
+            [_alias_table(get_table_name(target_type), '__ORG')],
+            [_alias_table(get_table_name(target_type, f), _get_prefix_for_unwind(f, unwind)) 
+                for f in unwind]
+        )
+    )
+
+    return join_line(
+        f"SELECT",
+        tab_each_line(
+            field_list,
+            use_comma=True
+        ),
+        f"FROM",
+        tab_each_line(
+            source
+        ),
+        _build_where(field_op_var)
+    ), tuple(_add_namespace(f, ns) for f in itertools.chain(*prefix_fields.values()))
+
+
+def _get_prefix_for_unwind(f:str, unwind:Tuple[str], other:str = '__ORG') -> str:
+    if f in unwind:
+        return f'__UNWIND_{f.upper()}'
+    else:
+        return other
+
+
+def _build_query_for_base_table(ns_types: Tuple[Tuple[str, PersistentModelT],...],
+                                core_table_queries: Dict[str, Tuple[str, Tuple[str,...]]],
+                                field_ops: Tuple[Tuple[str, str]],
+                                order_by: Tuple[str, ...],
+                                offset: int | None,
+                                limit: int | None,
+                                main_table_ns: str | None):
+    # 다른 table에 relevance가 있거나 현재 field_ops에 match가 있다면, 
+    # order_by마지막에 relevance를 넣어 주어야 한다.
+    # base type이 table과 
+
+    # '', 'home', 'company', 'home.person', 'company.members'
+
+    joined, fields = _build_join_for_ns(ns_types, core_table_queries, main_table_ns) 
+
+    nested_where = tuple()
+
+    if _RELEVANCE_FIELD in tuple(_split_namespace(f)[1] for f in fields):
+        nested_where = ((_RELEVANCE_FIELD, '>', 0), )
+        order_by += order_by + (f"{_RELEVANCE_FIELD} DESC" ,)
+
+    if order_by or nested_where:
+        return join_line(
+            'SELECT',
+            tab_each_line(
+                fields,
+                use_comma=True
+            ),
+            'FROM',
+            _alias_table(
+                join_line(
+                    'SELECT',
+                    tab_each_line(
+                        _merge_relevance_fields(fields),
+                        use_comma=True
+                    ),
+                    'FROM',
+                    tab_each_line(
+                        joined
+                    )
+                ), "FOR_ORDERING"
+            ),
+            _build_where(field_ops),
+            _build_order_by(order_by),
+            _build_limit_and_offset(limit, offset)
+        ), fields
+
+    return join_line(
+        'SELECT',
+        tab_each_line(
+            _merge_relevance_fields(fields),
+            use_comma=True
+        ),
+        'FROM',
+        tab_each_line(
+            joined
+        ),
+        _build_where(field_ops),
+        _build_limit_and_offset(limit, offset)
+    ), fields
+
+def _merge_relevance_fields(fields:Iterable[str]) -> List[str]:
+    merged = []
+    relevance_fields = []
+
+    for f in fields:
+        _, field = _split_namespace(f)
+
+        if field == _RELEVANCE_FIELD:
+            relevance_fields.append(field)
+        else:
+            merged.append(field)
+
+    if relevance_fields:
+        merged.append(
+            ' + '.join(relevance_fields) + f' AS {_RELEVANCE_FIELD}'
+        )
+
+    return merged
+
+
+def _build_join_for_ns(ns_types: Tuple[Tuple[str, PersistentModelT],...], 
+                       core_table_queries: Dict[str, Tuple[str, Tuple[str,...]]],
+                       main_table_ns: str | None) -> Tuple[str, List[str]]:
+    join_dict = dict(ns_types)
+    join_keys = _find_join_keys(ns_types)
+
+    joined_queries = []
+    total_fields = []
+
+    join_scope = ''
+    prev_ns = None
+
+    for current_ns in sorted(core_table_queries):
+        query, fields = core_table_queries[current_ns]
+        current_type = join_dict[current_ns]
+
+        total_fields.extend(fields)
+
+        if current_ns == main_table_ns:
+            join_scope = 'RIGHT '
+        elif prev_ns is not None and prev_ns == main_table_ns:
+            join_scope = 'LEFT '
+
+        if current_ns:
+            base_ns, _ = _split_namespace(current_ns)
+            base_type = join_dict[base_ns]
+
+            keys = join_keys[(base_type, current_type)]
+
+            left_key = _add_namespace(keys[0], base_ns)
+            right_key = _add_namespace(keys[1], current_ns)
+            joined_queries.append(f'{join_scope}JOIN {_alias_table(query, f"__{current_ns.upper()}")} ON {left_key} = {right_key}')
+        else:
+            joined_queries.append(_alias_table(query, '__BASE'))
+
+        prev_ns = current_ns
+
+    return join_line(joined_queries), total_fields
+
+
+def _count_row_query(query:str) -> str:
+    return join_line(
+        'SELECT',
+        '  *',
+        'FROM',
+        _alias_table(query, 'FOR_COUNT')
+    )
+    
+
+def _get_main_table_namespace(main_type:Type, ns_types:Tuple[Tuple[str, Type]]) -> str | None:
+    for prefix, type_ in ns_types:
+        if type_ == main_type:
+            return prefix
+
+    return None 
+
+
+def _build_namespace_set(fields:Iterable[str]) -> Set[str]:
+    field_tree = defaultdict(list)
+
+    for f in fields:
+        ns, field = _split_namespace(f)
+        field_tree[ns].append(field)
+
+    return set(field_tree)
+
+
+def _add_namespace(field:str, ns:str) -> str:
+    if ns:
+        return f'{ns}.{field}'
+
+    return field
+
+
+def _build_namespace_types(main_type:Type, join:Dict[str, Type], namespaces:Set[str]) -> Iterator[Tuple[str, Type]]:
+    yield ('', main_type)
+
+    yield from _build_join_from_refs(main_type, '', namespaces)
+
+    for field_name, field_type in join.items():
+        if any(field_name in ns for ns in namespaces):
+            yield field_name, field_type
+            yield from _build_join_from_refs(field_type, field_name + '.', namespaces)
+
+
+def _build_join_from_refs(current_type:Type, current_ns:str, namespaces:Set[str]) -> Iterator[Tuple[str, Type]]:
+    refs = get_stored_fields_for(current_type, ReferenceMixin)
+
+    for field_name, (_, field_type) in refs.items():
+        if any(field_name in ns for ns in namespaces):
+            generic_type = get_base_generic_type_of(field_type, ReferenceMixin)
+
+            ref_type = get_args(generic_type)[0]
+
+            yield current_ns + field_name, ref_type
+
+            yield from _build_join_from_refs(ref_type, current_ns + field_name + '.', namespaces)
+
+
+def _find_join_keys(join:Tuple[Tuple[str, Type],...]) -> Dict[Tuple[Type, Type], Tuple[str, str]]:
+    keys : Dict[Tuple[Type, Type], Tuple[str, str]] = {}
+
+    targets = dict(join)
+
+    for ns, joined_type in join:
+        if not ns:
+            continue
+
+        ref_ns, _ = _split_namespace(ns)
+
+        base_type = targets[ref_ns]
+        fields = _find_join_key(base_type, joined_type) or _find_join_key(joined_type, base_type, True)
+
+        if fields is None:
+            _logger.fatal(
+                f'{base_type=}, {joined_type=} does not have reference.\n'
+                f'{get_stored_fields(base_type)=} {get_stored_fields(joined_type)=}')
+            raise RuntimeError(f'{base_type} or {joined_type} does not have reference which links both.')
+
+        keys[(base_type, joined_type)] = (fields[0], fields[1])
+
+    return keys
+
+
+def _find_join_key(base_type:Type, target_type:Type, reversed:bool = False) -> Tuple[str, str] | None:
+    refs = get_stored_fields_for(base_type, ReferenceMixin)
+
+    for field_name, (_, field_type) in refs.items():
+        generic_type = get_base_generic_type_of(field_type, ReferenceMixin)
+        if get_args(generic_type)[0] == target_type:
+            target_field = field_type._target_field
+
+            if reversed:
+                return (target_field,  field_name)
+            else:
+                return (field_name, target_field)
+
+    return None
+
+
+def _get_table_name_of(ns:str) -> str:
+    if ns:
+        return f'_{ns.upper()}'
+    else:
+        return f'_MAIN'
+
+
+_BASE_TABLE_NAME = '_BASE'
+
+def _get_populated_table_query_from_base(query_for_base:str, 
+                                         base_fields: List[str],
+                                         target_fields: Tuple[str, ...],
+                                         ns_types: Tuple[Tuple[str, Type[PersistentModelT]]]):
+
+    joined_tables = [
+        _alias_table(query_for_base, _BASE_TABLE_NAME)
+    ]
+
+    scope_fields = {}
+
+    fields = [f for f in target_fields if f not in base_fields]
+
+    for ns, ns_type in ns_types:
+        ns_fields = _extract_fields(fields, ns)
+
+        if not ns_fields:
+            continue
+
+        ns_table_name = _get_table_name_of(ns)
+
+        if ns_fields:
+            scope_fields[ns] = ns_fields
+            joined_tables.append(
+                f'JOIN {_alias_table(get_table_name(ns_type), ns_table_name)} ON '
+                f'{field_exprs(_add_namespace(_ROW_ID_FIELD, ns), _BASE_TABLE_NAME)} = '
+                f'{field_exprs(_ROW_ID_FIELD, ns_table_name)}')
+
+    return join_line(
+        "SELECT",
+        tab_each_line(
+            field_exprs([f for f in base_fields if f in target_fields], _BASE_TABLE_NAME),
+            *(
+                (as_field_expr(f, _get_table_name_of(ns), ns) for f in ns_fields) 
+                for ns, ns_fields in scope_fields.items()
+            ),
+            use_comma=True
+        ),
+        "FROM", 
+        tab_each_line(
+            joined_tables
+        )
+    )
+
 

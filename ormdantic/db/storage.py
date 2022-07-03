@@ -3,15 +3,19 @@ from collections import deque
 
 from .connectionpool import DbConnectionPool
 
-from ..schema import PersistentModel, ModelT, get_container_type
-from ..schema.base import PartOfMixin, assign_identifying_fields_if_empty, get_part_types, PersistentModelT
+from ..schema import ModelT, PersistentModel, get_container_type
+from ..schema.base import (
+    PartOfMixin, assign_identifying_fields_if_empty, get_part_types, 
+    PersistentModelT
+)
 from ..util import get_logger
 from .queries import (
     Where, execute_and_get_last_id, 
     get_sql_for_creating_table,
     get_query_and_args_for_upserting, 
     get_query_and_args_for_reading, 
-    get_sql_for_inserting_parts_table,
+    get_sql_for_upserting_external_index_table, 
+    get_sql_for_upserting_parts_table,
     get_query_and_args_for_deleting,
     _ROW_ID_FIELD, _JSON_FIELD
 )
@@ -26,7 +30,7 @@ def build_where(items:Iterator[Tuple[str, str]] | Iterable[Tuple[str, str]]) -> 
     return tuple((item[0], '=', item[1]) for item in items)
 
        
-def create_table(pool:DbConnectionPool, *types:Type[ModelT]):
+def create_table(pool:DbConnectionPool, *types:Type[PersistentModelT]):
     with pool.open_cursor(True) as cursor:
         for type_ in _iterate_types_for_creating_order(types):
             for sql in get_sql_for_creating_table(type_):
@@ -59,7 +63,7 @@ def upsert_objects(pool:DbConnectionPool, models:PersistentModelT | Iterable[Per
             inserted_id = execute_and_get_last_id(
                 cursor, *get_query_and_args_for_upserting(model))
 
-            _upsert_parts(cursor, inserted_id, type(model))
+            _upsert_parts_and_externals(cursor, inserted_id, type(model))
 
     return targets[0] if is_single else targets
 
@@ -93,17 +97,36 @@ def convert_dict_to_model(type_:Type[ModelT], record:Dict[str, Any]) -> ModelT:
     return type_.parse_raw(record[_JSON_FIELD].encode())
 
 
-def query_records(pool:DbConnectionPool, 
-                  type_:Type[ModelT], 
+# In where or fields, the nested expression for json path can be used.
+# like 'persons.name'
+# if persons indicate the simple object, we will use JSON_EXTRACT or JSON_VALUE
+# if persons indicate ForeginReferenceMixin, the table which is referenced 
+# from Mixin will be joined.
+#
+# for paging the result, we will use offset, limit and order by.
+# if such feature is used, the whole used fields of table will be scaned.
+# It takes a time for scanning because JSON_EXTRACT is existed in view defintion.
+# So, we will build core tables for each table, which has _row_id and fields which is referenced
+# in where field. the core tables will be joined. then joined table will be call as base
+# table. the base table will be limited. 
+#
+# The base table will be join other table which can produce the fields which are targeted.
+# So, JSON_EXTRACT will be call on restrcited row.
+#
+def query_records(pool: DbConnectionPool, 
+                  type_: Type[PersistentModelT], 
                   where: Where,
                   fetch_size: Optional[int] = None,
                   fields: Tuple[str, ...] = (_JSON_FIELD, _ROW_ID_FIELD),
                   order_by: Tuple[str, ...] = tuple(),
                   limit: int | None = None,
-                  offset: int | None = None
+                  offset: int | None = None,
+                  joined: Dict[str, Type[PersistentModelT]] | None = None
                   ) -> Iterator[Dict[str, Any]]:
 
-    query_and_param = get_query_and_args_for_reading(type_, fields, where, order_by=order_by, limit=limit, offset=offset)
+    query_and_param = get_query_and_args_for_reading(
+        type_, fields, where, order_by=order_by, limit=limit, offset=offset, 
+        ns_types=joined)
 
     with pool.open_cursor() as cursor:
         cursor.execute(*query_and_param)
@@ -136,14 +159,18 @@ def _traverse_all_part_types(type_:Type[ModelT]):
         yield from _traverse_all_part_types(part_type)
 
 
-def _upsert_parts(cursor, root_inserted_id:int, type_:Type) -> None:
-    for (part_type, sqls) in get_sql_for_inserting_parts_table(type_).items():
-        args = {
-            '__root_row_id': root_inserted_id,
-        }
+def _upsert_parts_and_externals(cursor, root_inserted_id:int, type_:Type) -> None:
+    args = {
+        '__root_row_id': root_inserted_id,
+    }
 
+    for sql in get_sql_for_upserting_external_index_table(type_):
+        cursor.execute(sql, args)
+
+    for (part_type, sqls) in get_sql_for_upserting_parts_table(type_).items():
         for sql in sqls:
             cursor.execute(sql, args)
 
-        _upsert_parts(cursor, root_inserted_id, part_type)
+        _upsert_parts_and_externals(cursor, root_inserted_id, part_type)
+
 

@@ -1,4 +1,4 @@
-from typing import Type, List
+from typing import Type, List, Literal
 import pytest
 from decimal import Decimal
 from datetime import date, datetime
@@ -7,23 +7,21 @@ from pydantic import condecimal, constr, Field
 
 from ormdantic.schema import PersistentModel
 from ormdantic.db.queries import (
-    get_materialized_fields, get_table_name, 
-    get_sql_for_creating_table, 
-    _get_field_db_type, 
-    _generate_json_table_for_part_of,
-    field_exprs,
-    get_query_and_args_for_upserting,
-    get_query_and_args_for_reading,
-    get_query_and_args_for_updating,
-    get_query_and_args_for_deleting,
-    get_sql_for_inserting_parts_table, 
+    get_sql_for_upserting_external_index_table, get_stored_fields, get_table_name, 
+    get_sql_for_creating_table, _get_field_db_type, _generate_json_table_for_part_of,
+    _build_query_and_fields_for_core_table, field_exprs,
+    get_query_and_args_for_upserting, get_query_and_args_for_reading,
+    get_query_and_args_for_deleting, get_sql_for_upserting_parts_table, 
     join_line, 
-    _ENGINE
+    _build_namespace_types, _find_join_keys, _extract_fields,
+    _ENGINE, _RELEVANCE_FIELD
 )
 from ormdantic.schema.base import (
-    ArrayStringIndex, FullTextSearchedStringIndex, FullTextSearchedStr, PartOfMixin, 
+    IntegerArrayIndex, StringArrayIndex, FullTextSearchedStringIndex, 
+    FullTextSearchedStr, PartOfMixin, StringReference, 
     UniqueStringIndex, StringIndex, DecimalIndex, IntIndex, DateIndex,
-    DateTimeIndex, update_part_of_forward_refs, IdentifiedModel, UuidStr, MaterializedFieldDefinitions
+    DateTimeIndex, update_part_of_forward_refs, IdentifiedModel, UuidStr, 
+    StoredFieldDefinitions
 )
 
 from .tools import (
@@ -61,7 +59,7 @@ def test_get_sql_for_create_table_with_index():
         i2: FullTextSearchedStringIndex
         i3: UniqueStringIndex
         i4: StringIndex
-        i5: ArrayStringIndex
+        i5: StringArrayIndex
         i6: DecimalIndex
         i7: IntIndex
         i8: DateIndex
@@ -127,11 +125,48 @@ def test_get_sql_for_create_part_of_table():
         '    `model_Part_pbase`.`__container_row_id`,\n'
         '    `model_Part_pbase`.`order`\n'
         '  FROM `model_Part_pbase`\n'
-        '    JOIN `model_Container` ON `model_Container`.`__row_id` = `model_Part_pbase`.`__container_row_id`\n'
+        '  JOIN `model_Container` ON `model_Container`.`__row_id` = `model_Part_pbase`.`__container_row_id`\n'
         ')'
     ) == next(sqls, None)
 
     assert None is next(sqls, None)
+
+
+def test_get_sql_for_creating_external_index_table():
+    class Target(PersistentModel):
+        codes: StringArrayIndex
+        ids: IntegerArrayIndex
+
+    assert [
+        join_line(
+            "CREATE TABLE IF NOT EXISTS `model_Target` (",
+            "  `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,",
+            "  `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`)),",
+            "  `codes` TEXT AS (JSON_EXTRACT(`__json`, '$.codes[*]')) STORED,",
+            "  `ids` TEXT AS (JSON_EXTRACT(`__json`, '$.ids[*]')) STORED,",
+            "  KEY `codes_index` (`codes`),",
+            "  KEY `ids_index` (`ids`)",
+            ")"
+        ),
+        join_line(
+            "CREATE TABLE IF NOT EXISTS `model_Target_codes` (",
+            "  `__row_id` BIGINT,",
+            "  `__root_row_id` BIGINT,",
+            "  `codes` TEXT,",
+            "  KEY `__row_id_index` (`__row_id`),",
+            "  KEY `codes_index` (`codes`)",
+            ")"
+        ),
+        join_line(
+            "CREATE TABLE IF NOT EXISTS `model_Target_ids` (",
+            "  `__row_id` BIGINT,",
+            "  `__root_row_id` BIGINT,",
+            "  `ids` BIGINT,",
+            "  KEY `__row_id_index` (`__row_id`),",
+            "  KEY `ids_index` (`ids`)",
+            ")"
+        )
+    ] == list(get_sql_for_creating_table(Target))
 
 
 @pytest.mark.parametrize('type_, expected', [
@@ -221,28 +256,28 @@ def test_field_exprs():
     assert ['*', '`f`', '`f`', 'T() as T'] == list(field_exprs(['*', 'f', '`f`', 'T() as T']))
 
 
-def test_get_materialized_fields():
+def test_get_stored_fields():
     class MyModel(PersistentModel):
         order: StringIndex
 
     # Container에서 시작함으로 $.part.에 $.order가 된다.
-    assert {'order': (('$.order',), StringIndex)} == get_materialized_fields(MyModel)
+    assert {'order': (('$.order',), StringIndex)} == get_stored_fields(MyModel)
 
 
-def test_get_materialized_fields_for_mro():
+def test_get_stored_fields_for_mro():
     class OrderModel(PersistentModel):
-        _materialized_fields: MaterializedFieldDefinitions = {
+        _stored_fields: StoredFieldDefinitions = {
             'order': (('$.order_name',), StringIndex)
         }
 
     class BaseOrderModel(PersistentModel):
-        _materialized_fields: MaterializedFieldDefinitions = {
+        _stored_fields: StoredFieldDefinitions = {
             'name': (('$.name',), StringIndex),
             'order': (('$.order',), StringIndex)
         }
 
     class DerivedModel1(BaseOrderModel, OrderModel):
-        _materialized_fields: MaterializedFieldDefinitions = {
+        _stored_fields: StoredFieldDefinitions = {
             'hello': (('$.hello',), StringIndex),
         }
         pass
@@ -252,7 +287,7 @@ def test_get_materialized_fields_for_mro():
         'hello': (('$.hello',), StringIndex),
         'order': (('$.order',), StringIndex), 
         'name': (('$.name',), StringIndex)
-    } == get_materialized_fields(DerivedModel1)
+    } == get_stored_fields(DerivedModel1)
 
     class DerivedModel2(OrderModel, BaseOrderModel):
         pass
@@ -260,10 +295,10 @@ def test_get_materialized_fields_for_mro():
     assert {
         'order': (('$.order_name',), StringIndex), 
         'name': (('$.name',), StringIndex)
-    } == get_materialized_fields(DerivedModel2)
+    } == get_stored_fields(DerivedModel2)
 
 
-def test_get_materialized_fields_of_parts():
+def test_get_stored_fields_of_parts():
     class Part(PersistentModel, PartOfMixin['Container']):
         order: StringIndex
 
@@ -274,11 +309,11 @@ def test_get_materialized_fields_of_parts():
     update_part_of_forward_refs(Container, locals())
 
     # Container에서 시작함으로 $.part.에 $.order가 된다.
-    assert {'order': (('$.order',), StringIndex)} == get_materialized_fields(Part)
-    assert {} == get_materialized_fields(Container)
+    assert {'order': (('$.order',), StringIndex)} == get_stored_fields(Part)
+    assert {} == get_stored_fields(Container)
 
 
-def test_get_materialized_fields_of_single_part():
+def test_get_stored_fields_of_single_part():
     class SinglePart(PersistentModel, PartOfMixin['ContainerForSingle']):
         order: StringIndex
 
@@ -288,25 +323,25 @@ def test_get_materialized_fields_of_single_part():
     update_part_of_forward_refs(SinglePart, locals())
 
     # Container에서 시작함으로 $.part.에 $.order가 된다.
-    assert {'order': (('$.order',), StringIndex)} == get_materialized_fields(SinglePart)
+    assert {'order': (('$.order',), StringIndex)} == get_stored_fields(SinglePart)
 
 
-def test_get_materialized_fields_raise_exception():
+def test_get_stored_fields_raise_exception():
     class PathNotStartWithDollar(PersistentModel):
-        _materialized_fields: MaterializedFieldDefinitions = {
+        _stored_fields: StoredFieldDefinitions = {
             'order': (('order_name',), StringIndex)
         }
 
     with pytest.raises(RuntimeError, match='.*path must start with \\$.*'):
-        get_materialized_fields(PathNotStartWithDollar)
+        get_stored_fields(PathNotStartWithDollar)
 
     class PathsNotEndWithDollar(PersistentModel):
-        _materialized_fields: MaterializedFieldDefinitions = {
-            'order': (('..', '$.order'), ArrayStringIndex)
+        _stored_fields: StoredFieldDefinitions = {
+            'order': (('..', '$.order'), StringArrayIndex)
         }
 
     with pytest.raises(RuntimeError, match='.*collection type should end with.*'):
-        get_materialized_fields(PathsNotEndWithDollar)
+        get_stored_fields(PathsNotEndWithDollar)
 
 
 class SimpleBaseModel(IdentifiedModel):
@@ -343,33 +378,9 @@ def test_get_query_and_args_for_reading():
         assert [{'__row_id': 2}] == cursor.fetchall()
 
 
-def test_get_query_and_args_for_updating():
-    model = SimpleBaseModel(id=UuidStr('@'), version='0.1.0')
-    with use_temp_database_cursor_with_model(model) as cursor:
-        query_and_args = get_query_and_args_for_reading(
-            SimpleBaseModel, '*', tuple())
-
-        cursor.execute(*query_and_args)
-        assert [
-            {'__row_id': 1, 'id': '@', '__json': '{"version":"0.1.0","id":"@"}'},
-        ] == cursor.fetchall()
-
-        model.version = "0.2.0" 
-        query_and_args = get_query_and_args_for_updating(model, (('__row_id', '=', 1),))
-
-        cursor.execute(*query_and_args)
-        
-        query_and_args = get_query_and_args_for_reading(
-            SimpleBaseModel, '*', tuple())
-
-        cursor.execute(*query_and_args)
-        assert [
-            {'__row_id': 1, 'id': '@', '__json': '{"version":"0.2.0","id":"@"}'},
-        ] == cursor.fetchall()
-
-
 def test_get_query_and_args_for_deleting():
     model = SimpleBaseModel(id=UuidStr('@'), version='0.1.0')
+
     with use_temp_database_cursor_with_model(model) as cursor:
         query_and_args = get_query_and_args_for_deleting(
             SimpleBaseModel, tuple())
@@ -378,17 +389,17 @@ def test_get_query_and_args_for_deleting():
         assert tuple() == cursor.fetchall()
 
 
-def test_get_query_and_args_for_reading_for_materialized_fields():
-    class SampleMaterializedModel(IdentifiedModel):
+def test_get_query_and_args_for_reading_for_stored_fields():
+    class SampleStoredModel(IdentifiedModel):
         name: FullTextSearchedStringIndex
 
-    model = SampleMaterializedModel(id=UuidStr('@'), version='0.1.0', 
+    model = SampleStoredModel(id=UuidStr('@'), version='0.1.0', 
                                     name=FullTextSearchedStringIndex('sample'))
 
     with use_temp_database_cursor_with_model(model) as cursor:
         model.id = UuidStr("@")
         query_and_args = get_query_and_args_for_reading(
-            SampleMaterializedModel, ('id', 'name'), (('name', '=', 'sample'),))
+            SampleStoredModel, ('id', 'name'), (('name', '=', 'sample'),))
 
         cursor.execute(*query_and_args)
 
@@ -444,7 +455,7 @@ def test_get_query_and_args_for_reading_for_nested_parts():
         members: List['MemberModel']
 
     class MemberModel(PersistentModel, PartOfMixin[PartModel]):
-        descriptions: ArrayStringIndex
+        descriptions: StringArrayIndex
 
     update_part_of_forward_refs(ContainerModel, locals())
     update_part_of_forward_refs(PartModel, locals())
@@ -455,8 +466,8 @@ def test_get_query_and_args_for_reading_for_nested_parts():
                            part=PartModel(
                                 name=FullTextSearchedStringIndex('part1'),
                                 members=[
-                                    MemberModel(descriptions=ArrayStringIndex(['desc1'])),
-                                    MemberModel(descriptions=ArrayStringIndex(['desc1', 'desc2']))
+                                    MemberModel(descriptions=StringArrayIndex(['desc1'])),
+                                    MemberModel(descriptions=StringArrayIndex(['desc1', 'desc2']))
                                 ]
                            ))
 
@@ -494,13 +505,13 @@ def test_get_query_and_args_for_reading_for_nested_parts():
 def test_get_sql_for_inserting_parts_table():
     class Part(PersistentModel, PartOfMixin['Container']):
         order: StringIndex
-        codes: ArrayStringIndex
+        codes: StringArrayIndex
 
     class Container(PersistentModel):
         parts: List[Part] = Field(default=[])
 
     update_part_of_forward_refs(Part, locals())
-    sqls = get_sql_for_inserting_parts_table(Container)
+    sqls = get_sql_for_upserting_parts_table(Container)
 
     assert len(sqls[Part]) == 2
     assert join_line(
@@ -554,6 +565,83 @@ def test_get_sql_for_inserting_parts_table():
     ) == sqls[Part][1]
 
 
+def test_get_sql_for_upserting_external_index_table():
+    class Part(PersistentModel, PartOfMixin['Container']):
+        _stored_fields: StoredFieldDefinitions = {
+            '_names': (('..', '$.names', '$'), StringArrayIndex)
+        }
+
+        order: StringIndex
+        codes: StringArrayIndex
+
+    class Container(PersistentModel):
+        names: List[str]
+        parts: List[Part] = Field(default=[])
+
+    update_part_of_forward_refs(Part, locals())
+    sqls = list(get_sql_for_upserting_external_index_table(Part))
+
+    assert len(sqls) == 4
+    assert join_line(
+        "DELETE FROM model_Part_codes",
+        "WHERE `__root_row_id` = %(__root_row_id)s"
+    ) == sqls[0]
+
+    assert join_line(
+        "INSERT INTO model_Part_codes",
+        "(",
+        "  `__root_row_id`,",
+        "  `__row_id`,",
+        "  `codes`",
+        ")",
+        "SELECT",
+        "  `__ORG`.`__root_row_id`,",
+        "  `__ORG`.`__row_id`,",
+        "  `__EXT_JSON_TABLE`.`codes`",
+        "FROM",  
+        "  model_Part AS __ORG,",
+        "  JSON_TABLE(",
+        "    `__ORG`.`__json`,",
+        "    '$' COLUMNS (",
+        "      NESTED PATH '$.codes[*]' COLUMNS (",
+        "        `__part_order` FOR ORDINALITY,",
+        "        `codes` TEXT PATH '$'",
+        "      )",    
+        "    )",    
+        "  ) AS __EXT_JSON_TABLE",
+        "WHERE",
+        "  `__ORG`.`__root_row_id` = %(__root_row_id)s",
+    ) == sqls[1]
+
+    assert join_line(
+        "DELETE FROM model_Part__names",
+        "WHERE `__root_row_id` = %(__root_row_id)s"
+    ) == sqls[2]
+
+    assert join_line(
+        "INSERT INTO model_Part__names",
+        "(",
+        "  `__root_row_id`,",
+        "  `__row_id`,",
+        "  `_names`",
+        ")",
+        "SELECT",
+        "  `__ORG`.`__root_row_id`,",
+        "  `__ORG`.`__row_id`,",
+        "  `__EXT_JSON_TABLE`.`_names`",
+        "FROM",  
+        "  model_Part AS __ORG,",
+        "  JSON_TABLE(",
+        "    `__ORG`.`_names`,",
+        "    '$[*]' COLUMNS (",
+        "      `_names` TEXT PATH '$'",
+        "    )",    
+        "  ) AS __EXT_JSON_TABLE",
+        "WHERE",
+        "  `__ORG`.`__root_row_id` = %(__root_row_id)s",
+    ) == sqls[3]
+
+
 def test_get_query_and_args_for_reading_for_matching():
     class MyModel(PersistentModel):
         order: FullTextSearchedStr
@@ -561,19 +649,35 @@ def test_get_query_and_args_for_reading_for_matching():
 
     sql, args = get_query_and_args_for_reading(MyModel, ('order',), (('', 'match', '+FAST'),))
 
-    assert join_line(
+    assert join_line (
         "SELECT",
-        "  *",
-        "FROM (",
-        "  SELECT",
-        "    `order`,",
-        "    MATCH (`order`,`name`) AGAINST (%(order_name)s IN BOOLEAN MODE) as `__relevance`",
-        "  FROM model_MyModel",
-        "  WHERE",
-        "    MATCH (`order`,`name`) AGAINST (%(order_name)s IN BOOLEAN MODE)",
-        ") AS FOR_ORDER_BY",
-        "ORDER BY",
-        "  `__relevance` DESC"
+        "  `_MAIN`.`order`",
+        "FROM",
+        "  (",
+        "    SELECT",
+        "      __row_id,",
+        "      __relevance",
+        "    FROM",    
+        "    (",
+        "      SELECT",
+        "        __row_id,",
+        "        __relevance AS __relevance",
+        "      FROM",
+        "        (",
+        "          SELECT",
+        "            `__ORG`.`__row_id`,",
+        "            MATCH (`__ORG`.`order`,`__ORG`.`name`) AGAINST (%(order_name)s IN BOOLEAN MODE) as `__relevance`",
+        "          FROM",
+        "            model_MyModel as __ORG",
+        "        )",
+        "        AS __BASE",
+        "    )",
+        "    AS FOR_ORDERING",
+        "    ORDER BY",
+        "      `__relevance` DESC",
+        "  )",
+        "  AS _BASE",
+        "  JOIN model_MyModel as _MAIN ON `_BASE`.`__row_id` = `_MAIN`.`__row_id`"
     ) == sql
 
     assert {
@@ -588,17 +692,244 @@ def test_get_query_and_args_for_reading_for_order_by():
 
     sql, _ = get_query_and_args_for_reading(MyModel, ('order',), tuple(), order_by=('order desc', 'name'))
 
+    print(sql)
+
     assert join_line(
         "SELECT",
-        "  *",
-        "FROM (",
-        "  SELECT",
-        "    `order`",
-        "  FROM model_MyModel",
-        ") AS FOR_ORDER_BY",
-        "ORDER BY",
-        "  `order` desc,",
-        "  `name`"
+        "  `_BASE`.`order`",
+        "FROM",
+        "  (",
+        "    SELECT",
+        "      __row_id,",
+        "      order,",
+        "      name",
+        "    FROM",
+        "    (",
+        "      SELECT",
+        "        __row_id,",
+        "        order,",
+        "        name",
+        "      FROM",
+        "        (",
+        "          SELECT",
+        "            `__ORG`.`__row_id`,",
+        "            `__ORG`.`order`,",
+        "            `__ORG`.`name`",
+        "          FROM",
+        "            model_MyModel as __ORG",
+        "        )",
+        "        AS __BASE",
+        "    )",
+        "    AS FOR_ORDERING",
+        "    ORDER BY",
+        "      `order` desc,",
+        "      `name`",
+        "  )",
+        "  AS _BASE"
     ) == sql
 
 
+def test_build_query_for_core_table():
+    class Model(PersistentModel):
+        codes: StringArrayIndex
+        name: FullTextSearchedStr
+        description: FullTextSearchedStr
+
+    query, fields = _build_query_and_fields_for_core_table('', Model, 
+        ('description',), 
+        (('codes', '='), ('name', '!=')),
+        tuple()
+    )
+
+    assert join_line(
+        'SELECT',
+        '  `__ORG`.`__row_id`,',
+        '  `__ORG`.`description`,',
+        '  `__ORG`.`codes`,',
+        '  `__ORG`.`name`',
+        'FROM',
+        '  model_Model as __ORG',
+        'WHERE',
+        '  `__ORG`.`codes` = %(codes)s',
+        '  AND `__ORG`.`name` != %(name)s'
+    ) == query
+    assert ('__row_id', 'description', 'codes', 'name') == fields
+
+
+def test_build_query_for_core_table_for_unwind():
+    class Model(PersistentModel):
+        codes: StringArrayIndex
+        name: FullTextSearchedStr
+        description: FullTextSearchedStr
+
+    query, fields = _build_query_and_fields_for_core_table('ns', Model, 
+        ['description'],
+        (('codes', '='), ('name', '!=')),
+        ('codes',)
+    )
+
+    assert join_line(
+        'SELECT',
+        '  `__ORG`.`__row_id` AS `ns.__row_id`,',
+        '  `__ORG`.`description` AS `ns.description`,',
+        '  `__ORG`.`name` AS `ns.name`,',
+        '  `__UNWIND_CODES`.`codes` AS `ns.codes`',
+        'FROM',
+        '  model_Model as __ORG',
+        '  LEFT JOIN model_Model_codes as __UNWIND_CODES',
+        'WHERE',
+        '  `__UNWIND_CODES`.`codes` = %(codes)s',
+        '  AND `__ORG`.`name` != %(name)s'
+    ) == query
+
+    assert ('ns.__row_id', 'ns.description', 'ns.name', 'ns.codes') == fields
+
+
+def test_build_query_for_core_table_for_match():
+    class Model(PersistentModel):
+        codes: StringArrayIndex
+        name: FullTextSearchedStr
+        description: FullTextSearchedStr
+    
+    query, fields = _build_query_and_fields_for_core_table('ns', Model, 
+        [],
+        (('codes', '='), ('name,description', 'match')),
+        ('codes',)
+    )
+
+    assert join_line(
+        'SELECT',
+        '  `__ORG`.`__row_id` AS `ns.__row_id`,',
+        '  `__UNWIND_CODES`.`codes` AS `ns.codes`,',
+        '  MATCH (`__ORG`.`name`,`__ORG`.`description`) AGAINST (%(name_description)s IN BOOLEAN MODE) as `ns.__relevance`',
+        'FROM',
+        '  model_Model as __ORG',
+        '  LEFT JOIN model_Model_codes as __UNWIND_CODES',
+        'WHERE',
+        '  `__UNWIND_CODES`.`codes` = %(codes)s',
+    ) == query
+
+    assert ('ns.__row_id', 'ns.' + _RELEVANCE_FIELD, 'ns.codes') == fields
+
+
+def test_build_query_for_core_table_for_multiple_match():
+    class Model(PersistentModel):
+        codes: StringArrayIndex
+        name: FullTextSearchedStr
+        description: FullTextSearchedStr
+ 
+    query, fields = _build_query_and_fields_for_core_table('', Model, 
+        [],
+        (('name', 'match'), ('description', 'match',)),
+        tuple()
+    )
+
+    assert join_line(
+        'SELECT',
+        '  `__ORG`.`__row_id`,',
+        '  MATCH (`__ORG`.`name`) AGAINST (%(name)s IN BOOLEAN MODE) + MATCH (`__ORG`.`description`) AGAINST (%(description)s IN BOOLEAN MODE) as `__relevance`',
+        'FROM',
+        '  model_Model as __ORG',
+    ) == query
+
+    assert ('__row_id', _RELEVANCE_FIELD) == fields
+
+
+def test_extract_fields():
+    fields = ('test', 'prefix.field1', 'prefix.prefix2.field', 'prefix.field2')
+
+    assert ('test',) == _extract_fields(fields, '')
+    assert ('field1', 'field2') == _extract_fields(fields, 'prefix')
+    assert ('field',) == _extract_fields(fields, 'prefix.prefix2')
+
+
+def test_build_join():
+    class ReferencedByName(PersistentModel):
+        name: StringIndex
+
+    class NameReference(StringReference[ReferencedByName]):
+        _target_field = 'name'
+
+    class ReferencedByCode(PersistentModel):
+        code: StringIndex
+        name: NameReference
+
+    class CodeReference(StringReference[ReferencedByCode]):
+        _target_field = 'code'
+
+    class ReferencedById(PersistentModel):
+        id: IntIndex
+
+    class IdReference(StringReference[ReferencedById]):
+        _target_field = 'id'
+
+    class StartModel(PersistentModel):
+        code: CodeReference
+        id: IdReference
+        name: StringIndex
+
+    assert [
+        ('', StartModel),
+        ('code', ReferencedByCode)
+    ] == list(_build_namespace_types(StartModel, {}, {'code'}))
+
+    assert [
+        ('', StartModel),
+        ('code', ReferencedByCode),
+        ('code.name', ReferencedByName),
+        ('id', ReferencedById)
+    ] == list(_build_namespace_types(StartModel, {}, {'code.name', 'id'}))
+
+    assert [
+        ('', ReferencedById),
+        ('start', StartModel),
+        ('start.code', ReferencedByCode),
+        ('start.code.name', ReferencedByName)
+    ] == list(_build_namespace_types(ReferencedById, {'start': StartModel}, {'start.code.name'}))
+
+
+def test_find_join_keys():
+    class ReferencedByName(PersistentModel):
+        name_ref: StringIndex
+
+    class NameReference(StringReference[ReferencedByName]):
+        _target_field = 'name_ref'
+
+    class ReferencedByCode(PersistentModel):
+        code: StringIndex
+        name: NameReference
+
+    class CodeReference(StringReference[ReferencedByCode]):
+        _target_field = 'code'
+
+    class ReferencedById(PersistentModel):
+        id: IntIndex
+
+    class IdReference(StringReference[ReferencedById]):
+        _target_field = 'id'
+
+    class StartModel(PersistentModel):
+        code: CodeReference
+        id: IdReference
+        name: StringIndex
+
+    assert {
+    } == _find_join_keys((('',StartModel),))
+
+    assert {
+        (StartModel, ReferencedByCode) : ('code', 'code')
+    } == _find_join_keys((('',StartModel), ('code',ReferencedByCode)))
+
+    assert {
+        (ReferencedById, StartModel) : ('id', 'id'),
+        (StartModel, ReferencedByCode) : ('code', 'code'),
+        (ReferencedByCode, ReferencedByName) : ('name', 'name_ref')
+    } == _find_join_keys((
+        ('', ReferencedById),
+        ('start', StartModel), 
+        ('start.code', ReferencedByCode), 
+        ('start.code.name', ReferencedByName)
+    ))
+
+
+   

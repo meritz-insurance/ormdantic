@@ -1,6 +1,6 @@
 from typing import (
     get_args, Type, get_origin, Tuple, Any, Generic, Protocol,
-    ForwardRef, Dict, Generic,
+    ForwardRef, Dict, Generic, _collect_type_vars
 )
 from inspect import getmro
 import sys
@@ -26,18 +26,19 @@ def get_type_args(type_:Type) -> Tuple[Any,...]:
 # from https://github.com/python/typing/issues/777
 def _generic_mro(result, tp):
     origin = get_origin(tp)
-    if origin is None:
-        origin = tp
+    origin = origin or tp
+
     result[origin] = tp
     if hasattr(origin, "__orig_bases__"):
-        # parameters = _collect_type_vars(origin.__orig_bases__)
-        # substitution = dict(zip(parameters, get_args(tp)))
+        parameters = _collect_type_vars(origin.__orig_bases__)
+        substitution = dict(zip(parameters, get_args(tp)))
+
         for base in origin.__orig_bases__:
             if get_origin(base) in result:
                 continue
-            # base_parameters = getattr(base, "__parameters__", ())
-            # if base_parameters:
-            #     base = base[tuple(substitution.get(p, p) for p in base_parameters)]
+            base_parameters = getattr(base, "__parameters__", ())
+            if base_parameters:
+                base = base[tuple(substitution.get(p, p) for p in base_parameters)]
             _generic_mro(result, base)
 
 

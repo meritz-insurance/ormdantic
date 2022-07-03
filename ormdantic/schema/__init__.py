@@ -1,16 +1,18 @@
 from .base import (
-    ModelT, IdentifiedModelT, PersistentModel, IdentifiedModel,
+    ModelT, PersistentModelT, IdentifiedModelT, PersistentModel, IdentifiedModel,
     get_base_generic_type_of, get_container_type, get_field_name_and_type,
-    UuidStr,
+    UuidStr, get_stored_fields
 )
 
 __all__ = [
     'ModelT',
+    'PersistentModelT',
     'IdentifiedModelT',
     'PersistentModel',
     'IdentifiedModel',
     "get_base_generic_type_of",
     "get_container_type",
     "get_field_name_and_type",
+    "get_stored_fields",
     "UuidStr"
 ]

@@ -1,6 +1,7 @@
 *.swp
 .coverage.*
 .venv/*
-prof/*
 .coverage
+prof/*
+**/.DS_Store
 **/__pycache__/*

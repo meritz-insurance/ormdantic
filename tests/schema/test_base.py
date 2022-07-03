@@ -57,11 +57,13 @@ def test_get_field_name_and_type():
 
     class Container(PersistentModel):
         parts: List[Part]
+        part: Part
         number: int
 
-    assert [('parts', List[Part]), ('number', int)] == list(get_field_name_and_type(Container))
-    assert [('parts', List[Part])] == list(get_field_name_and_type(Container, lambda t: t is Part))
-    assert [] == list(get_field_name_and_type(Container, lambda t: t is List[Part]))
+    assert [('parts', List[Part]), ('part', Part), ('number', int)] == list(get_field_name_and_type(Container))
+    assert [('parts', List[Part])] == list(get_field_name_and_type(Container, lambda t: t is List[Part]))
+    assert [('part', Part)] == list(get_field_name_and_type(Container, PartOfMixin))
+    assert [] == list(get_field_name_and_type(Container, lambda t: t is List))
 
     class WrongType():
         pass

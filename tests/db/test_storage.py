@@ -11,9 +11,9 @@ from ormdantic.db.storage import (
 
 from ormdantic.schema import PersistentModel
 from ormdantic.schema.base import (
-    FullTextSearchedStringIndex, PartOfMixin, 
+    FullTextSearchedStringIndex, PartOfMixin, StringArrayIndex, 
     get_identifer_of, update_part_of_forward_refs, IdentifiedModel, UuidStr,
-    MaterializedFieldDefinitions
+    StoredFieldDefinitions
 )
 
 from .tools import (
@@ -24,16 +24,24 @@ class ContainerModel(IdentifiedModel):
     name: FullTextSearchedStringIndex
     parts: List['PartModel']
     
+
 class PartModel(PersistentModel, PartOfMixin[ContainerModel]):
-    _materialized_fields: MaterializedFieldDefinitions = {
+    _stored_fields: StoredFieldDefinitions = {
         '_container_name': (('..', '$.name'), FullTextSearchedStringIndex)
     }
 
     name: FullTextSearchedStringIndex
     parts: Tuple['SubPartModel', ...]
+    codes: List[str]
+
 
 class SubPartModel(PersistentModel, PartOfMixin[PartModel]):
+    _stored_fields: StoredFieldDefinitions = {
+        '_part_codes': (('..', '$.codes', '$'), StringArrayIndex)
+    }
+
     name: FullTextSearchedStringIndex
+    codes: StringArrayIndex
 
 update_part_of_forward_refs(ContainerModel, locals())
 update_part_of_forward_refs(PartModel, locals())
@@ -43,13 +51,30 @@ model = ContainerModel(id=UuidStr('@'),
                         version='0.1.0',
                         name=FullTextSearchedStringIndex('sample'),
                         parts=[
-                            PartModel(name=FullTextSearchedStringIndex('part1'), parts=(
-                                SubPartModel(name=FullTextSearchedStringIndex('part1-sub1')),
-                            )),
-                            PartModel(name=FullTextSearchedStringIndex('part2'), parts=(
-                                SubPartModel(name=FullTextSearchedStringIndex('part2-sub1')),
-                                SubPartModel(name=FullTextSearchedStringIndex('part2-sub2'))
-                            )),
+                            PartModel(
+                                name=FullTextSearchedStringIndex('part1'), 
+                                parts=(
+                                    SubPartModel(
+                                        name=FullTextSearchedStringIndex('part1-sub1'),
+                                        codes=StringArrayIndex(['part1-sub1-code1'])
+                                    ),
+                                ),
+                                codes = ['part1-code1', 'part1-code2']
+                            ),
+                            PartModel(
+                                name=FullTextSearchedStringIndex('part2'), 
+                                parts=(
+                                    SubPartModel(
+                                        name=FullTextSearchedStringIndex('part2-sub1'),
+                                        codes=StringArrayIndex(['part2-sub1-code1', 'part2-sub1-code2'])
+                                    ),
+                                    SubPartModel(
+                                        name=FullTextSearchedStringIndex('part2-sub2'),
+                                        codes=StringArrayIndex([])
+                                    )
+                                ),
+                                codes = ['part2-code1', 'part2-code2']
+                            )
                         ])
 
 
