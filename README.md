@@ -15,7 +15,7 @@ class Company(IdentifiedModel):
     member: List['Person']
     
 class Person(PersistentModel, PartOfMixin[Company]):
-    _materialized_fields: MaterializedFieldDefinitions = {
+    _stored_fields: StoredFieldDefinitions = {
         '_company_address': (('..', '$.address'), FullTextSearchedStringIndex)
     }
 
@@ -65,8 +65,9 @@ persons = find_objects(pool, Person, ('name', 'like', '%Stev%'))
    - query_objects(... unwind=('codes',))
 
  * link two different model objects
+   - ReferenceMixin
 
- * where support partof materialized fields
+ * where support partof stored fields
    - wheres = ('persons.name', '=', 'steve')
 
  * fast query using offset, limit
@@ -78,4 +79,8 @@ persons = find_objects(pool, Person, ('name', 'like', '%Stev%'))
  * derived class, cache, audit, bitemporal
 
  * separated 'part of' object
-   - shared by content.
+   - shared by content. 
+
+ * shadow model which is duplicated or can be generated.
+
+
