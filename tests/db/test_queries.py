@@ -1,4 +1,4 @@
-from typing import Type, List, Literal
+from typing import Type, List, ClassVar
 import pytest
 from decimal import Decimal
 from datetime import date, datetime
@@ -197,12 +197,12 @@ def test_get_field_type(type_:Type, expected:str):
                 'name':  (('$.name',), str),
                 'item':  (('$.des.item',), str),
                 'id':  (('$.id',), str),
-            }
+            },
+            '_JSON_TABLE'
         ),
 f"""JSON_TABLE(
   CONTAINER.`__json`,
   '$' COLUMNS (
-    `title` TEXT PATH '$.title',
     NESTED PATH '$.items' COLUMNS (
       `__part_order` FOR ORDINALITY,
       `name` TEXT PATH '$.name',
@@ -210,7 +210,7 @@ f"""JSON_TABLE(
       `id` TEXT PATH '$.id'
     )
   )
-) AS __PART_JSON_TABLE""",
+) AS _JSON_TABLE""",
     ),
     (
         (
@@ -221,12 +221,12 @@ f"""JSON_TABLE(
                 'name':  (('$.data', '$.name'), str),
                 'item':  (('$.data', '$.des.item'), str),
                 'id':  (('$.id',), str),
-            }
+            },
+            '_JSON_TABLE'
         ),
 f"""JSON_TABLE(
   CONTAINER.`__json`,
   '$' COLUMNS (
-    `title` TEXT PATH '$.title',
     NESTED PATH '$.items[*]' COLUMNS (
       `__part_order` FOR ORDINALITY,
       `id` TEXT PATH '$.id',
@@ -236,7 +236,24 @@ f"""JSON_TABLE(
       )
     )
   )
-) AS __PART_JSON_TABLE"""
+) AS _JSON_TABLE"""
+    ),
+    (
+        (
+            '$.items',
+            True,
+            {
+            },
+            '_JSON_TABLE'
+        ),
+f"""JSON_TABLE(
+  CONTAINER.`__json`,
+  '$' COLUMNS (
+    NESTED PATH '$.items[*]' COLUMNS (
+      `__part_order` FOR ORDINALITY
+    )
+  )
+) AS _JSON_TABLE"""
     ),
 ])
 def test_generate_json_table(items, expected:str):
@@ -335,15 +352,7 @@ def test_get_stored_fields_raise_exception():
     with pytest.raises(RuntimeError, match='.*path must start with \\$.*'):
         get_stored_fields(PathNotStartWithDollar)
 
-    class PathsNotEndWithDollar(PersistentModel):
-        _stored_fields: StoredFieldDefinitions = {
-            'order': (('..', '$.order'), StringArrayIndex)
-        }
-
-    with pytest.raises(RuntimeError, match='.*collection type should end with.*'):
-        get_stored_fields(PathsNotEndWithDollar)
-
-
+    
 class SimpleBaseModel(IdentifiedModel):
     pass
 
@@ -407,35 +416,35 @@ def test_get_query_and_args_for_reading_for_stored_fields():
 
 
 def test_get_query_and_args_for_reading_for_parts():
-    class ContainerModel(IdentifiedModel):
+    class QContainerModel(IdentifiedModel):
         name: FullTextSearchedStringIndex
-        parts: List['PartModel']
+        parts: List['QPartModel']
      
-    class PartModel(PersistentModel, PartOfMixin[ContainerModel]):
+    class QPartModel(PersistentModel, PartOfMixin[QContainerModel]):
         name: FullTextSearchedStringIndex
 
-    update_part_of_forward_refs(ContainerModel, locals())
+    update_part_of_forward_refs(QContainerModel, locals())
 
-    model = ContainerModel(id=UuidStr('@'), 
+    model = QContainerModel(id=UuidStr('@'), 
                            version='0.1.0',
                            name=FullTextSearchedStringIndex('sample'),
                            parts=[
-                               PartModel(name=FullTextSearchedStringIndex('part1')),
-                               PartModel(name=FullTextSearchedStringIndex('part2')),
+                               QPartModel(name=FullTextSearchedStringIndex('part1')),
+                               QPartModel(name=FullTextSearchedStringIndex('part2')),
                            ])
 
     with use_temp_database_cursor_with_model(model, 
                                              keep_database_when_except=False) as cursor:
         model.id = UuidStr("@")
         query_and_args = get_query_and_args_for_reading(
-            ContainerModel, ('id', 'name'), (('name', '=', 'sample'),))
+            QContainerModel, ('id', 'name'), (('name', '=', 'sample'),))
 
         cursor.execute(*query_and_args)
 
         assert [{'id':'@', 'name':'sample'}] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(
-            PartModel, ('__row_id', '__json', 'name'), tuple())
+            QPartModel, ('__row_id', '__json', 'name'), tuple())
 
         cursor.execute(*query_and_args)
 
@@ -502,7 +511,7 @@ def test_get_query_and_args_for_reading_for_nested_parts():
 
 
 
-def test_get_sql_for_inserting_parts_table():
+def test_get_sql_for_upserting_parts_table():
     class Part(PersistentModel, PartOfMixin['Container']):
         order: StringIndex
         codes: StringArrayIndex
@@ -563,6 +572,65 @@ def test_get_sql_for_inserting_parts_table():
         "  `__container_row_id`,",
         "  `__part_order`",
     ) == sqls[Part][1]
+
+
+def test_get_sql_for_upserting_parts_table_with_container_fields():
+    class Part(PersistentModel, PartOfMixin['Container']):
+        _stored_fields: ClassVar[StoredFieldDefinitions]  = {
+            '_container_name': (('..', '$.name'), StringIndex)
+        }
+
+    class Container(PersistentModel):
+        name: StringIndex
+        parts: List[Part] = Field(default=[])
+
+    update_part_of_forward_refs(Part, locals())
+    sqls = get_sql_for_upserting_parts_table(Container)
+
+    assert len(sqls[Part]) == 2
+    assert join_line(
+        "DELETE FROM model_Part_pbase",
+        "WHERE `__root_row_id` = %(__root_row_id)s"
+    ) == sqls[Part][0]
+
+    assert join_line(
+        "INSERT INTO model_Part_pbase",
+        "(",
+        "  `__root_row_id`,",
+        "  `__container_row_id`,",
+        "  `__json_path`,",
+        "  `_container_name`",
+        ")",
+        "SELECT",
+        "  `__root_row_id`,",
+        "  `__container_row_id`,",
+        "  `__json_path`,",
+        "  `_container_name`",
+        "FROM (",  
+        "  SELECT",
+        "    `__part_order`,",
+        "    CONTAINER.`__row_id` as `__root_row_id`,",
+        "    CONTAINER.`__row_id` as `__container_row_id`,",
+        "    CONCAT('$.parts[', `__part_order` - 1, ']') as `__json_path`,",
+        "    JSON_VALUE(`CONTAINER`.`__json`, '$.name') as `_container_name`",
+        "  FROM",
+        "    model_Container as CONTAINER,",
+        "    JSON_TABLE(",
+        "      CONTAINER.`__json`,",
+        "      '$' COLUMNS (",
+        "        NESTED PATH '$.parts[*]' COLUMNS (",
+        "          `__part_order` FOR ORDINALITY",
+        "        )",
+        "      )",    
+        "    ) AS __PART_JSON_TABLE",
+        "  WHERE",
+        "    CONTAINER.`__row_id` = %(__root_row_id)s",
+        ") AS T1",
+        "GROUP BY",
+        "  `__container_row_id`,",
+        "  `__part_order`",
+    ) == sqls[Part][1]
+
 
 
 def test_get_sql_for_upserting_external_index_table():
@@ -673,6 +741,8 @@ def test_get_query_and_args_for_reading_for_matching():
         "        AS __BASE",
         "    )",
         "    AS FOR_ORDERING",
+        "    WHERE",
+        "      `__relevance`",
         "    ORDER BY",
         "      `__relevance` DESC",
         "  )",

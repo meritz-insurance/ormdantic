@@ -492,6 +492,9 @@ def get_sql_for_upserting_parts_table(model_type:Type) -> Dict[Type, Tuple[str, 
             is_collection = is_field_collection_type(model_type, part_field)
             json_path = f'$.{part_field}'
 
+            fields_from_json_table = [f for f in target_fields if f in fields and fields[f][0][0] != '..']
+            fields_from_container_json = [f for f in target_fields if f in fields and fields[f][0][0] == '..']
+
             insert_sql = join_line([
                 f'INSERT INTO {get_table_name(part_type, _PART_BASE_TABLE)}',
                 f'(',
@@ -506,7 +509,7 @@ def get_sql_for_upserting_parts_table(model_type:Type) -> Dict[Type, Tuple[str, 
                     use_comma=True
                 ),
                 f'FROM (',
-                tab_each_line([
+                tab_each_line(
                     f'SELECT',
                     tab_each_line(
                         [ field_exprs(_PART_ORDER_FIELD) ],
@@ -519,20 +522,21 @@ def get_sql_for_upserting_parts_table(model_type:Type) -> Dict[Type, Tuple[str, 
                                 f"'{json_path}' as {field_exprs(_JSON_PATH_FIELD)}"
                             )
                         ],
-                        field_exprs(fields, table_name='__PART_JSON_TABLE'),
+                        [_generate_json_eval(f, fields[f], 'CONTAINER') for f in fields_from_container_json],
+                        field_exprs(fields_from_json_table, table_name='__PART_JSON_TABLE'),
                         use_comma=True
                     ),
                     f'FROM',
                     tab_each_line(
                         [f'{get_table_name(model_type)} as CONTAINER'],
-                        _generate_json_table_for_part_of(json_path, is_collection, fields),
+                        _generate_json_table_for_part_of(json_path, is_collection, fields, '__PART_JSON_TABLE'),
                         use_comma=True
                     ),
                     f'WHERE',
                     tab_each_line(
                         f'{root_field} = %(__root_row_id)s'
                     ),
-                ]),
+                ),
                 ') AS T1',
                 # group by should be applied after table was generated. 
                 # if you apply on JSON_TABLE, sometime it cannot generate data properly.
@@ -607,14 +611,22 @@ def get_sql_for_upserting_external_index_table(model_type:Type) -> Iterator[str]
 
 
 def _generate_json_table_for_part_of(json_path: str,
-                                     is_collection: bool, fields: StoredFieldDefinitions) -> str:
+                                     is_collection: bool, fields: StoredFieldDefinitions,
+                                     part_json_table_name: str) -> str:
     items = [
         (
             _resolve_paths_for_part_of(paths, json_path + ('[*]' if is_collection else '')), 
             field_name, field_type
         )
         for field_name, (paths, field_type) in fields.items()
+        if paths[0] != '..'
     ]
+
+    if not items:
+        items = [(
+            [json_path + ('[*]' if is_collection else ''), '$'], 
+            '', None
+        )]
 
     return join_line(
         'JSON_TABLE(',
@@ -623,9 +635,26 @@ def _generate_json_table_for_part_of(json_path: str,
             _generate_nested_json_table('$', items), 
             use_comma=True
         ),
-        ') AS __PART_JSON_TABLE'
+        f') AS {part_json_table_name}'
     )
 
+
+def _generate_json_eval(field_name:str, paths_and_type:Tuple[Tuple[str,...], Type], table_name:str) -> str:
+    paths, field_type = paths_and_type
+
+    if paths and paths[0] == '..':
+        if len(paths) != 2:
+            _logger.fatal(f'{field_name=}, {paths=}, {field_type=}. check paths have 2 element.')
+            raise RuntimeError('paths should have 2 items for generating value from container.') 
+
+        if is_collection_type_of(field_type):
+            return f"JSON_EXTRACT({field_exprs(_JSON_FIELD, table_name)}, '{paths[1]}') as {field_exprs(field_name)}"
+        else:
+            return f"JSON_VALUE({field_exprs(_JSON_FIELD, table_name)}, '{paths[1]}') as {field_exprs(field_name)}"
+
+    _logger.fatal(f'{field_name=}, {paths=}, {field_type=}. invalid paths. paths start with ..')
+    raise RuntimeError(f'invalid paths for field_name:{field_name}')
+        
 
 def _generate_select_field_of_json_table(target_fields:Tuple[str,...], 
                                          fields: StoredFieldDefinitions
@@ -636,7 +665,7 @@ def _generate_select_field_of_json_table(target_fields:Tuple[str,...],
 
             if is_collection_type_of(field_type):
                 yield f"JSON_ARRAYAGG({field_exprs(field_name)}) AS {field_exprs(field_name)}"
-                continue
+                continue 
 
         yield field_exprs(field_name)
 
@@ -652,7 +681,8 @@ def _generate_nested_json_table(first_path:str,
 
     for paths, field_name, field_type in items:
         if len(paths) == 1:
-            columns.append(f"{field_exprs(field_name)} {_get_field_db_type(field_type)} PATH '{paths[0]}'")
+            if field_name:
+                columns.append(f"{field_exprs(field_name)} {_get_field_db_type(field_type)} PATH '{paths[0]}'")
         else:
             nested_items[paths[0]].append((paths[1:], field_name, field_type))
 
@@ -939,10 +969,12 @@ def _build_where_op(fields_op:Tuple[str, str] | Tuple[str, str, str]) -> str:
     op = fields_op[1]
     variable = fields_op[2] if len(fields_op) == 3 else fields_op[0]
 
+    if op == '':
+        return field_exprs(field)
     if op == 'match':
         return _build_match(fields_op[0], variable, variable)
     else:
-        return f'{field} {op} %({variable})s'
+        return f'{field_exprs(field)} {op} %({variable})s'
 
 
 def _build_match(fields:str, variable:str, table_name:str = ''):
@@ -1054,10 +1086,10 @@ def _build_query_for_base_table(ns_types: Tuple[Tuple[str, PersistentModelT],...
 
     joined, fields = _build_join_for_ns(ns_types, core_table_queries, main_table_ns) 
 
-    nested_where = tuple()
+    nested_where : Tuple[Tuple[str, str]] = tuple()
 
     if _RELEVANCE_FIELD in tuple(_split_namespace(f)[1] for f in fields):
-        nested_where = ((_RELEVANCE_FIELD, '>', 0), )
+        nested_where = ((_RELEVANCE_FIELD, ''), )
         order_by += order_by + (f"{_RELEVANCE_FIELD} DESC" ,)
 
     if order_by or nested_where:
@@ -1081,7 +1113,7 @@ def _build_query_for_base_table(ns_types: Tuple[Tuple[str, PersistentModelT],...
                     )
                 ), "FOR_ORDERING"
             ),
-            _build_where(field_ops),
+            _build_where(tuple(itertools.chain(field_ops, nested_where))),
             _build_order_by(order_by),
             _build_limit_and_offset(limit, offset)
         ), fields

@@ -37,7 +37,7 @@ class PartModel(PersistentModel, PartOfMixin[ContainerModel]):
 
 class SubPartModel(PersistentModel, PartOfMixin[PartModel]):
     _stored_fields: StoredFieldDefinitions = {
-        '_part_codes': (('..', '$.codes', '$'), StringArrayIndex)
+        '_part_codes': (('..', '$.codes'), StringArrayIndex)
     }
 
     name: FullTextSearchedStringIndex

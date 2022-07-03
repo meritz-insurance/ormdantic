@@ -382,8 +382,8 @@ def _validate_json_paths(paths:Tuple[str], is_collection:bool):
         _logger.fatal(f'{paths} has one item which did not starts with .. or $.')
         raise RuntimeError('Invalid path expression. the path must start with $')
 
-    if is_collection and paths[-1] != '$':
-        _logger.fatal(f'{paths} should end with $ for collection type')
-        raise RuntimeError('Invalid path expression. collection type should end with $.')
+    # if is_collection and paths[-1] != '$':
+    #     _logger.fatal(f'{paths} should end with $ for collection type')
+    #     raise RuntimeError('Invalid path expression. collection type should end with $.')
 
 
