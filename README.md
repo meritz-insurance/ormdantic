@@ -61,17 +61,8 @@ persons = find_objects(pool, Person, ('name', 'like', '%Stev%'))
  * support python 3.10+ only.
 
 ## TODO
- * unwind on array object. (like mongodb's $unwind)
-   - query_objects(... unwind=('codes',))
-
- * link two different model objects
-   - ReferenceMixin
-
  * where support partof stored fields
    - wheres = ('persons.name', '=', 'steve')
-
- * fast query using offset, limit
-   - query_objects(..., offset=100, limit=100)
 
  * cache
    - pydantic object validation is a little bit slow.
