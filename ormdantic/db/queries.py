@@ -358,7 +358,7 @@ def _f(field:str) -> str:
     if field == '*':
         return field
 
-    if ' ' in field and '(' in field: # if field has function or "as" statement.
+    if ' ' in field or '(' in field: # if field has function or "as" statement.
         return field
 
     return f'`{field}`'
@@ -1157,7 +1157,7 @@ def _merge_relevance_fields(fields:Iterable[str]) -> List[str]:
 
     if relevance_fields:
         merged.append(
-            ' + '.join(relevance_fields) + f' AS {_RELEVANCE_FIELD}'
+            ' + '.join(field_exprs(relevance_fields)) + f' AS {field_exprs(_RELEVANCE_FIELD)}'
         )
 
     return merged

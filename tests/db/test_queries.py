@@ -978,24 +978,26 @@ def test_get_query_and_args_for_reading_for_matching():
 
     sql, args = get_query_and_args_for_reading(MyModel, ('order',), (('', 'match', '+FAST'),))
 
+    print(sql)
+
     assert join_line (
         "SELECT",
         "  `_MAIN`.`order`",
         "FROM",
         "  (",
         "    SELECT",
-        "      __row_id,",
-        "      __relevance",
+        "      `__row_id`,",
+        "      `__relevance`",
         "    FROM",    
         "    (",
         "      SELECT",
-        "        __row_id,",
-        "        __relevance AS __relevance",
+        "        `__row_id`,",
+        "        `__relevance` AS `__relevance`",
         "      FROM",
         "        (",
         "          SELECT",
         "            `__ORG`.`__row_id`,",
-        "            MATCH (`__ORG`.`order`,`__ORG`.`name`) AGAINST (%(order_name)s IN BOOLEAN MODE) as `__relevance`",
+        "            MATCH (`__ORG`.`order`,`__ORG`.`name`) AGAINST (%(ORDER_NAME)s IN BOOLEAN MODE) as `__relevance`",
         "          FROM",
         "            model_MyModel as __ORG",
         "        )",
@@ -1013,7 +1015,7 @@ def test_get_query_and_args_for_reading_for_matching():
     ) == sql
 
     assert {
-        "order_name": "+FAST"
+        "ORDER_NAME": "+FAST"
     } == args
 
 
@@ -1032,15 +1034,15 @@ def test_get_query_and_args_for_reading_for_order_by():
         "FROM",
         "  (",
         "    SELECT",
-        "      __row_id,",
-        "      order,",
-        "      name",
+        "      `__row_id`,",
+        "      `order`,",
+        "      `name`",
         "    FROM",
         "    (",
         "      SELECT",
-        "        __row_id,",
-        "        order,",
-        "        name",
+        "        `__row_id`,",
+        "        `order`,",
+        "        `name`",
         "      FROM",
         "        (",
         "          SELECT",
@@ -1083,8 +1085,8 @@ def test_build_query_for_core_table():
         'FROM',
         '  model_Model as __ORG',
         'WHERE',
-        '  `__ORG`.`codes` = %(codes)s',
-        '  AND `__ORG`.`name` != %(name)s'
+        '  `__ORG`.`codes` = %(CODES)s',
+        '  AND `__ORG`.`name` != %(NAME)s'
     ) == query
     assert ('__row_id', 'description', 'codes', 'name') == fields
 
@@ -1111,8 +1113,8 @@ def test_build_query_for_core_table_for_unwind():
         '  model_Model as __ORG',
         '  LEFT JOIN model_Model_codes as __UNWIND_CODES ON `__ORG`.`__row_id` = `__UNWIND_CODES`.`__row_id`',
         'WHERE',
-        '  `__UNWIND_CODES`.`codes` = %(codes)s',
-        '  AND `__ORG`.`name` != %(name)s'
+        '  `__UNWIND_CODES`.`codes` = %(NS_CODES)s',
+        '  AND `__ORG`.`name` != %(NS_NAME)s'
     ) == query
 
     assert ('ns.__row_id', 'ns.description', 'ns.name', 'ns.codes') == fields
@@ -1134,12 +1136,12 @@ def test_build_query_for_core_table_for_match():
         'SELECT',
         '  `__ORG`.`__row_id` AS `ns.__row_id`,',
         '  `__UNWIND_CODES`.`codes` AS `ns.codes`,',
-        '  MATCH (`__ORG`.`name`,`__ORG`.`description`) AGAINST (%(name_description)s IN BOOLEAN MODE) as `ns.__relevance`',
+        '  MATCH (`__ORG`.`name`,`__ORG`.`description`) AGAINST (%(NAME_DESCRIPTION)s IN BOOLEAN MODE) as `ns.__relevance`',
         'FROM',
         '  model_Model as __ORG',
         '  LEFT JOIN model_Model_codes as __UNWIND_CODES ON `__ORG`.`__row_id` = `__UNWIND_CODES`.`__row_id`',
         'WHERE',
-        '  `__UNWIND_CODES`.`codes` = %(codes)s',
+        '  `__UNWIND_CODES`.`codes` = %(NS_CODES)s',
     ) == query
 
     assert ('ns.__row_id', 'ns.' + _RELEVANCE_FIELD, 'ns.codes') == fields
@@ -1160,7 +1162,7 @@ def test_build_query_for_core_table_for_multiple_match():
     assert join_line(
         'SELECT',
         '  `__ORG`.`__row_id`,',
-        '  MATCH (`__ORG`.`name`) AGAINST (%(name)s IN BOOLEAN MODE) + MATCH (`__ORG`.`description`) AGAINST (%(description)s IN BOOLEAN MODE) as `__relevance`',
+        '  MATCH (`__ORG`.`name`) AGAINST (%(NAME)s IN BOOLEAN MODE) + MATCH (`__ORG`.`description`) AGAINST (%(DESCRIPTION)s IN BOOLEAN MODE) as `__relevance`',
         'FROM',
         '  model_Model as __ORG',
     ) == query
