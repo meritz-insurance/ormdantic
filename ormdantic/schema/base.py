@@ -1,6 +1,5 @@
 from ast import Mod
 from operator import mod
-from pyexpat import model
 from typing import (
     Any, ForwardRef, Tuple, Dict, Type, Generic, TypeVar, Iterator, Callable, Optional,
     List, ClassVar, cast, get_args
@@ -14,9 +13,7 @@ import orjson
 
 from pydantic import (
     BaseModel, ConstrainedDecimal, ConstrainedInt, Field, ConstrainedStr,
-    root_validator
 )
-from pytest import param
 from ormdantic.util import (
     get_logger,
     get_base_generic_type_of, get_type_args, update_forward_refs_in_generic_base,
@@ -360,10 +357,17 @@ def _get_stored_fields(type_:Type):
         for base in inspect.getmro(type_) if is_derived_from(base, PersistentModel)]):
         stored_fields.update(fields)
 
-    for _, (paths, field_type) in stored_fields.items():
-        _validate_json_paths(paths, is_collection_type_of(field_type))
+    adjusted = {}
 
-    return stored_fields
+    for field_name, (paths, field_type) in stored_fields.items():
+        is_collection_type = is_collection_type_of(field_type)
+
+        _validate_json_paths(paths)
+
+        if is_collection_type and paths[-1] != '$' and paths[0] != '..':
+            adjusted[field_name] = (paths + ('$',), field_type)
+
+    return stored_fields | adjusted
         
 
 def _get_json_paths(type_, field_name, field_type) -> Tuple[str,...]:
@@ -377,7 +381,7 @@ def _get_json_paths(type_, field_name, field_type) -> Tuple[str,...]:
     return tuple(paths)
 
 
-def _validate_json_paths(paths:Tuple[str], is_collection:bool):
+def _validate_json_paths(paths:Tuple[str]):
     if any(not (p == '..' or p.startswith('$.') or p == '$') for p in paths):
         _logger.fatal(f'{paths} has one item which did not starts with .. or $.')
         raise RuntimeError('Invalid path expression. the path must start with $')

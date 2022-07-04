@@ -1,4 +1,4 @@
-from typing import Type, List, ClassVar
+from typing import Container, Type, List, ClassVar
 import pytest
 from decimal import Decimal
 from datetime import date, datetime
@@ -17,7 +17,7 @@ from ormdantic.db.queries import (
     _ENGINE, _RELEVANCE_FIELD
 )
 from ormdantic.schema.base import (
-    IntegerArrayIndex, StringArrayIndex, FullTextSearchedStringIndex, 
+    IntegerArrayIndex, SchemaBaseModel, StringArrayIndex, FullTextSearchedStringIndex, 
     FullTextSearchedStr, PartOfMixin, StringReference, 
     UniqueStringIndex, StringIndex, DecimalIndex, IntIndex, DateIndex,
     DateTimeIndex, update_part_of_forward_refs, IdentifiedModel, UuidStr, 
@@ -520,7 +520,12 @@ def test_get_query_and_args_for_reading_for_external_index():
         codes= StringArrayIndex(['code1', 'code2'])
     )
 
-    with use_temp_database_cursor_with_model(model, 
+
+    emptry_codes_model = PartModel(
+        name=FullTextSearchedStringIndex('empty code'),
+        codes= StringArrayIndex([])
+    )
+    with use_temp_database_cursor_with_model(model, emptry_codes_model,
                                              keep_database_when_except=False) as cursor:
         query_and_args = get_query_and_args_for_reading(
             PartModel, ('__row_id', 'name', 'codes'), (('codes', '=', 'code1'),), unwind='codes')
@@ -530,7 +535,25 @@ def test_get_query_and_args_for_reading_for_external_index():
         assert [
             {'__row_id':1, 'name':'part1', 'codes': 'code1'}
         ] == cursor.fetchall()
- 
+
+        query_and_args = get_query_and_args_for_reading(
+            PartModel, ('__row_id', 'name', 'codes'), (('name', '=', 'part1'),))
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'__row_id':1, 'name':'part1', 'codes': '["code1", "code2"]'}
+        ] == cursor.fetchall()
+
+        query_and_args = get_query_and_args_for_reading(
+            PartModel, ('__row_id', 'name', 'codes'), (('name', '=', 'empty code'),), unwind='codes')
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'__row_id':2, 'name':'empty code', 'codes': None}
+        ] == cursor.fetchall()
+
 
 def test_get_query_and_args_for_reading_for_stored_fields():
     class PartModel(PersistentModel):
@@ -567,6 +590,186 @@ def test_get_query_and_args_for_reading_for_stored_fields():
             {'__row_id':2, '__json':'{"descriptions": ["desc1", "desc2"]}', 'descriptions':'["desc1","desc2"]'}, 
         ] == cursor.fetchall()
 
+
+
+
+def test_get_query_and_args_for_reading_for_stored_external_index():
+    class MemberModel(SchemaBaseModel):
+        name: str
+
+    class PartModel(PersistentModel, PartOfMixin['ContainerModel']):
+        _stored_fields: ClassVar[StoredFieldDefinitions] = {
+            '_container_codes' : (('..', '$.codes'), StringArrayIndex),
+            '_members_names' : (('$.members[*].name',), StringArrayIndex)
+        }
+        name: FullTextSearchedStringIndex
+        members: List[MemberModel]
+
+    class ContainerModel(PersistentModel):
+        codes: StringArrayIndex
+        parts: List[PartModel]
+
+    update_part_of_forward_refs(PartModel, locals())
+     
+    model = ContainerModel(
+        codes=StringArrayIndex(['code1', 'code2']),
+        parts=[
+           PartModel(
+             name=FullTextSearchedStringIndex('part1'), 
+             members=[MemberModel(name='part1-member1'), MemberModel(name='part1-member2')]
+           )   
+        ]
+    )
+
+    with use_temp_database_cursor_with_model(model, 
+                                             keep_database_when_except=False) as cursor:
+        query_and_args = get_query_and_args_for_reading(
+            PartModel, 
+            ('__row_id', 'name', '_container_codes', '_members_names'), 
+            tuple(), 
+            )
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'__row_id':1, 'name':'part1', '_container_codes': '["code1", "code2"]', '_members_names': '["part1-member1","part1-member2"]'}
+        ] == cursor.fetchall()
+ 
+        query_and_args = get_query_and_args_for_reading(
+            PartModel, 
+            ('__row_id', 'name', '_container_codes', '_members_names'), 
+            tuple(), 
+            unwind='_container_codes'
+            )
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'__row_id':1, 'name':'part1', '_container_codes': "code1", '_members_names': '["part1-member1","part1-member2"]'},
+            {'__row_id':1, 'name':'part1', '_container_codes': "code2", '_members_names': '["part1-member1","part1-member2"]'}
+        ] == cursor.fetchall()
+ 
+        query_and_args = get_query_and_args_for_reading(
+            PartModel, 
+            ('__row_id', 'name', '_container_codes', '_members_names'), 
+            tuple(), 
+            unwind=('_container_codes', '_members_names'),
+            order_by=('_container_codes', '_members_names')
+        )
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'__row_id':1, 'name':'part1', '_container_codes': "code1", '_members_names': "part1-member1"},
+            {'__row_id':1, 'name':'part1', '_container_codes': "code1", '_members_names': "part1-member2"},
+            {'__row_id':1, 'name':'part1', '_container_codes': "code2", '_members_names': "part1-member1"},
+            {'__row_id':1, 'name':'part1', '_container_codes': "code2", '_members_names': "part1-member2"},
+        ] == cursor.fetchall()
+ 
+        query_and_args = get_query_and_args_for_reading(
+            PartModel, 
+            ('__row_id', 'name', '_container_codes', '_members_names'), 
+            (('_container_codes', '=', 'code1'), ('_members_names', '=', 'part1-member2')), 
+            unwind=('_container_codes', '_members_names'),
+        )
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'__row_id':1, 'name':'part1', '_container_codes': "code1", '_members_names': "part1-member2"},
+        ] == cursor.fetchall()
+
+
+def test_get_query_and_args_for_reading_for_reference():
+    class PartModel(PersistentModel):
+        name: StringIndex
+        description: StringIndex
+
+    class PartReference(StringReference[PartModel]):
+        _target_field: ClassVar[str] = 'name'
+
+    class PartInfoModel(PersistentModel):
+        name: StringIndex
+        part: PartReference
+        codes: StringArrayIndex
+        
+    class ContainerModel(PersistentModel):
+        name: StringIndex
+        part: PartReference
+
+    update_part_of_forward_refs(PartModel, locals())
+     
+    model = ContainerModel(
+        name=StringIndex('container'),
+        part=PartReference('part1')
+    )
+
+    part_info = PartInfoModel(
+        name=StringIndex('part info'),
+        part=PartReference('part1'),
+        codes=StringArrayIndex(['code-1', 'code-2'])
+    )
+
+    part = PartModel(
+        name=StringIndex('part1'),
+        description=StringIndex('part 1')
+    )
+
+    with use_temp_database_cursor_with_model(model, part_info, part,
+                                             keep_database_when_except=False) as cursor:
+        # simple one
+        query_and_args = get_query_and_args_for_reading(
+            ContainerModel, 
+            ('name', 'part'),
+            tuple(), 
+            )
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'name': 'container', 'part':'part1'}
+        ] == cursor.fetchall()
+
+        # join part model
+        query_and_args = get_query_and_args_for_reading(
+            ContainerModel, 
+            ('name', 'part.name', 'part.description'),
+            tuple(), 
+            )
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'name': 'container', 'part.name':'part1', 'part.description':'part 1'}
+        ] == cursor.fetchall()
+
+        # explicit join
+        query_and_args = get_query_and_args_for_reading(
+            ContainerModel, 
+            ('name', 'part.name', 'part.part_info.name'),
+            tuple(), 
+            ns_types={'part.part_info':PartInfoModel}
+            )
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'name': 'container', 'part.name':'part1', 'part.part_info.name':'part info'}
+        ] == cursor.fetchall()
+
+        query_and_args = get_query_and_args_for_reading(
+            ContainerModel, 
+            ('name', 'part.name', 'part.part_info.name'),
+            (('part.part_info.codes', '=', 'code-1'), ), 
+            ns_types={'part.part_info':PartInfoModel},
+            unwind="part.part_info.codes"
+        )
+            
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'name': 'container', 'part.name':'part1', 'part.part_info.name':'part info'}
+        ] == cursor.fetchall()
 
 
 def test_get_sql_for_upserting_parts_table():
@@ -803,6 +1006,7 @@ def test_get_query_and_args_for_reading_for_matching():
         "      `__relevance`",
         "    ORDER BY",
         "      `__relevance` DESC",
+        "    LIMIT 100000000000",
         "  )",
         "  AS _BASE",
         "  JOIN model_MyModel as _MAIN ON `_BASE`.`__row_id` = `_MAIN`.`__row_id`"
@@ -852,6 +1056,7 @@ def test_get_query_and_args_for_reading_for_order_by():
         "    ORDER BY",
         "      `order` desc,",
         "      `name`",
+        "    LIMIT 100000000000",
         "  )",
         "  AS _BASE"
     ) == sql

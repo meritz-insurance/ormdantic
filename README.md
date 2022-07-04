@@ -61,11 +61,18 @@ persons = find_objects(pool, Person, ('name', 'like', '%Stev%'))
  * support python 3.10+ only.
 
 ## TODO
+ * test case for external index.
+	external index of sub-part
+
+ * reduce join if it is not necessary.
+   if there is not limit, we don't need to join table with base table.
+
  * where support partof stored fields
    - wheres = ('persons.name', '=', 'steve')
 
  * cache
    - pydantic object validation is a little bit slow.
+   - raw dictionary or validated python object.
 
  * derived class, cache, audit, bitemporal
 

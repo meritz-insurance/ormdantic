@@ -1,4 +1,3 @@
-from operator import mod
 from typing import (
     Type, Iterator, overload, Iterable, List, Tuple, cast, Dict, 
     Any, DefaultDict, Optional, get_args, Set
@@ -50,7 +49,7 @@ _ENGINE = ""
 _FULL_TEXT_SEARCH_OPTION = r"""COMMENT 'parser "TokenBigramIgnoreBlankSplitSymbolAlphaDigit"'"""
 
 
-Where = Tuple[Tuple[str, str, Any]]
+Where = Tuple[Tuple[str, str, Any], ...]
 FieldOp = Tuple[Tuple[str, str]]
 
 _logger = get_logger(__name__)
@@ -99,6 +98,7 @@ def join_line(*lines:str | Iterable[str],
 
 
 def _alias_table(old_table:str, table_name:str) -> str:
+    table_name = _normalize_database_object_name(table_name)
     old_table = old_table.strip()
 
     if old_table.startswith('(') and old_table.endswith(')'):
@@ -664,9 +664,9 @@ def _generate_select_field_of_json_table(target_fields:Tuple[str,...],
                                          ) -> Iterable[str]:
     for field_name in target_fields:
         if field_name in fields:
-            _, field_type = fields[field_name]
+            json_path, field_type = fields[field_name]
 
-            if is_collection_type_of(field_type):
+            if is_collection_type_of(field_type) and json_path[0] != '..':
                 yield f"JSON_ARRAYAGG({field_exprs(field_name)}) AS {field_exprs(field_name)}"
                 continue 
 
@@ -856,7 +856,7 @@ def _split_namespace(field:str) -> Tuple[str, str]:
 
 
 def _extract_fields_and_ops_for_core(
-        field_ops:List[Tuple[ str, str]], 
+        field_ops:List[Tuple[str, str]], 
         ns: str) -> Tuple[Tuple[Tuple[str, str], ...], List[str]]:
 
     ns_field_ops = [fo for fo in field_ops if _split_namespace(fo[0])[0] == ns]
@@ -933,12 +933,12 @@ def _build_database_args(where:Where) -> Dict[str, Any]:
     return {_get_parameter_variable_for_multiple_fields(field):value for field, _, value in where}
 
 
-def _build_where(field_and_ops:FieldOp | Tuple[Tuple[str, str, str]]) -> str:
+def _build_where(field_and_ops:FieldOp | Tuple[Tuple[str, str, str]], ns:str = '') -> str:
     if field_and_ops:
         return join_line(
             'WHERE',
             tab_each_line(
-                '\nAND '.join(_build_where_op(item) for item in field_and_ops)
+                '\nAND '.join(_build_where_op(item, ns) for item in field_and_ops)
             )
         )
 
@@ -967,10 +967,12 @@ def _build_order_by(order_by:Tuple[str,...]) -> str:
     )
 
 
-def _build_where_op(fields_op:Tuple[str, str] | Tuple[str, str, str]) -> str:
+def _build_where_op(fields_op:Tuple[str, str] | Tuple[str, str, str], ns:str = '') -> str:
+    ns  = ns + '.' if ns else ''
+
     field = fields_op[0]
     op = fields_op[1]
-    variable = fields_op[2] if len(fields_op) == 3 else fields_op[0]
+    variable = _normalize_database_object_name(ns + (fields_op[2] if len(fields_op) == 3 else fields_op[0]))
 
     if op == '':
         return field_exprs(field)
@@ -988,7 +990,7 @@ def _build_match(fields:str, variable:str, table_name:str = ''):
 
 
 def _get_parameter_variable_for_multiple_fields(fields:str):
-    variable = fields.replace(',', '_').replace(' ', '')
+    variable = _normalize_database_object_name(fields)
     return variable
 
 
@@ -1020,7 +1022,7 @@ def _build_query_and_fields_for_core_table(
 
     prefix_fields['__ORG'][_ROW_ID_FIELD] = None
 
-    for f in fields:
+    for f in itertools.chain(fields, unwind):
         prefix_fields[_get_alias_for_unwind(f, unwind)][f] = None
 
     for f, op in field_ops:
@@ -1067,13 +1069,14 @@ def _build_query_and_fields_for_core_table(
         tab_each_line(
             source
         ),
-        _build_where(field_op_var)
+        _build_where(field_op_var, ns)
     ), tuple(_add_namespace(f, ns) for f in itertools.chain(*prefix_fields.values()))
 
 
 def _get_alias_for_unwind(f:str, unwind:Tuple[str], other:str = '__ORG') -> str:
     if f in unwind:
-        return f'__UNWIND_{f.upper()}'
+        f = _normalize_database_object_name(f)
+        return f'__UNWIND_{f}'
     else:
         return other
 
@@ -1103,7 +1106,7 @@ def _build_query_for_base_table(ns_types: Tuple[Tuple[str, PersistentModelT],...
         return join_line(
             'SELECT',
             tab_each_line(
-                fields,
+                field_exprs(fields),
                 use_comma=True
             ),
             'FROM',
@@ -1111,7 +1114,7 @@ def _build_query_for_base_table(ns_types: Tuple[Tuple[str, PersistentModelT],...
                 join_line(
                     'SELECT',
                     tab_each_line(
-                        _merge_relevance_fields(fields),
+                        field_exprs(_merge_relevance_fields(fields)),
                         use_comma=True
                     ),
                     'FROM',
@@ -1122,13 +1125,13 @@ def _build_query_for_base_table(ns_types: Tuple[Tuple[str, PersistentModelT],...
             ),
             _build_where(tuple(itertools.chain(field_ops, nested_where))),
             _build_order_by(order_by),
-            _build_limit_and_offset(limit, offset)
+            _build_limit_and_offset(limit or 100_000_000_000, offset)
         ), fields
 
     return join_line(
         'SELECT',
         tab_each_line(
-            _merge_relevance_fields(fields),
+            field_exprs(_merge_relevance_fields(fields)),
             use_comma=True
         ),
         'FROM',
@@ -1139,6 +1142,7 @@ def _build_query_for_base_table(ns_types: Tuple[Tuple[str, PersistentModelT],...
         _build_limit_and_offset(limit, offset)
     ), fields
 
+
 def _merge_relevance_fields(fields:Iterable[str]) -> List[str]:
     merged = []
     relevance_fields = []
@@ -1147,9 +1151,9 @@ def _merge_relevance_fields(fields:Iterable[str]) -> List[str]:
         _, field = _split_namespace(f)
 
         if field == _RELEVANCE_FIELD:
-            relevance_fields.append(field)
+            relevance_fields.append(f)
         else:
-            merged.append(field)
+            merged.append(f)
 
     if relevance_fields:
         merged.append(
@@ -1190,7 +1194,8 @@ def _build_join_for_ns(ns_types: Tuple[Tuple[str, PersistentModelT],...],
 
             left_key = _add_namespace(keys[0], base_ns)
             right_key = _add_namespace(keys[1], current_ns)
-            joined_queries.append(f'{join_scope}JOIN {_alias_table(query, f"__{current_ns.upper()}")} ON {left_key} = {right_key}')
+            joined_queries.append(f'{join_scope}JOIN {_alias_table(query, f"__{current_ns.upper()}")}'
+                f' ON {field_exprs(left_key)} = {field_exprs(right_key)}')
         else:
             joined_queries.append(_alias_table(query, '__BASE'))
 
@@ -1301,7 +1306,8 @@ def _find_join_key(base_type:Type, target_type:Type, reversed:bool = False) -> T
 
 def _get_table_name_of(ns:str) -> str:
     if ns:
-        return f'_{ns.upper()}'
+        ns = _normalize_database_object_name(ns)
+        return f'_{ns}'
     else:
         return f'_MAIN'
 
@@ -1341,7 +1347,7 @@ def _get_populated_table_query_from_base(query_for_base:str,
         tab_each_line(
             field_exprs([f for f in base_fields if f in target_fields], _BASE_TABLE_NAME),
             *(
-                (as_field_expr(f, _get_table_name_of(ns), ns) for f in ns_fields) 
+                tuple(as_field_expr(f, _get_table_name_of(ns), ns) for f in ns_fields) 
                 for ns, ns_fields in scope_fields.items()
             ),
             use_comma=True
@@ -1353,3 +1359,5 @@ def _get_populated_table_query_from_base(query_for_base:str,
     )
 
 
+def _normalize_database_object_name(value:str) -> str:
+    return value.replace('.', '_').replace(',', '_').replace(' ', '').upper()
