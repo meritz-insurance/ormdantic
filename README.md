@@ -56,18 +56,17 @@ persons = find_objects(pool, Person, ('name', 'like', '%Stev%'))
 
 ```
 
-## Json Key Value which will be saved on the field of table (StoredMixin)
-StoredMixin indicate the json key which will be saved on the field.
+## StoredMixin
+StoredMixin indicate the json key the value of which will be saved on the database field.
 
-StringIndex, FullTextSearchedStringIndex is derived from StoredMixin. so, the field value will be 
-saved as the field. the field which is declared as \*Index, ormdantic make the fields which hold the value
-and create the index also.
+StringIndex, FullTextSearchedStringIndex is derived from StoredMixin. 
+The field which is declared as \*Index, ormdantic make the fields which hold the value and create the index also.
 
 The table will be defined as following if you will use the StoredMxin.
 
 ``` python
 class SampleModel(PersistentModel):
-	name: StringIndex
+   name: StringIndex
 ```
 
 The model will generate following the sql.
@@ -81,6 +80,13 @@ CREATE TABLE IF NOT EXISTS `model_SampleModel` (
 )
 ```
 
+## Explicit Stored Fields
+
+## StringArrayIndex
+
+## offset, limit and PartOfMixin
+
+## Reference 
  
 ## Note
  * implemented for mariadb only.
@@ -93,7 +99,7 @@ CREATE TABLE IF NOT EXISTS `model_SampleModel` (
  * external in various reference.
   * find_join_key
   * main_type 
-  * _count_row_query 
+  * count_row_query 
   * match 
   * is null will be applied the base table.
 
