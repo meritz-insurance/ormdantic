@@ -510,6 +510,64 @@ def test_get_query_and_args_for_reading_for_nested_parts():
         ] == cursor.fetchall()
 
 
+def test_get_query_and_args_for_reading_for_external_index():
+    class PartModel(PersistentModel):
+        name: FullTextSearchedStringIndex
+        codes: StringArrayIndex
+
+    model = PartModel(
+        name=FullTextSearchedStringIndex('part1'),
+        codes= StringArrayIndex(['code1', 'code2'])
+    )
+
+    with use_temp_database_cursor_with_model(model, 
+                                             keep_database_when_except=False) as cursor:
+        query_and_args = get_query_and_args_for_reading(
+            PartModel, ('__row_id', 'name', 'codes'), (('codes', '=', 'code1'),), unwind='codes')
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'__row_id':1, 'name':'part1', 'codes': 'code1'}
+        ] == cursor.fetchall()
+ 
+
+def test_get_query_and_args_for_reading_for_stored_fields():
+    class PartModel(PersistentModel):
+        name: FullTextSearchedStringIndex
+        members: List['MemberModel']
+
+    class MemberModel(PersistentModel, PartOfMixin[PartModel]):
+        _stored_fields: ClassVar[StoredFieldDefinitions] = {
+            '_part_name': (('..', '$.name'), FullTextSearchedStringIndex)
+        }
+        descriptions: StringArrayIndex
+
+    update_part_of_forward_refs(PartModel, locals())
+
+    model = PartModel(
+        name=FullTextSearchedStringIndex('part1'),
+        members=[
+            MemberModel(
+                descriptions=StringArrayIndex(['desc1'])),
+            MemberModel(descriptions=StringArrayIndex(
+                ['desc1', 'desc2']))
+        ]
+    )
+
+    with use_temp_database_cursor_with_model(model, 
+                                             keep_database_when_except=False) as cursor:
+        query_and_args = get_query_and_args_for_reading(
+            MemberModel, ('__row_id', '__json', 'descriptions'), (('_part_name', '=', 'part1'),))
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'__row_id':1, '__json':'{"descriptions": ["desc1"]}', 'descriptions':'["desc1"]'}, 
+            {'__row_id':2, '__json':'{"descriptions": ["desc1", "desc2"]}', 'descriptions':'["desc1","desc2"]'}, 
+        ] == cursor.fetchall()
+
+
 
 def test_get_sql_for_upserting_parts_table():
     class Part(PersistentModel, PartOfMixin['Container']):
@@ -806,7 +864,7 @@ def test_build_query_for_core_table():
         description: FullTextSearchedStr
 
     query, fields = _build_query_and_fields_for_core_table('', Model, 
-        ('description',), 
+        ['description'], 
         (('codes', '='), ('name', '!=')),
         tuple()
     )
@@ -846,7 +904,7 @@ def test_build_query_for_core_table_for_unwind():
         '  `__UNWIND_CODES`.`codes` AS `ns.codes`',
         'FROM',
         '  model_Model as __ORG',
-        '  LEFT JOIN model_Model_codes as __UNWIND_CODES',
+        '  LEFT JOIN model_Model_codes as __UNWIND_CODES ON `__ORG`.`__row_id` = `__UNWIND_CODES`.`__row_id`',
         'WHERE',
         '  `__UNWIND_CODES`.`codes` = %(codes)s',
         '  AND `__ORG`.`name` != %(name)s'
@@ -874,7 +932,7 @@ def test_build_query_for_core_table_for_match():
         '  MATCH (`__ORG`.`name`,`__ORG`.`description`) AGAINST (%(name_description)s IN BOOLEAN MODE) as `ns.__relevance`',
         'FROM',
         '  model_Model as __ORG',
-        '  LEFT JOIN model_Model_codes as __UNWIND_CODES',
+        '  LEFT JOIN model_Model_codes as __UNWIND_CODES ON `__ORG`.`__row_id` = `__UNWIND_CODES`.`__row_id`',
         'WHERE',
         '  `__UNWIND_CODES`.`codes` = %(codes)s',
     ) == query

@@ -1,3 +1,4 @@
+from operator import mod
 from typing import (
     Type, Iterator, overload, Iterable, List, Tuple, cast, Dict, 
     Any, DefaultDict, Optional, get_args, Set
@@ -555,6 +556,8 @@ def get_sql_for_upserting_parts_table(model_type:Type) -> Dict[Type, Tuple[str, 
 
 
 def get_sql_for_upserting_external_index_table(model_type:Type) -> Iterator[str]:
+    is_part = is_derived_from(model_type, PartOfMixin)
+
     for field_name, (json_paths, field_type) in get_stored_fields_for_external_index(model_type).items():
 
         if json_paths[0] == '..':
@@ -584,7 +587,7 @@ def get_sql_for_upserting_external_index_table(model_type:Type) -> Iterator[str]
             f')',
             f'SELECT',
             tab_each_line(
-                field_exprs(_ROOT_ROW_ID_FIELD, '__ORG'),
+                field_exprs(_ROOT_ROW_ID_FIELD if is_part else _ROW_ID_FIELD, '__ORG') ,
                 field_exprs(_ROW_ID_FIELD, '__ORG'),
                 field_exprs(field_name, '__EXT_JSON_TABLE'),
                 use_comma=True
@@ -605,7 +608,7 @@ def get_sql_for_upserting_external_index_table(model_type:Type) -> Iterator[str]
             ),
             f'WHERE',
             tab_each_line(
-                f"""{field_exprs(_ROOT_ROW_ID_FIELD, '__ORG')} = %(__root_row_id)s"""
+                f"""{field_exprs(_ROOT_ROW_ID_FIELD if is_part else _ROW_ID_FIELD, '__ORG')} = %(__root_row_id)s"""
             )
         )
 
@@ -1018,16 +1021,16 @@ def _build_query_and_fields_for_core_table(
     prefix_fields['__ORG'][_ROW_ID_FIELD] = None
 
     for f in fields:
-        prefix_fields[_get_prefix_for_unwind(f, unwind)][f] = None
+        prefix_fields[_get_alias_for_unwind(f, unwind)][f] = None
 
     for f, op in field_ops:
         if op == 'match':
             matches.append(_build_match(f, f, '__ORG'))
         else:
-            prefix_fields[_get_prefix_for_unwind(f, unwind)][f] = None
+            prefix_fields[_get_alias_for_unwind(f, unwind)][f] = None
 
     field_op_var = tuple(
-        (field_exprs(f, _get_prefix_for_unwind(f, unwind)), o, f)
+        (field_exprs(f, _get_alias_for_unwind(f, unwind)), o, f)
         for f, o in field_ops if o != 'match'
     )
 
@@ -1045,8 +1048,12 @@ def _build_query_and_fields_for_core_table(
     source = '\nLEFT JOIN '.join(
         itertools.chain(
             [_alias_table(get_table_name(target_type), '__ORG')],
-            [_alias_table(get_table_name(target_type, f), _get_prefix_for_unwind(f, unwind)) 
-                for f in unwind]
+            [
+                _alias_table(get_table_name(target_type, f), _get_alias_for_unwind(f, unwind)) 
+                + f' ON {field_exprs(_ROW_ID_FIELD, "__ORG")} = '
+                + f'{field_exprs(_ROW_ID_FIELD, _get_alias_for_unwind(f, unwind))}'
+                for f in unwind
+            ]
         )
     )
 
@@ -1064,7 +1071,7 @@ def _build_query_and_fields_for_core_table(
     ), tuple(_add_namespace(f, ns) for f in itertools.chain(*prefix_fields.values()))
 
 
-def _get_prefix_for_unwind(f:str, unwind:Tuple[str], other:str = '__ORG') -> str:
+def _get_alias_for_unwind(f:str, unwind:Tuple[str], other:str = '__ORG') -> str:
     if f in unwind:
         return f'__UNWIND_{f.upper()}'
     else:
