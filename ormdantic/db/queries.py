@@ -225,6 +225,7 @@ def _build_create_part_of_model_view_statement(view_name:str, joined_table:str,
         ')'
     )
 
+
 def _build_create_external_index_tables(type_:Type):
     for field_name, (_, field_type) in get_stored_fields_for_external_index(type_).items():
         yield _build_create_model_table_statement(
@@ -425,7 +426,6 @@ def _get_sql_for_upserting(model_type:Type):
             f'{field_exprs(_JSON_FIELD)} = %(__json)s'
         )
     ) 
-
 
 
 # At first, I would use the JSON_TABLE function in mariadb. 
@@ -889,7 +889,9 @@ def _extract_fields_for_order_by(order_by:Tuple[str], ns:str) -> List[str]:
     return fields
 
 
-def _extract_fields_for_join(join_keys:Dict[Tuple[Type, Type], Tuple[str, str]], ns_type:Type) -> List[str]:
+def _extract_fields_for_join(
+    join_keys:Dict[Tuple[Type, Type], Tuple[str, str]], 
+    ns_type:Type) -> List[str]:
     fields = []
 
     for (tl, tr), (kl, kr) in join_keys.items():
@@ -1293,6 +1295,7 @@ def _find_join_key(base_type:Type, target_type:Type, reversed:bool = False) -> T
 
     for field_name, (_, field_type) in refs.items():
         generic_type = get_base_generic_type_of(field_type, ReferenceMixin)
+
         if get_args(generic_type)[0] == target_type:
             target_field = field_type._target_field
 

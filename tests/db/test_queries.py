@@ -398,23 +398,6 @@ def test_get_query_and_args_for_deleting():
         assert tuple() == cursor.fetchall()
 
 
-def test_get_query_and_args_for_reading_for_stored_fields():
-    class SampleStoredModel(IdentifiedModel):
-        name: FullTextSearchedStringIndex
-
-    model = SampleStoredModel(id=UuidStr('@'), version='0.1.0', 
-                                    name=FullTextSearchedStringIndex('sample'))
-
-    with use_temp_database_cursor_with_model(model) as cursor:
-        model.id = UuidStr("@")
-        query_and_args = get_query_and_args_for_reading(
-            SampleStoredModel, ('id', 'name'), (('name', '=', 'sample'),))
-
-        cursor.execute(*query_and_args)
-
-        assert [{'id':'@', 'name':'sample'}] == cursor.fetchall()
-
-
 def test_get_query_and_args_for_reading_for_parts():
     class QContainerModel(IdentifiedModel):
         name: FullTextSearchedStringIndex
@@ -770,6 +753,68 @@ def test_get_query_and_args_for_reading_for_reference():
         assert [
             {'name': 'container', 'part.name':'part1', 'part.part_info.name':'part info'}
         ] == cursor.fetchall()
+
+
+def test_get_query_and_args_for_reading_for_reference_with_main_type():
+    class PartModel(PersistentModel):
+        name: StringIndex
+        description: str
+
+    class PartReference(StringReference[PartModel]):
+        _target_field: ClassVar[str] = 'name'
+
+    class PartInfoModel(PersistentModel):
+        name: StringIndex
+        part: PartReference
+        
+    class PartAttrModel(PersistentModel):
+        name: StringIndex
+        part: PartReference
+
+    update_part_of_forward_refs(PartModel, locals())
+     
+    models = [
+        PartModel(name=StringIndex('part-1'), description='part 1 description'),
+        PartModel(name=StringIndex('part-3'), description='part 4 description'),
+        PartInfoModel(name=StringIndex('part-1 info'), part=PartReference('part-1')),
+        PartInfoModel(name=StringIndex('part-2 info'), part=PartReference('part-2')),
+        PartAttrModel(name=StringIndex('part-1 attr'), part=PartReference('part-1')),
+        PartAttrModel(name=StringIndex('part-3 attr'), part=PartReference('part-3')),
+    ]
+
+    with use_temp_database_cursor_with_model(*models,
+                                             keep_database_when_except=False) as cursor:
+        # simple one
+        query_and_args = get_query_and_args_for_reading(
+            PartModel, ('name'), tuple() )
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'name': 'part-1'},
+            {'name': 'part-3'},
+        ] == cursor.fetchall()
+
+        query_and_args = get_query_and_args_for_reading(
+            PartModel, ('name', 'info.name', 'attr.name'), tuple() , ns_types={'info':PartInfoModel, 'attr':PartAttrModel})
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'name': 'part-1', 'info.name': 'part-1 info', 'attr.name': 'part-1 attr'},
+        ] == cursor.fetchall()
+
+        query_and_args = get_query_and_args_for_reading(
+            PartModel, ('name', 'attr.name'), tuple() , ns_types={'attr':PartInfoModel}, 
+            main_type=PartInfoModel)
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'name': 'part-1', 'attr.name': 'part-1 info'},
+            {'name': None, 'attr.name': 'part-2 info'},
+        ] == cursor.fetchall()
+
 
 
 def test_get_sql_for_upserting_parts_table():
