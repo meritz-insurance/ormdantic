@@ -399,41 +399,80 @@ def test_get_query_and_args_for_deleting():
 
 
 def test_get_query_and_args_for_reading_for_parts():
-    class QContainerModel(IdentifiedModel):
+    class ContainerModel(IdentifiedModel):
         name: FullTextSearchedStringIndex
-        parts: List['QPartModel']
+        parts: List['PartModel']
      
-    class QPartModel(PersistentModel, PartOfMixin[QContainerModel]):
+    class PartModel(PersistentModel, PartOfMixin[ContainerModel]):
         name: FullTextSearchedStringIndex
 
-    update_part_of_forward_refs(QContainerModel, locals())
+    update_part_of_forward_refs(ContainerModel, locals())
 
-    model = QContainerModel(id=UuidStr('@'), 
+    model = ContainerModel(id=UuidStr('@'), 
                            version='0.1.0',
                            name=FullTextSearchedStringIndex('sample'),
                            parts=[
-                               QPartModel(name=FullTextSearchedStringIndex('part1')),
-                               QPartModel(name=FullTextSearchedStringIndex('part2')),
+                               PartModel(name=FullTextSearchedStringIndex('part1')),
+                               PartModel(name=FullTextSearchedStringIndex('part2')),
                            ])
 
     with use_temp_database_cursor_with_model(model, 
                                              keep_database_when_except=False) as cursor:
         model.id = UuidStr("@")
         query_and_args = get_query_and_args_for_reading(
-            QContainerModel, ('id', 'name'), (('name', '=', 'sample'),))
+            ContainerModel, ('id', 'name'), (('name', '=', 'sample'),))
 
         cursor.execute(*query_and_args)
 
         assert [{'id':'@', 'name':'sample'}] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(
-            QPartModel, ('__row_id', '__json', 'name'), tuple())
+            PartModel, ('__row_id', '__json', 'name'), tuple())
 
         cursor.execute(*query_and_args)
 
         assert [
             {'__row_id':1, '__json':'{"name": "part1"}', 'name':'part1'}, 
             {'__row_id':2, '__json':'{"name": "part2"}', 'name':'part2'}
+        ] == cursor.fetchall()
+
+def test_get_query_and_args_for_reading_for_multiple_parts():
+    class ContainerModel(IdentifiedModel):
+        name: FullTextSearchedStringIndex
+        parts: List['PartModel']
+        part: 'PartModel'
+        my_parts: List['PartModel']
+     
+    class PartModel(PersistentModel, PartOfMixin[ContainerModel]):
+        name: FullTextSearchedStringIndex
+
+    update_part_of_forward_refs(ContainerModel, locals())
+
+    model = ContainerModel(id=UuidStr('@'), 
+                           version='0.1.0',
+                           name=FullTextSearchedStringIndex('sample'),
+                           parts=[
+                               PartModel(name=FullTextSearchedStringIndex('part1')),
+                               PartModel(name=FullTextSearchedStringIndex('part2')),
+                           ],
+                           part=PartModel(name=FullTextSearchedStringIndex('part3')),
+                           my_parts=[
+                               PartModel(name=FullTextSearchedStringIndex('part4')),
+                           ])
+
+    with use_temp_database_cursor_with_model(model, 
+                                             keep_database_when_except=False) as cursor:
+        query_and_args = get_query_and_args_for_reading(
+            PartModel, ('__row_id', '__json', 'name'), tuple())
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'__row_id':1, '__json':'{"name": "part1"}', 'name':'part1'}, 
+            {'__row_id':2, '__json':'{"name": "part2"}', 'name':'part2'},
+            # I don't know why __row_id:3 is missed.
+            {'__row_id':4, '__json':'{"name": "part3"}', 'name':'part3'},
+            {'__row_id':5, '__json':'{"name": "part4"}', 'name':'part4'},
         ] == cursor.fetchall()
 
 
@@ -572,8 +611,6 @@ def test_get_query_and_args_for_reading_for_stored_fields():
             {'__row_id':1, '__json':'{"descriptions": ["desc1"]}', 'descriptions':'["desc1"]'}, 
             {'__row_id':2, '__json':'{"descriptions": ["desc1", "desc2"]}', 'descriptions':'["desc1","desc2"]'}, 
         ] == cursor.fetchall()
-
-
 
 
 def test_get_query_and_args_for_reading_for_stored_external_index():
@@ -755,7 +792,7 @@ def test_get_query_and_args_for_reading_for_reference():
         ] == cursor.fetchall()
 
 
-def test_get_query_and_args_for_reading_for_reference_with_main_type():
+def test_get_query_and_args_for_reading_for_reference_with_base_type():
     class PartModel(PersistentModel):
         name: StringIndex
         description: str
@@ -806,7 +843,7 @@ def test_get_query_and_args_for_reading_for_reference_with_main_type():
 
         query_and_args = get_query_and_args_for_reading(
             PartModel, ('name', 'attr.name'), tuple() , ns_types={'attr':PartInfoModel}, 
-            main_type=PartInfoModel)
+            base_type=PartInfoModel)
 
         cursor.execute(*query_and_args)
 

@@ -98,7 +98,6 @@ def join_line(*lines:str | Iterable[str],
 
 
 def _alias_table(old_table:str, table_name:str) -> str:
-    table_name = _normalize_database_object_name(table_name)
     old_table = old_table.strip()
 
     if old_table.startswith('(') and old_table.endswith(')'):
@@ -111,10 +110,10 @@ def _alias_table(old_table:str, table_name:str) -> str:
                 old_table
             ),
             f")",
-            f"AS {table_name}"
+            f"AS {_normalize_database_object_name(table_name)}"
         )
 
-    return f"{old_table} as {table_name}"
+    return f"{old_table} AS {_normalize_database_object_name(table_name)}"
 
 
 
@@ -719,7 +718,7 @@ def get_query_and_args_for_reading(type_:Type[PersistentModelT], fields:Tuple[st
                                    limit : None | int = None,
                                    unwind: Tuple[str, ...] | str = tuple(),
                                    ns_types:Dict[str, Type[PersistentModelT]] | None = None,
-                                   main_type:Optional[Type[PersistentModelT]] = None,
+                                   base_type:Optional[Type[PersistentModelT]] = None,
                                    for_count:bool = False
                                    ):
     '''
@@ -753,7 +752,7 @@ def get_query_and_args_for_reading(type_:Type[PersistentModelT], fields:Tuple[st
             tuple((f, o) for f, o, _ in where), 
             order_by, offset, limit, 
             unwind, 
-            cast(Type, main_type), for_count), 
+            cast(Type, base_type), for_count), 
         _build_database_args(where)
     )
 
@@ -787,7 +786,7 @@ def _get_sql_for_reading(ns_types:Tuple[Tuple[str, Type]],
                          offset: int | None,
                          limit: int | None,
                          unwind: Tuple[str, ...],
-                         main_type: Type[PersistentModelT] | None,
+                         base_type: Type[PersistentModelT] | None,
                          for_count: bool) -> str:
 
     # we will build the core table which has _row_id and fields which
@@ -801,13 +800,13 @@ def _get_sql_for_reading(ns_types:Tuple[Tuple[str, Type]],
 
     # We extract the where conditions which be applied on core table.
     # if the where condition does not have 'IS NULL' condition,
-    # and apply where condition on core table and make main_type as None
+    # and apply where condition on core table and make base_type as None
     # for inner join.
 
     core_query_and_fields : Dict[str, Tuple[str, Tuple[str,...]]] = {}
     field_ops_list = list(field_ops)
 
-    main_table_ns = _get_main_table_namespace(main_type, ns_types)
+    main_table_ns = _get_main_table_namespace(base_type, ns_types)
 
     join_keys = _find_join_keys(ns_types)
 
@@ -1215,9 +1214,9 @@ def _count_row_query(query:str) -> str:
     )
     
 
-def _get_main_table_namespace(main_type:Type, ns_types:Tuple[Tuple[str, Type]]) -> str | None:
+def _get_main_table_namespace(base_type:Type, ns_types:Tuple[Tuple[str, Type]]) -> str | None:
     for prefix, type_ in ns_types:
-        if type_ == main_type:
+        if type_ == base_type:
             return prefix
 
     return None 
@@ -1240,10 +1239,10 @@ def _add_namespace(field:str, ns:str) -> str:
     return field
 
 
-def _build_namespace_types(main_type:Type, join:Dict[str, Type], namespaces:Set[str]) -> Iterator[Tuple[str, Type]]:
-    yield ('', main_type)
+def _build_namespace_types(base_type:Type, join:Dict[str, Type], namespaces:Set[str]) -> Iterator[Tuple[str, Type]]:
+    yield ('', base_type)
 
-    yield from _build_join_from_refs(main_type, '', namespaces)
+    yield from _build_join_from_refs(base_type, '', namespaces)
 
     for field_name, field_type in join.items():
         if any(field_name in ns for ns in namespaces):

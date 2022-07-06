@@ -1,5 +1,3 @@
-from ast import Mod
-from operator import mod
 from typing import (
     Any, ForwardRef, Tuple, Dict, Type, Generic, TypeVar, Iterator, Callable, Optional,
     List, ClassVar, cast, get_args
@@ -19,6 +17,7 @@ from ormdantic.util import (
     get_base_generic_type_of, get_type_args, update_forward_refs_in_generic_base,
     is_derived_from, resolve_forward_ref, is_collection_type_of
 )
+from ormdantic.util.tools import unique
 
 JsonPathAndType = Tuple[Tuple[str,...], Type[Any]]
 StoredFieldDefinitions = Dict[str, JsonPathAndType]
@@ -36,15 +35,15 @@ class StoredMixin():
 
 
 class ReferenceMixin(Generic[ModelT], StoredMixin):
-    ''' refenence key which indicate other row in other table like database foreign key 
-        ModelT will describe the Type which is referenced.
+    ''' refenence key which indicate other row in other table like database's foreign key 
+        ModelT will describe the type which is referenced.
     '''
     _target_field: ClassVar[str] = ''
     pass
 
 
 class IdentifyingMixin(StoredMixin):
-    ''' the json value will be used identify the object. 
+    ''' the json value will be used for identifing the object. 
     The value of this type will be update through the sql param 
     so, this field of database will not use stored feature. '''
     
@@ -131,7 +130,6 @@ class UuidStr(ConstrainedStr, IdentifyingMixin):
             return UuidStr(uuid4().hex)
 
         return self
-
 
 
 class FullTextSearchedStr(ConstrainedStr, FullTextSearchedMixin):
@@ -254,9 +252,11 @@ def is_field_collection_type(type_:Type[ModelT], field_name:str, parameters:Tupl
 
 def get_part_types(type_:Type[ModelT]) -> Tuple[Type]:
     return tuple(
-        model_field.type_
-        for model_field in type_.__fields__.values()
-        if is_derived_from(model_field.type_, PartOfMixin)
+        unique(
+            model_field.type_
+            for model_field in type_.__fields__.values()
+            if is_derived_from(model_field.type_, PartOfMixin)
+        )
     )
         
 
