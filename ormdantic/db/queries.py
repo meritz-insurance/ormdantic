@@ -100,8 +100,8 @@ def join_line(*lines:str | Iterable[str],
 def _alias_table(old_table:str, table_name:str) -> str:
     old_table = old_table.strip()
 
-    if old_table.startswith('(') and old_table.endswith(')'):
-        old_table = old_table[1:-1]
+    #if old_table.startswith('(') and old_table.endswith(')'):
+    #    old_table = old_table[1:-1]
 
     if ' ' in old_table:
         return join_line(
@@ -193,7 +193,7 @@ def get_stored_fields_for_part_of(type_:Type[PersistentModelT]):
 
 
 def _is_come_from_container_field(paths:Tuple[str,...]) -> bool:
-    return bool(paths and paths[0] == '..' and not paths[1].startswith('$'))
+    return bool(len(paths) >= 2 and paths[0] == '..' and not paths[1].startswith('$'))
 
 
 def get_stored_fields_for_external_index(type_:Type[PersistentModelT]):
@@ -312,8 +312,9 @@ def _get_external_index_table_indexes(field_name:str, field_type:Type) -> Iterat
     yield f"""KEY `{_ROW_ID_FIELD}_index` ({field_exprs(_ROW_ID_FIELD)})"""
     yield f"""KEY `{field_name}_index` ({field_exprs(field_name)})"""
 
-    if is_derived_from(field_type, FullTextSearchedMixin):
-        yield f"""FULLTEXT INDEX `ft_index` ({field_exprs(field_name)}) {_FULL_TEXT_SEARCH_OPTION}"""
+    # for external, we don't need full text search index.
+    #if is_derived_from(field_type, FullTextSearchedMixin):
+    #    yield f"""FULLTEXT INDEX `ft_index` ({field_exprs(field_name)}) {_FULL_TEXT_SEARCH_OPTION}"""
 
 
 def _get_field_db_type(type_:Type) -> str:
@@ -617,7 +618,7 @@ def _generate_json_table_for_part_of(json_path: str,
                                      part_json_table_name: str) -> str:
     items = [
         (
-            _resolve_paths_for_part_of(paths, json_path + ('[*]' if is_collection else '')), 
+            [json_path + ('[*]' if is_collection else ''), *paths],
             field_name, field_type
         )
         for field_name, (paths, field_type) in fields.items()
@@ -644,18 +645,16 @@ def _generate_json_table_for_part_of(json_path: str,
 def _generate_json_eval(field_name:str, paths_and_type:Tuple[Tuple[str,...], Type], table_name:str) -> str:
     paths, field_type = paths_and_type
 
-    if paths and paths[0] == '..':
-        if len(paths) != 2:
-            _logger.fatal(f'{field_name=}, {paths=}, {field_type=}. check paths have 2 element.')
-            raise RuntimeError('paths should have 2 items for generating value from container.') 
+    assert  paths and paths[0] == '..'
 
-        if is_collection_type_of(field_type):
-            return f"JSON_EXTRACT({field_exprs(_JSON_FIELD, table_name)}, '{paths[1]}') as {field_exprs(field_name)}"
-        else:
-            return f"JSON_VALUE({field_exprs(_JSON_FIELD, table_name)}, '{paths[1]}') as {field_exprs(field_name)}"
+    if len(paths) != 2:
+        _logger.fatal(f'{field_name=}, {paths=}, {field_type=}. check paths have 2 element.')
+        raise RuntimeError('paths should have 2 items for generating value from container.') 
 
-    _logger.fatal(f'{field_name=}, {paths=}, {field_type=}. invalid paths. paths start with ..')
-    raise RuntimeError(f'invalid paths for field_name:{field_name}')
+    if is_collection_type_of(field_type):
+        return f"JSON_EXTRACT({field_exprs(_JSON_FIELD, table_name)}, '{paths[1]}') as {field_exprs(field_name)}"
+    else:
+        return f"JSON_VALUE({field_exprs(_JSON_FIELD, table_name)}, '{paths[1]}') as {field_exprs(field_name)}"
         
 
 def _generate_select_field_of_json_table(target_fields:Tuple[str,...], 
@@ -699,15 +698,6 @@ def _generate_nested_json_table(first_path:str,
         ),
         f")"
     )
-
-
-def _resolve_paths_for_part_of(paths:Tuple[str, ...], json_path:str) -> List[str]:
-    if paths[0] == '..':
-        resolved = [*paths[1:]]
-    else:
-        resolved = [json_path, *paths]
-
-    return resolved
 
 
 # fields is the json key , it can contain '.' like product.name
@@ -806,7 +796,7 @@ def _get_sql_for_reading(ns_types:Tuple[Tuple[str, Type]],
     core_query_and_fields : Dict[str, Tuple[str, Tuple[str,...]]] = {}
     field_ops_list = list(field_ops)
 
-    main_table_ns = _get_main_table_namespace(base_type, ns_types)
+    base_table_ns = _get_main_table_namespace(base_type, ns_types)
 
     join_keys = _find_join_keys(ns_types)
 
@@ -818,7 +808,7 @@ def _get_sql_for_reading(ns_types:Tuple[Tuple[str, Type]],
         core_fields += _extract_fields_for_order_by(order_by, ns)
 
         if field_ops:
-            main_table_ns = None
+            base_table_ns = None
 
         core_query_and_fields[ns] = _build_query_and_fields_for_core_table(
             ns, ns_type, core_fields,
@@ -830,7 +820,7 @@ def _get_sql_for_reading(ns_types:Tuple[Tuple[str, Type]],
         query_for_base, _ = _build_query_for_base_table(
             ns_types, core_query_and_fields, field_ops,
             tuple(), None, None,
-            main_table_ns
+            base_table_ns
         )
 
         return _count_row_query(query_for_base)
@@ -838,7 +828,7 @@ def _get_sql_for_reading(ns_types:Tuple[Tuple[str, Type]],
         query_for_base, base_fields = _build_query_for_base_table(
             ns_types, core_query_and_fields, field_ops,
             order_by, offset, limit,
-            main_table_ns
+            base_table_ns
         )
 
         return _get_populated_table_query_from_base(
@@ -975,10 +965,14 @@ def _build_where_op(fields_op:Tuple[str, str] | Tuple[str, str, str], ns:str = '
     op = fields_op[1]
     variable = _normalize_database_object_name(ns + (fields_op[2] if len(fields_op) == 3 else fields_op[0]))
 
+    assert op != 'match'
+
     if op == '':
         return field_exprs(field)
-    if op == 'match':
-        return _build_match(fields_op[0], variable, variable)
+    if op == 'is null':
+        return f'{field_exprs(field)} {op}'
+    #if op == 'match':
+    #    return _build_match(fields_op[0], variable, variable)
     else:
         return f'{field_exprs(field)} {op} %({variable})s'
 
@@ -1088,14 +1082,14 @@ def _build_query_for_base_table(ns_types: Tuple[Tuple[str, PersistentModelT],...
                                 order_by: Tuple[str, ...],
                                 offset: int | None,
                                 limit: int | None,
-                                main_table_ns: str | None):
+                                base_table_ns: str | None):
     # 다른 table에 relevance가 있거나 현재 field_ops에 match가 있다면, 
     # order_by마지막에 relevance를 넣어 주어야 한다.
     # base type이 table과 
 
     # '', 'home', 'company', 'home.person', 'company.members'
 
-    joined, fields = _build_join_for_ns(ns_types, core_table_queries, main_table_ns) 
+    joined, fields = _build_join_for_ns(ns_types, core_table_queries, base_table_ns) 
 
     nested_where : Tuple[Tuple[str, str]] = tuple()
 

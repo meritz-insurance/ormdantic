@@ -420,7 +420,7 @@ def test_get_query_and_args_for_reading_for_parts():
                                              keep_database_when_except=False) as cursor:
         model.id = UuidStr("@")
         query_and_args = get_query_and_args_for_reading(
-            ContainerModel, ('id', 'name'), (('name', '=', 'sample'),))
+            ContainerModel, ('id', 'name'), (('name', 'match', 'sample'),))
 
         cursor.execute(*query_and_args)
 
@@ -833,7 +833,8 @@ def test_get_query_and_args_for_reading_for_reference_with_base_type():
         ] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(
-            PartModel, ('name', 'info.name', 'attr.name'), tuple() , ns_types={'info':PartInfoModel, 'attr':PartAttrModel})
+            PartModel, ('name', 'info.name', 'attr.name'), tuple() , 
+            ns_types={'info':PartInfoModel, 'attr':PartAttrModel})
 
         cursor.execute(*query_and_args)
 
@@ -851,6 +852,71 @@ def test_get_query_and_args_for_reading_for_reference_with_base_type():
             {'name': 'part-1', 'attr.name': 'part-1 info'},
             {'name': None, 'attr.name': 'part-2 info'},
         ] == cursor.fetchall()
+
+        query_and_args = get_query_and_args_for_reading(
+            PartModel, ('name', 'attr.name'), (('name', 'is null', None),), 
+            ns_types={'attr':PartInfoModel}, 
+            base_type=PartInfoModel)
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'name': None, 'attr.name': 'part-2 info'},
+        ] == cursor.fetchall()
+        
+
+        query_and_args = get_query_and_args_for_reading(
+            PartModel, ('name', 'attr.name'), tuple() , ns_types={'attr':PartInfoModel}, 
+            base_type=PartModel)
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'name': 'part-1', 'attr.name': 'part-1 info'},
+        ] == cursor.fetchall()
+
+
+def test_get_query_and_args_for_reading_for_where_is_null():
+    class PartModel(PersistentModel):
+        name: StringIndex
+        description: str
+
+    class PartReference(StringReference[PartModel]):
+        _target_field: ClassVar[str] = 'name'
+
+    class PartInfoModel(PersistentModel):
+        name: StringIndex
+        part: PartReference
+        
+    class PartAttrModel(PersistentModel):
+        name: StringIndex
+        part: PartReference
+
+    update_part_of_forward_refs(PartModel, locals())
+     
+    models = [
+        PartModel(name=StringIndex('part-1'), description='part 1 description'),
+        PartModel(name=StringIndex('part-3'), description='part 4 description'),
+        PartInfoModel(name=StringIndex('part-1 info'), part=PartReference('part-1')),
+        PartInfoModel(name=StringIndex('part-2 info'), part=PartReference('part-2')),
+        PartAttrModel(name=StringIndex('part-1 attr'), part=PartReference('part-1')),
+        PartAttrModel(name=StringIndex('part-3 attr'), part=PartReference('part-3')),
+    ]
+
+    with use_temp_database_cursor_with_model(*models,
+                                             keep_database_when_except=False) as cursor:
+        # simple one
+        query_and_args = get_query_and_args_for_reading(
+            PartModel, ('name', 'attr.name'), (('name', 'is null', None),), 
+            ns_types={'attr':PartInfoModel}, 
+            base_type=PartInfoModel)
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'name': None, 'attr.name': 'part-2 info'},
+        ] == cursor.fetchall()
+        
 
 def test_get_query_and_args_for_counting():
     class ContainerModel(IdentifiedModel):
@@ -1088,6 +1154,21 @@ def test_get_sql_for_upserting_external_index_table():
         "WHERE",
         "  `__ORG`.`__root_row_id` = %(__root_row_id)s",
     ) == sqls[3]
+
+
+def test_get_sql_for_upserting_parts_table_throws_if_invalid_path():
+    class InvalidPath(PersistentModel, PartOfMixin['MyModel']):
+        _stored_fields: ClassVar[StoredFieldDefinitions] = {
+            '_invalid': (('..',), StringIndex)
+        }
+
+    class MyModel(PersistentModel):
+        paths: InvalidPath
+
+    update_part_of_forward_refs(InvalidPath, locals())
+
+    with pytest.raises(RuntimeError, match='.*2.*items'):
+        get_sql_for_upserting_parts_table(MyModel)
 
 
 def test_get_query_and_args_for_reading_for_matching():
