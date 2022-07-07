@@ -9,50 +9,54 @@ Managing the persistent Python object which was defined by Pydantic.
 ## Example
 
 ``` python
-# define class which will be save
-class Company(IdentifiedModel):
-    address: FullTextSearchedStringIndex
-    member: List['Person']
-    
-class Person(PersistentModel, PartOfMixin[Company]):
-    _stored_fields: StoredFieldDefinitions = {
-        '_company_address': (('..', '$.address'), FullTextSearchedStringIndex)
+from typing import List, ClassVar
+from datetime import date
+
+import ormdantic as od
+
+class Person(od.PersistentModel, od.PartOfMixin['Company']):
+    _stored_fields: ClassVar[od.StoredFieldDefinitions] = {
+        '_company_address': (('..', '$.address'), od.StringIndex)
     }
 
-    name: StringIndex
-    birth_date: date
+    name: od.StringIndex
+    birth_date : date
 
-# resolving ForwardRef 
-update_part_of_forward_refs(Company, locals())
 
-....
+class Company(od.IdentifiedModel):
+    address: od.FullTextSearchedStringIndex
+    members: List[Person]
 
-pool = DbConnectionPool(config)
+od.update_part_of_forward_refs(Person, locals())
 
-# create_table should be called once.
-create_table(pool, Company)
+pool = od.DatabaseConnectionPool({
+    'user':'orm',
+    'password': 'iamroot',
+    'database': 'json_storage',
+    'host':'localhost',
+    'port':3306
+})
 
-# create instance
-one_company = Company(
-    address='California'
-    members = [
-        Person(name='Steve Jobs', birth_date=date(1955, 2, 24))
-        Person(name='Steve Wozniak', birth_date=date(1950, 9, 11))
+od.create_table(pool, Company)
+
+
+apple_company = Company.parse_obj({
+    'address':'California', 
+    'members':[
+        {'name':'Steve Jobs', 'birth_date':'1955-02-24'},
+        {'name':'Steve Wozniak', 'birth_date':'1950-09-11'},
     ]
-)
+})
 
-# insert or update by id in IdentifiedModel. The instance of PartOfMixin could not be saved directly.
-one_company = upsert_objects(pool, one_company)
+apple_company = od.upsert_objects(pool, apple_company)
 
-one_company.members[1].birth_date=date(1950, 8, 11)
+apple_company.members[1].birth_date = date(1950, 8, 11)
 
-upsert_objects(pool, one_compay)
+od.upsert_objects(pool, apple_company)
 
-# find entry.
-companies_in_california = find_objects(pool, Company, ('address', 'match', '+California'))
+companies_in_california = od.find_objects(pool, Company, (('address', 'match', '+California'),))
 
-persons = find_objects(pool, Person, ('_company_address', '=', 'California'))
-persons = find_objects(pool, Person, ('name', 'like', '%Stev%'))
+persons = od.find_objects(pool, Person, (('name', 'like', '%Stev'),))
 
 ```
 
