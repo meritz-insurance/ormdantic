@@ -613,7 +613,7 @@ def test_get_query_and_args_for_reading_for_stored_fields():
         ] == cursor.fetchall()
 
 
-def test_get_query_and_args_for_reading_for_stored_external_index():
+def test_get_query_and_args_for_reading_for_explicit_external_index():
     class MemberModel(SchemaBaseModel):
         name: str
 
@@ -1081,7 +1081,7 @@ def test_get_query_and_args_for_reading_for_matching():
         "            `__ORG`.`__row_id`,",
         "            MATCH (`__ORG`.`order`,`__ORG`.`name`) AGAINST (%(ORDER_NAME)s IN BOOLEAN MODE) as `__relevance`",
         "          FROM",
-        "            model_MyModel as __ORG",
+        "            model_MyModel AS __ORG",
         "        )",
         "        AS __BASE",
         "    )",
@@ -1093,7 +1093,7 @@ def test_get_query_and_args_for_reading_for_matching():
         "    LIMIT 100000000000",
         "  )",
         "  AS _BASE",
-        "  JOIN model_MyModel as _MAIN ON `_BASE`.`__row_id` = `_MAIN`.`__row_id`"
+        "  JOIN model_MyModel AS _MAIN ON `_BASE`.`__row_id` = `_MAIN`.`__row_id`"
     ) == sql
 
     assert {
@@ -1132,7 +1132,7 @@ def test_get_query_and_args_for_reading_for_order_by():
         "            `__ORG`.`order`,",
         "            `__ORG`.`name`",
         "          FROM",
-        "            model_MyModel as __ORG",
+        "            model_MyModel AS __ORG",
         "        )",
         "        AS __BASE",
         "    )",
@@ -1165,7 +1165,7 @@ def test_build_query_for_core_table():
         '  `__ORG`.`codes`,',
         '  `__ORG`.`name`',
         'FROM',
-        '  model_Model as __ORG',
+        '  model_Model AS __ORG',
         'WHERE',
         '  `__ORG`.`codes` = %(CODES)s',
         '  AND `__ORG`.`name` != %(NAME)s'
@@ -1192,8 +1192,8 @@ def test_build_query_for_core_table_for_unwind():
         '  `__ORG`.`name` AS `ns.name`,',
         '  `__UNWIND_CODES`.`codes` AS `ns.codes`',
         'FROM',
-        '  model_Model as __ORG',
-        '  LEFT JOIN model_Model_codes as __UNWIND_CODES ON `__ORG`.`__row_id` = `__UNWIND_CODES`.`__row_id`',
+        '  model_Model AS __ORG',
+        '  LEFT JOIN model_Model_codes AS __UNWIND_CODES ON `__ORG`.`__row_id` = `__UNWIND_CODES`.`__row_id`',
         'WHERE',
         '  `__UNWIND_CODES`.`codes` = %(NS_CODES)s',
         '  AND `__ORG`.`name` != %(NS_NAME)s'
@@ -1220,8 +1220,8 @@ def test_build_query_for_core_table_for_match():
         '  `__UNWIND_CODES`.`codes` AS `ns.codes`,',
         '  MATCH (`__ORG`.`name`,`__ORG`.`description`) AGAINST (%(NAME_DESCRIPTION)s IN BOOLEAN MODE) as `ns.__relevance`',
         'FROM',
-        '  model_Model as __ORG',
-        '  LEFT JOIN model_Model_codes as __UNWIND_CODES ON `__ORG`.`__row_id` = `__UNWIND_CODES`.`__row_id`',
+        '  model_Model AS __ORG',
+        '  LEFT JOIN model_Model_codes AS __UNWIND_CODES ON `__ORG`.`__row_id` = `__UNWIND_CODES`.`__row_id`',
         'WHERE',
         '  `__UNWIND_CODES`.`codes` = %(NS_CODES)s',
     ) == query
@@ -1246,7 +1246,7 @@ def test_build_query_for_core_table_for_multiple_match():
         '  `__ORG`.`__row_id`,',
         '  MATCH (`__ORG`.`name`) AGAINST (%(NAME)s IN BOOLEAN MODE) + MATCH (`__ORG`.`description`) AGAINST (%(DESCRIPTION)s IN BOOLEAN MODE) as `__relevance`',
         'FROM',
-        '  model_Model as __ORG',
+        '  model_Model AS __ORG',
     ) == query
 
     assert ('__row_id', _RELEVANCE_FIELD) == fields

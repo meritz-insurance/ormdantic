@@ -68,12 +68,12 @@ def upsert_objects(pool:DbConnectionPool, models:PersistentModelT | Iterable[Per
     return targets[0] if is_single else targets
 
 
-def delete_objects(pool:DbConnectionPool, type_:Type[ModelT], where:Where):
+def delete_objects(pool:DbConnectionPool, type_:Type[PersistentModelT], where:Where):
     with pool.open_cursor(True) as cursor:
         cursor.execute(*get_query_and_args_for_deleting(type_, where))
 
 
-def find_object(pool:DbConnectionPool, type_:Type[ModelT], where:Where) -> Optional[ModelT]:
+def find_object(pool:DbConnectionPool, type_:Type[PersistentModelT], where:Where) -> Optional[ModelT]:
     objs = list(query_records(pool, type_, where, 2))
 
     if len(objs) == 2:
@@ -86,7 +86,7 @@ def find_object(pool:DbConnectionPool, type_:Type[ModelT], where:Where) -> Optio
     return None
 
 
-def find_objects(pool:DbConnectionPool, type_:Type[ModelT], where:Where, 
+def find_objects(pool:DbConnectionPool, type_:Type[PersistentModelT], where:Where, 
                          fetch_size: Optional[int] = None) -> Iterator[ModelT]:
 
     for record in query_records(pool, type_, where, fetch_size):
