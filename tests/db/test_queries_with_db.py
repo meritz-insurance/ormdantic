@@ -1,26 +1,15 @@
-from typing import Type, List, ClassVar
-import pytest
-from decimal import Decimal
-from datetime import date, datetime
-
-from pydantic import condecimal, constr, Field
+from typing import List, ClassVar
 
 from ormdantic.schema import PersistentModel
 from ormdantic.db.queries import (
-    get_sql_for_upserting_external_index_table, get_stored_fields, get_table_name, 
-    get_sql_for_creating_table, _get_field_db_type, _generate_json_table_for_part_of,
-    _build_query_and_fields_for_core_table, field_exprs,
     get_query_and_args_for_upserting, get_query_and_args_for_reading,
-    get_query_and_args_for_deleting, get_sql_for_upserting_parts_table, 
-    join_line, 
-    _build_namespace_types, _find_join_keys, _extract_fields,
-    _ENGINE, _RELEVANCE_FIELD
+    get_query_and_args_for_deleting, 
 )
 from ormdantic.schema.base import (
-    IntegerArrayIndex, SchemaBaseModel, StringArrayIndex, FullTextSearchedStringIndex, 
-    FullTextSearchedStr, PartOfMixin, StringReference, 
-    UniqueStringIndex, StringIndex, DecimalIndex, IntIndex, DateIndex,
-    DateTimeIndex, update_part_of_forward_refs, IdentifiedModel, UuidStr, 
+    SchemaBaseModel, StringArrayIndex, FullTextSearchedStringIndex, 
+    PartOfMixin, StringReference, 
+    StringIndex, 
+    update_part_of_forward_refs, IdentifiedModel, UuidStr, 
     StoredFieldDefinitions
 )
 
@@ -629,3 +618,37 @@ def test_get_query_and_args_for_counting():
         assert [
             {'COUNT':4}
         ] == cursor.fetchall()
+
+
+def test_get_query_and_args_for_reading_with_limit():
+    class PartModel(PersistentModel):
+        name: StringIndex
+        description: str
+
+    models = [
+        PartModel(name=StringIndex('part-1'), description='part 1 description'),
+        PartModel(name=StringIndex('part-2'), description='part 2 description'),
+        PartModel(name=StringIndex('part-3'), description='part 3 description'),
+        PartModel(name=StringIndex('part-4'), description='part 4 description'),
+        PartModel(name=StringIndex('part-5'), description='part 5 description'),
+        PartModel(name=StringIndex('part-6'), description='part 6 description'),
+        PartModel(name=StringIndex('part-7'), description='part 7 description'),
+        PartModel(name=StringIndex('part-8'), description='part 8 description'),
+    ]
+
+    with use_temp_database_cursor_with_model(*models,
+                                             keep_database_when_except=False) as cursor:
+        # simple one
+        query_and_args = get_query_and_args_for_reading(
+            PartModel, ('name',), tuple(),
+            offset=2, limit=4, order_by='name')
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'name': 'part-3'},
+            {'name': 'part-4'},
+            {'name': 'part-5'},
+            {'name': 'part-6'},
+        ] == cursor.fetchall()
+        

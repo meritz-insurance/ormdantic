@@ -92,13 +92,6 @@ CREATE TABLE IF NOT EXISTS `model_SampleModel` (
  * support python 3.10+ only.
 
 ## TODO
- * external in various reference.
-  * find_join_key
-  * count_row_query 
-  * match 
-  * is null will be applied the base table.
-
- * order by, offset, limit test.
 
  * reduce join if it is not necessary.
    if there is not limit, we don't need to join table with base table.

@@ -938,6 +938,8 @@ def _build_where(field_and_ops:FieldOp | Tuple[Tuple[str, str, str]], ns:str = '
 
 def _build_limit_and_offset(limit:int| None, offset:int|None) -> str:
     query = f'LIMIT {limit}' if limit else ''
+    if query:
+        query += ' ' 
     query +=f'OFFSET {offset}' if offset else ''
 
     return query

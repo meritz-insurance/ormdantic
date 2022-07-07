@@ -10,17 +10,17 @@ from ormdantic.db.queries import (
     get_sql_for_upserting_external_index_table, get_stored_fields, get_table_name, 
     get_sql_for_creating_table, _get_field_db_type, _generate_json_table_for_part_of,
     _build_query_and_fields_for_core_table, field_exprs,
-    get_query_and_args_for_upserting, get_query_and_args_for_reading,
-    get_query_and_args_for_deleting, get_sql_for_upserting_parts_table, 
+    get_query_and_args_for_reading,
+    get_sql_for_upserting_parts_table, 
     join_line, 
     _build_namespace_types, _find_join_keys, _extract_fields,
     _ENGINE, _RELEVANCE_FIELD
 )
 from ormdantic.schema.base import (
-    IntegerArrayIndex, SchemaBaseModel, StringArrayIndex, FullTextSearchedStringIndex, 
+    IntegerArrayIndex, StringArrayIndex, FullTextSearchedStringIndex, 
     FullTextSearchedStr, PartOfMixin, StringReference, 
     UniqueStringIndex, StringIndex, DecimalIndex, IntIndex, DateIndex,
-    DateTimeIndex, update_part_of_forward_refs, IdentifiedModel, UuidStr, 
+    DateTimeIndex, update_part_of_forward_refs, UuidStr, 
     StoredFieldDefinitions
 )
 
