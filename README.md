@@ -56,63 +56,6 @@ od.upsert_objects(pool, apple_company)
 
 companies_in_california = od.find_objects(pool, Company, (('address', 'match', '+California'),))
 
-persons = od.find_objects(pool, Person, (('name', 'like', '%Stev'),))
+persons = od.find_objects(pool, Person, (('name', 'like', '%Stev%'),))
 
 ```
-
-## StoredMixin
-StoredMixin indicate the json key the value of which will be saved on the database field.
-
-StringIndex, FullTextSearchedStringIndex is derived from StoredMixin. 
-The field which is declared as \*Index, ormdantic make the fields which hold the value and create the index also.
-
-The table will be defined as following if you will use the StoredMxin.
-
-``` python
-class SampleModel(PersistentModel):
-   name: StringIndex
-```
-
-The model will generate following the sql.
-
-``` sql
-CREATE TABLE IF NOT EXISTS `model_SampleModel` (
-  `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`)),
-  `name` VARCHAR(200) AS (JSON_VALUE(`__json`, '$.name')) STORED,  
-  KEY `name_index` (`name`)
-)
-```
-
-## Explicit Stored Fields
-
-## StringArrayIndex
-
-## offset, limit and PartOfMixin
-
-## Reference 
-## Note
- * implemented for mariadb only.
- * support python 3.10+ only.
-
-## TODO
-
- * reduce join if it is not necessary.
-   if there is not limit, we don't need to join table with base table.
-
- * where support partof stored fields
-   - wheres = ('persons.name', '=', 'steve')
-
- * cache
-   - pydantic object validation is a little bit slow.
-   - raw dictionary or validated python object.
-
- * derived class, cache, audit, bitemporal
-
- * separated 'part of' object
-   - shared by content. 
-
- * shadow model which is duplicated or can be generated.
-
-  * detect the fields is not existed in model.
-

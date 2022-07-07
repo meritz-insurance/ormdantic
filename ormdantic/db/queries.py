@@ -42,6 +42,7 @@ _JSON_FIELD = '__json'
 _JSON_PATH_FIELD = '__json_path'
 _PART_ORDER_FIELD = '__part_order'
 _RELEVANCE_FIELD = '__relevance'
+_MODEL_TABLE_PREFIX = 'model'
 
 # for cjk full text search (mroonga). It seemed to be slow that records are inserted in mroonga.
 # _ENGINE = r""" ENGINE=mroonga COMMENT='engine "innodb" DEFAULT CHARSET=utf8'"""
@@ -55,7 +56,7 @@ FieldOp = Tuple[Tuple[str, str]]
 _logger = get_logger(__name__)
 
 def get_table_name(type_:Type[PersistentModelT], postfix:str = ''):
-    return f'model_{type_.__name__}{"_" + postfix if postfix else ""}' 
+    return f'{_MODEL_TABLE_PREFIX}_{type_.__name__}{"_" + postfix if postfix else ""}' 
 
 
 @overload
