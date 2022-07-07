@@ -14,7 +14,7 @@ _logger = get_logger(__name__)
 DATABASE = 'database'
 PASSWORD = 'password'
 
-class DbConnectionPool():
+class DatabaseConnectionPool():
     # connect will make database connection object. if you finish to use,
     # it will be saved in self._connections for reuse it.
 

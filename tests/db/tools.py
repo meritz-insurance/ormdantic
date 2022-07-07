@@ -4,7 +4,7 @@ from pymysql import Connection, connect
 from pymysql.cursors import DictCursor
 from contextlib import contextmanager
 
-from ormdantic.db import DbConnectionPool, create_table, upsert_objects
+from ormdantic.db import DatabaseConnectionPool, create_table, upsert_objects
 from ormdantic.db.connectionpool import DATABASE, PASSWORD
 
 from ormdantic.schema.base import PersistentModel, get_part_types
@@ -44,13 +44,13 @@ def use_temp_database(database_name:str) -> Iterator[Connection]:
  
 
 @contextmanager
-def use_random_database_pool(keep_database_when_except:bool = False) -> Iterator[DbConnectionPool]:
+def use_random_database_pool(keep_database_when_except:bool = False) -> Iterator[DatabaseConnectionPool]:
     database_name = f'TEST_{uuid4().hex}'
 
     with _create_database(database_name) as connection:
         config = _config | {DATABASE: database_name}
 
-        pool = DbConnectionPool(config)
+        pool = DatabaseConnectionPool(config)
 
         try:
             yield pool
@@ -87,7 +87,7 @@ def _drop_database(connection : Connection, database_name:str) -> None:
 
 
 @contextmanager
-def use_temp_database_pool_with_model(*args:Type) -> Iterator[DbConnectionPool]:
+def use_temp_database_pool_with_model(*args:Type) -> Iterator[DatabaseConnectionPool]:
     with use_random_database_pool() as pool:
         create_table(pool, *args)
 

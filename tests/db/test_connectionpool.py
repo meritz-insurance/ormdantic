@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from pymysql.cursors import DictCursor
 
-from ormdantic.db.connectionpool import DbConnectionPool
+from ormdantic.db.connectionpool import DatabaseConnectionPool
 
 from .tools import (
     use_temp_database, use_random_database_pool, 
@@ -133,7 +133,7 @@ def test_del():
     database_name = f'TEST_{uuid4().hex}'
 
     with use_temp_database(database_name) as connection:
-        pool = DbConnectionPool(get_database_config(database_name))
+        pool = DatabaseConnectionPool(get_database_config(database_name))
         
         with pool.open_cursor() as cursor:
             cursor.execute('select 1')
@@ -165,7 +165,7 @@ def test_del():
 def test_str():
     database_name = f'TEST_{uuid4().hex}'
 
-    pool = DbConnectionPool(get_database_config(database_name))
+    pool = DatabaseConnectionPool(get_database_config(database_name))
 
     assert str(pool).startswith(f'DbConnectionPool(config=')
     assert 'cached' in str(pool)

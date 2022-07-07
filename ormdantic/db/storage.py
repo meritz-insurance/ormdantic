@@ -1,7 +1,7 @@
 from typing import Optional, Iterable, Type, Iterator, Dict, Any, Tuple, overload
 from collections import deque
 
-from .connectionpool import DbConnectionPool
+from .connectionpool import DatabaseConnectionPool
 
 from ..schema import ModelT, PersistentModel, get_container_type
 from ..schema.base import (
@@ -30,21 +30,21 @@ def build_where(items:Iterator[Tuple[str, str]] | Iterable[Tuple[str, str]]) -> 
     return tuple((item[0], '=', item[1]) for item in items)
 
        
-def create_table(pool:DbConnectionPool, *types:Type[PersistentModelT]):
+def create_table(pool:DatabaseConnectionPool, *types:Type[PersistentModelT]):
     with pool.open_cursor(True) as cursor:
         for type_ in _iterate_types_for_creating_order(types):
             for sql in get_sql_for_creating_table(type_):
                 cursor.execute(sql)
 
 @overload
-def upsert_objects(pool:DbConnectionPool, models:PersistentModelT) -> PersistentModelT:
+def upsert_objects(pool:DatabaseConnectionPool, models:PersistentModelT) -> PersistentModelT:
     ...
 
 @overload
-def upsert_objects(pool:DbConnectionPool, models:Iterable[PersistentModelT]) -> Tuple[PersistentModelT,...]:
+def upsert_objects(pool:DatabaseConnectionPool, models:Iterable[PersistentModelT]) -> Tuple[PersistentModelT,...]:
     ...
 
-def upsert_objects(pool:DbConnectionPool, models:PersistentModelT | Iterable[PersistentModelT]):
+def upsert_objects(pool:DatabaseConnectionPool, models:PersistentModelT | Iterable[PersistentModelT]):
     is_single = isinstance(models, PersistentModel)
 
     model_list = [models] if is_single else models
@@ -68,12 +68,12 @@ def upsert_objects(pool:DbConnectionPool, models:PersistentModelT | Iterable[Per
     return targets[0] if is_single else targets
 
 
-def delete_objects(pool:DbConnectionPool, type_:Type[PersistentModelT], where:Where):
+def delete_objects(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:Where):
     with pool.open_cursor(True) as cursor:
         cursor.execute(*get_query_and_args_for_deleting(type_, where))
 
 
-def find_object(pool:DbConnectionPool, type_:Type[PersistentModelT], where:Where) -> Optional[ModelT]:
+def find_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:Where) -> Optional[ModelT]:
     objs = list(query_records(pool, type_, where, 2))
 
     if len(objs) == 2:
@@ -86,7 +86,7 @@ def find_object(pool:DbConnectionPool, type_:Type[PersistentModelT], where:Where
     return None
 
 
-def find_objects(pool:DbConnectionPool, type_:Type[PersistentModelT], where:Where, 
+def find_objects(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:Where, 
                          fetch_size: Optional[int] = None) -> Iterator[ModelT]:
 
     for record in query_records(pool, type_, where, fetch_size):
@@ -113,7 +113,7 @@ def convert_dict_to_model(type_:Type[ModelT], record:Dict[str, Any]) -> ModelT:
 # The base table will be join other table which can produce the fields which are targeted.
 # So, JSON_EXTRACT will be call on restrcited row.
 #
-def query_records(pool: DbConnectionPool, 
+def query_records(pool: DatabaseConnectionPool, 
                   type_: Type[PersistentModelT], 
                   where: Where,
                   fetch_size: Optional[int] = None,
