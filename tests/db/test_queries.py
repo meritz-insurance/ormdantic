@@ -1,4 +1,4 @@
-from typing import Container, Type, List, ClassVar
+from typing import Type, List, ClassVar
 import pytest
 from decimal import Decimal
 from datetime import date, datetime
@@ -852,6 +852,43 @@ def test_get_query_and_args_for_reading_for_reference_with_base_type():
             {'name': None, 'attr.name': 'part-2 info'},
         ] == cursor.fetchall()
 
+def test_get_query_and_args_for_counting():
+    class ContainerModel(IdentifiedModel):
+        name: FullTextSearchedStringIndex
+        parts: List['PartModel']
+        part: 'PartModel'
+        my_parts: List['PartModel']
+     
+    class PartModel(PersistentModel, PartOfMixin[ContainerModel]):
+        name: FullTextSearchedStringIndex
+
+    update_part_of_forward_refs(ContainerModel, locals())
+
+    model = ContainerModel(id=UuidStr('@'), 
+                           version='0.1.0',
+                           name=FullTextSearchedStringIndex('sample'),
+                           parts=[
+                               PartModel(name=FullTextSearchedStringIndex('part1')),
+                               PartModel(name=FullTextSearchedStringIndex('part2')),
+                           ],
+                           part=PartModel(name=FullTextSearchedStringIndex('part3')),
+                           my_parts=[
+                               PartModel(name=FullTextSearchedStringIndex('part4')),
+                           ])
+
+    with use_temp_database_cursor_with_model(model,
+                                             keep_database_when_except=False) as cursor:
+
+        query_and_args = get_query_and_args_for_reading(
+            PartModel, ('*',), tuple(),
+            base_type=PartModel, for_count=True)
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'COUNT':4}
+        ] == cursor.fetchall()
+
 
 
 def test_get_sql_for_upserting_parts_table():
@@ -1348,5 +1385,6 @@ def test_find_join_keys():
         ('start.code.name', ReferencedByName)
     ))
 
+    with pytest.raises(RuntimeError):
+        _find_join_keys((('',StartModel),('name', ReferencedByName)))
 
-   

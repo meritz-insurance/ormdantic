@@ -87,23 +87,16 @@ CREATE TABLE IF NOT EXISTS `model_SampleModel` (
 ## offset, limit and PartOfMixin
 
 ## Reference 
- 
 ## Note
  * implemented for mariadb only.
  * support python 3.10+ only.
 
 ## TODO
- * test case for external index.
-	external index of sub-part
-
  * external in various reference.
   * find_join_key
-  * main_type 
   * count_row_query 
   * match 
   * is null will be applied the base table.
-
- * main_type이 있는 경우 join 처리
 
  * order by, offset, limit test.
 
@@ -124,4 +117,5 @@ CREATE TABLE IF NOT EXISTS `model_SampleModel` (
 
  * shadow model which is duplicated or can be generated.
 
+  * detect the fields is not existed in model.
 

@@ -8,7 +8,7 @@ from ormdantic.db import DbConnectionPool, create_table, upsert_objects
 from ormdantic.db.connectionpool import DATABASE, PASSWORD
 
 from ormdantic.schema.base import PersistentModel, get_part_types
-from ormdantic.util import is_derived_from
+from ormdantic.util import is_derived_from, get_logger
 
 _config = {
     'user':'orm',
@@ -17,6 +17,8 @@ _config = {
     'host':'localhost',
     'port':33069
 }
+
+_logger = get_logger(__name__)
 
 def get_database_config(database_name:Optional[str] = None) -> Dict[str, Any]:
     if database_name:
@@ -56,6 +58,8 @@ def use_random_database_pool(keep_database_when_except:bool = False) -> Iterator
             pool.close_all()
             if not keep_database_when_except:
                 _drop_database(connection, database_name)
+            else:
+                _logger.info(f'{database_name} is remained. please remove it after investigation.')
 
             raise
         else:
@@ -105,7 +109,7 @@ def use_temp_database_cursor_with_model(*models:PersistentModel,
                 types.add(type_)
                 types.update(get_part_types(type_))
             else:
-                raise TypeError(f'{type_} is not derived from SchemaBaseModel')
+                raise TypeError(f'{type_} is not derived from PersistentModel')
 
         create_table(pool, *types)
 

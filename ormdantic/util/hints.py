@@ -63,12 +63,12 @@ def update_forward_refs_in_generic_base(type_:Type, localns:Dict[str, Any]):
 
     if hasattr(type_, '__orig_bases__'):
         type_.__orig_bases__ = tuple(
-            _resolve_base_or_args(base, localns) for base in type_.__orig_bases__)
+            resolve_forward_ref_in_args(base, localns) for base in type_.__orig_bases__)
 
                 
-def _resolve_base_or_args(base:Type, localns:Dict[str, Any]) -> Type:
-    if is_derived_from(base, Generic) and any(type(arg) is ForwardRef for arg in base.__args__):
-        new_type = copy.copy(base)
+def resolve_forward_ref_in_args(base:Type, localns:Dict[str, Any]) -> Type:
+    if hasattr(base, '__args__') and any(type(arg) is ForwardRef for arg in base.__args__):
+        new_type = copy.deepcopy(base)
         new_type.__args__ = tuple(resolve_forward_ref(arg, localns) for arg in base.__args__)
 
         return new_type

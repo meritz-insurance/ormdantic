@@ -38,6 +38,14 @@ class DbConnectionPool():
         with self.connect() as connection:
             cur = connection.cursor(DictCursor)
 
+            old = cur.execute
+
+            def _execute_and_log(*args, **kwds):
+                _logger.debug(args)
+                return old(*args, **kwds)
+
+            cur.execute = _execute_and_log
+
             try:
                 yield cur
 

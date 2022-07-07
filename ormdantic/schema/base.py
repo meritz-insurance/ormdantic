@@ -6,6 +6,7 @@ import datetime
 import inspect
 import functools
 from uuid import uuid4
+import copy
 
 import orjson
 
@@ -17,6 +18,7 @@ from ormdantic.util import (
     get_base_generic_type_of, get_type_args, update_forward_refs_in_generic_base,
     is_derived_from, resolve_forward_ref, is_collection_type_of
 )
+from ormdantic.util.hints import resolve_forward_ref_in_args
 from ormdantic.util.tools import unique
 
 JsonPathAndType = Tuple[Tuple[str,...], Type[Any]]
@@ -228,21 +230,16 @@ def get_field_name_and_type(type_:Type[ModelT],
             yield (field_name, model_field.outer_type_)
 
 def update_part_of_forward_refs(type_:Type[ModelT], localns:Dict[str, Any]):
-    update_forward_refs_in_generic_base(type_, localns)
-
     type_.update_forward_refs(**localns)
 
     # resolve outer type also,
     for model_field in type_.__fields__.values(): 
         if isinstance(model_field.outer_type_, ForwardRef):
             model_field.outer_type_ = resolve_forward_ref(model_field.outer_type_, localns)
+        else:
+            model_field.outer_type_ = resolve_forward_ref_in_args(model_field.outer_type_, localns)
         
-        parameters = get_args(model_field.outer_type_)
-
-        if parameters:
-            model_field.outer_type_.__args__ = tuple(resolve_forward_ref(p, localns) for p in parameters)
-
-
+    update_forward_refs_in_generic_base(type_, localns)
 
 def is_field_collection_type(type_:Type[ModelT], field_name:str, parameters:Tuple[Type,...] | Type = tuple()) -> bool:
     model_field = type_.__fields__[field_name]

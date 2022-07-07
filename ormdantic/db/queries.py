@@ -1208,7 +1208,7 @@ def _build_join_for_ns(ns_types: Tuple[Tuple[str, PersistentModelT],...],
 def _count_row_query(query:str) -> str:
     return join_line(
         'SELECT',
-        '  *',
+        '  COUNT(*) AS COUNT',
         'FROM',
         _alias_table(query, 'FOR_COUNT')
     )
