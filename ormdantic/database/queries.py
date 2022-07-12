@@ -42,7 +42,7 @@ _JSON_FIELD = '__json'
 _JSON_PATH_FIELD = '__json_path'
 _PART_ORDER_FIELD = '__part_order'
 _RELEVANCE_FIELD = '__relevance'
-_MODEL_TABLE_PREFIX = 'model'
+_MODEL_TABLE_PREFIX = 'md'
 
 # for cjk full text search (mroonga). It seemed to be slow that records are inserted in mroonga.
 # _ENGINE = r""" ENGINE=mroonga COMMENT='engine "innodb" DEFAULT CHARSET=utf8'"""
@@ -389,9 +389,14 @@ def _generate_key_definition(type_:Type) -> str:
 
 
 def get_query_and_args_for_upserting(model:PersistentModel):
-    query_args = {
-        f: getattr(model, f) for f in _get_identifying_fields(type(model))
-    }
+    if model._row_id:
+        query_args = {
+            _ROW_ID_FIELD: model._row_id
+        }
+    else:
+        query_args = {
+            f: getattr(model, f) for f in _get_identifying_fields(type(model))
+        }
 
     query_args[_JSON_FIELD] = model.json()
 

@@ -2,11 +2,11 @@ from typing import ForwardRef, Generic, List, TypeVar, Tuple
 
 import pytest
 
-from ormdantic.schema.base import PartOfMixin, PersistentModel
 from ormdantic.util import (
     get_base_generic_type_of, get_type_args, get_mro_with_generic, 
     resolve_forward_ref, update_forward_refs_in_generic_base, is_derived_from, is_collection_type_of
 )
+from ormdantic.schema.base import PartOfMixin, PersistentModel
 
 T = TypeVar('T')
 

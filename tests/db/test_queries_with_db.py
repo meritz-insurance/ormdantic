@@ -1,7 +1,7 @@
 from typing import List, ClassVar
 
 from ormdantic.schema import PersistentModel
-from ormdantic.db.queries import (
+from ormdantic.database.queries import (
     get_query_and_args_for_upserting, get_query_and_args_for_reading,
     get_query_and_args_for_deleting, 
 )

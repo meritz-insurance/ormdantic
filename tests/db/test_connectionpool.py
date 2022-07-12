@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from pymysql.cursors import DictCursor
 
-from ormdantic.db.connectionpool import DatabaseConnectionPool
+from ormdantic.database import DatabaseConnectionPool
 
 from .tools import (
     use_temp_database, use_random_database_pool, 

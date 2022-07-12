@@ -11,8 +11,8 @@ from ..util import get_logger
 
 _logger = get_logger(__name__)
 
-DATABASE = 'database'
-PASSWORD = 'password'
+_DATABASE = 'database'
+_PASSWORD = 'password'
 
 class DatabaseConnectionPool():
     # connect will make database connection object. if you finish to use,
@@ -20,7 +20,7 @@ class DatabaseConnectionPool():
 
     @property
     def database_name(self):
-        return self._connection_config[DATABASE]
+        return self._connection_config[_DATABASE]
 
     def __init__(self, config:Dict[str, Any]):
         self._connection_config = config

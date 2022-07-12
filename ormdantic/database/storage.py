@@ -1,7 +1,7 @@
 from typing import Optional, Iterable, Type, Iterator, Dict, Any, Tuple, overload
 from collections import deque
 
-from .connectionpool import DatabaseConnectionPool
+from .connections import DatabaseConnectionPool
 
 from ..schema import ModelT, PersistentModel, get_container_type
 from ..schema.base import (
@@ -73,7 +73,7 @@ def delete_objects(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], wh
         cursor.execute(*get_query_and_args_for_deleting(type_, where))
 
 
-def find_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:Where) -> Optional[ModelT]:
+def find_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:Where) -> Optional[PersistentModelT]:
     objs = list(query_records(pool, type_, where, 2))
 
     if len(objs) == 2:
@@ -87,14 +87,19 @@ def find_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where
 
 
 def find_objects(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:Where, 
-                         fetch_size: Optional[int] = None) -> Iterator[ModelT]:
+                         fetch_size: Optional[int] = None) -> Iterator[PersistentModelT]:
 
-    for record in query_records(pool, type_, where, fetch_size):
+    for record in query_records(pool, type_, where, fetch_size, fields=(_JSON_FIELD, _ROW_ID_FIELD)):
         yield convert_dict_to_model(type_, record)
 
 
-def convert_dict_to_model(type_:Type[ModelT], record:Dict[str, Any]) -> ModelT:
-    return type_.parse_raw(record[_JSON_FIELD].encode())
+def convert_dict_to_model(type_:Type[PersistentModelT], record:Dict[str, Any]) -> PersistentModelT:
+    model = type_.parse_raw(record[_JSON_FIELD].encode())
+    model._row_id = record[_ROW_ID_FIELD]
+
+    return model
+
+
 
 
 # In where or fields, the nested expression for json path can be used.

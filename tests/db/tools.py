@@ -4,16 +4,16 @@ from pymysql import Connection, connect
 from pymysql.cursors import DictCursor
 from contextlib import contextmanager
 
-from ormdantic.db import DatabaseConnectionPool, create_table, upsert_objects
-from ormdantic.db.connectionpool import DATABASE, PASSWORD
+from ormdantic.database import DatabaseConnectionPool, create_table, upsert_objects
+from ormdantic.database.connections import _DATABASE, _PASSWORD
 
 from ormdantic.schema.base import PersistentModel, get_part_types
 from ormdantic.util import is_derived_from, get_logger
 
 _config = {
     'user':'orm',
-    PASSWORD:'iamroot',
-    DATABASE:'json_storage',
+    _PASSWORD:'iamroot',
+    _DATABASE:'json_storage',
     'host':'localhost',
     'port':33069
 }
@@ -22,7 +22,7 @@ _logger = get_logger(__name__)
 
 def get_database_config(database_name:Optional[str] = None) -> Dict[str, Any]:
     if database_name:
-        return dict(_config) | {DATABASE:database_name}
+        return dict(_config) | {_DATABASE:database_name}
     else:
         return _config
 
@@ -48,7 +48,7 @@ def use_random_database_pool(keep_database_when_except:bool = False) -> Iterator
     database_name = f'TEST_{uuid4().hex}'
 
     with _create_database(database_name) as connection:
-        config = _config | {DATABASE: database_name}
+        config = _config | {_DATABASE: database_name}
 
         pool = DatabaseConnectionPool(config)
 
@@ -69,7 +69,7 @@ def use_random_database_pool(keep_database_when_except:bool = False) -> Iterator
 
 @contextmanager
 def _create_database(database_name:str) -> Iterator[Connection]:
-    connection = connect(**(_config | {DATABASE:None}))
+    connection = connect(**(_config | {_DATABASE:None}))
     cursor = connection.cursor()
     cursor.execute("CREATE DATABASE IF NOT EXISTS {}".format(database_name))
 

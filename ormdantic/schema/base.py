@@ -1,24 +1,23 @@
 from typing import (
     Any, ForwardRef, Tuple, Dict, Type, Generic, TypeVar, Iterator, Callable, Optional,
-    List, ClassVar, cast, get_args
+    List, ClassVar, cast 
 )
 import datetime
 import inspect
 import functools
 from uuid import uuid4
-import copy
 
 import orjson
 
 from pydantic import (
-    BaseModel, ConstrainedDecimal, ConstrainedInt, Field, ConstrainedStr,
+    BaseModel, ConstrainedDecimal, ConstrainedInt, Field, ConstrainedStr, PrivateAttr,
 )
-from ormdantic.util import (
+from ..util import (
     get_logger,
     get_base_generic_type_of, get_type_args, update_forward_refs_in_generic_base,
-    is_derived_from, resolve_forward_ref, is_collection_type_of
+    is_derived_from, resolve_forward_ref, is_collection_type_of,
+    resolve_forward_ref_in_args
 )
-from ormdantic.util.hints import resolve_forward_ref_in_args
 from ormdantic.util.tools import unique
 
 JsonPathAndType = Tuple[Tuple[str,...], Type[Any]]
@@ -173,6 +172,7 @@ class SchemaBaseModel(BaseModel):
 class PersistentModel(SchemaBaseModel):
     _stored_fields: ClassVar[StoredFieldDefinitions] = {
     }
+    _row_id : int = PrivateAttr(0)
 
     class Config:
         title = 'model which can be saved in database'

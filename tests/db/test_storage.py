@@ -4,7 +4,7 @@
 from typing import  List, Tuple
 import pytest
 
-from ormdantic.db.storage import (
+from ormdantic.database.storage import (
     delete_objects, query_records, upsert_objects, find_object, 
     find_objects, build_where
 )

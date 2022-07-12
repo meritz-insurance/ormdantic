@@ -6,7 +6,7 @@ from datetime import date, datetime
 from pydantic import condecimal, constr, Field
 
 from ormdantic.schema import PersistentModel
-from ormdantic.db.queries import (
+from ormdantic.database.queries import (
     get_sql_for_upserting_external_index_table, get_stored_fields, get_table_name, 
     get_sql_for_creating_table, _get_field_db_type, _generate_json_table_for_part_of,
     _build_query_and_fields_for_core_table, field_exprs,
@@ -37,8 +37,8 @@ def test_get_table_name():
     class SimpleBaseModel(PersistentModel):
         pass
 
-    assert 'model_SimpleBaseModel' == get_table_name(SimpleBaseModel)
-    assert 'model_SimpleBaseModel_part' == get_table_name(SimpleBaseModel, 'part')
+    assert 'md_SimpleBaseModel' == get_table_name(SimpleBaseModel)
+    assert 'md_SimpleBaseModel_part' == get_table_name(SimpleBaseModel, 'part')
 
 
 def test_get_sql_for_create_table():
@@ -46,7 +46,7 @@ def test_get_sql_for_create_table():
         pass
 
     assert (
-        'CREATE TABLE IF NOT EXISTS `model_SimpleBaseModel` (\n'
+        'CREATE TABLE IF NOT EXISTS `md_SimpleBaseModel` (\n'
         '  `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,\n'
         '  `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`))\n'
         f'){_ENGINE}'
@@ -67,7 +67,7 @@ def test_get_sql_for_create_table_with_index():
         i10: UuidStr
 
     assert (
-f"""CREATE TABLE IF NOT EXISTS `model_SampleModel` (
+f"""CREATE TABLE IF NOT EXISTS `md_SampleModel` (
   `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`)),
   `i1` VARCHAR(200) AS (JSON_VALUE(`__json`, '$.i1')) STORED,
@@ -105,7 +105,7 @@ def test_get_sql_for_create_part_of_table():
     sqls = get_sql_for_creating_table(Part)
 
     assert (
-        'CREATE TABLE IF NOT EXISTS `model_Part_pbase` (\n'
+        'CREATE TABLE IF NOT EXISTS `md_Part_pbase` (\n'
         '  `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,\n'
         '  `__root_row_id` BIGINT,\n'
         '  `__container_row_id` BIGINT,\n'
@@ -117,15 +117,15 @@ def test_get_sql_for_create_part_of_table():
     ) == next(sqls, None)
 
     assert (
-        'CREATE VIEW IF NOT EXISTS `model_Part` AS (\n'
+        'CREATE VIEW IF NOT EXISTS `md_Part` AS (\n'
         '  SELECT\n'
-        '    JSON_EXTRACT(`model_Container`.`__json`, `model_Part_pbase`.`__json_path`) AS `__json`,\n'
-        '    `model_Part_pbase`.`__row_id`,\n'
-        '    `model_Part_pbase`.`__root_row_id`,\n'
-        '    `model_Part_pbase`.`__container_row_id`,\n'
-        '    `model_Part_pbase`.`order`\n'
-        '  FROM `model_Part_pbase`\n'
-        '  JOIN `model_Container` ON `model_Container`.`__row_id` = `model_Part_pbase`.`__container_row_id`\n'
+        '    JSON_EXTRACT(`md_Container`.`__json`, `md_Part_pbase`.`__json_path`) AS `__json`,\n'
+        '    `md_Part_pbase`.`__row_id`,\n'
+        '    `md_Part_pbase`.`__root_row_id`,\n'
+        '    `md_Part_pbase`.`__container_row_id`,\n'
+        '    `md_Part_pbase`.`order`\n'
+        '  FROM `md_Part_pbase`\n'
+        '  JOIN `md_Container` ON `md_Container`.`__row_id` = `md_Part_pbase`.`__container_row_id`\n'
         ')'
     ) == next(sqls, None)
 
@@ -139,7 +139,7 @@ def test_get_sql_for_creating_external_index_table():
 
     assert [
         join_line(
-            "CREATE TABLE IF NOT EXISTS `model_Target` (",
+            "CREATE TABLE IF NOT EXISTS `md_Target` (",
             "  `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,",
             "  `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`)),",
             "  `codes` TEXT AS (JSON_EXTRACT(`__json`, '$.codes[*]')) STORED,",
@@ -149,7 +149,7 @@ def test_get_sql_for_creating_external_index_table():
             ")"
         ),
         join_line(
-            "CREATE TABLE IF NOT EXISTS `model_Target_codes` (",
+            "CREATE TABLE IF NOT EXISTS `md_Target_codes` (",
             "  `__row_id` BIGINT,",
             "  `__root_row_id` BIGINT,",
             "  `codes` TEXT,",
@@ -158,7 +158,7 @@ def test_get_sql_for_creating_external_index_table():
             ")"
         ),
         join_line(
-            "CREATE TABLE IF NOT EXISTS `model_Target_ids` (",
+            "CREATE TABLE IF NOT EXISTS `md_Target_ids` (",
             "  `__row_id` BIGINT,",
             "  `__root_row_id` BIGINT,",
             "  `ids` BIGINT,",
@@ -366,12 +366,12 @@ def test_get_sql_for_upserting_parts_table():
 
     assert len(sqls[Part]) == 2
     assert join_line(
-        "DELETE FROM model_Part_pbase",
+        "DELETE FROM md_Part_pbase",
         "WHERE `__root_row_id` = %(__root_row_id)s"
     ) == sqls[Part][0]
 
     assert join_line(
-        "INSERT INTO model_Part_pbase",
+        "INSERT INTO md_Part_pbase",
         "(",
         "  `__root_row_id`,",
         "  `__container_row_id`,",
@@ -394,7 +394,7 @@ def test_get_sql_for_upserting_parts_table():
         "    `__PART_JSON_TABLE`.`order`,",
         "    `__PART_JSON_TABLE`.`codes`",
         "  FROM",
-        "    model_Container as CONTAINER,",
+        "    md_Container as CONTAINER,",
         "    JSON_TABLE(",
         "      CONTAINER.`__json`,",
         "      '$' COLUMNS (",
@@ -431,12 +431,12 @@ def test_get_sql_for_upserting_parts_table_with_container_fields():
 
     assert len(sqls[Part]) == 2
     assert join_line(
-        "DELETE FROM model_Part_pbase",
+        "DELETE FROM md_Part_pbase",
         "WHERE `__root_row_id` = %(__root_row_id)s"
     ) == sqls[Part][0]
 
     assert join_line(
-        "INSERT INTO model_Part_pbase",
+        "INSERT INTO md_Part_pbase",
         "(",
         "  `__root_row_id`,",
         "  `__container_row_id`,",
@@ -456,7 +456,7 @@ def test_get_sql_for_upserting_parts_table_with_container_fields():
         "    CONCAT('$.parts[', `__part_order` - 1, ']') as `__json_path`,",
         "    JSON_VALUE(`CONTAINER`.`__json`, '$.name') as `_container_name`",
         "  FROM",
-        "    model_Container as CONTAINER,",
+        "    md_Container as CONTAINER,",
         "    JSON_TABLE(",
         "      CONTAINER.`__json`,",
         "      '$' COLUMNS (",
@@ -493,12 +493,12 @@ def test_get_sql_for_upserting_external_index_table():
 
     assert len(sqls) == 4
     assert join_line(
-        "DELETE FROM model_Part_codes",
+        "DELETE FROM md_Part_codes",
         "WHERE `__root_row_id` = %(__root_row_id)s"
     ) == sqls[0]
 
     assert join_line(
-        "INSERT INTO model_Part_codes",
+        "INSERT INTO md_Part_codes",
         "(",
         "  `__root_row_id`,",
         "  `__row_id`,",
@@ -509,7 +509,7 @@ def test_get_sql_for_upserting_external_index_table():
         "  `__ORG`.`__row_id`,",
         "  `__EXT_JSON_TABLE`.`codes`",
         "FROM",  
-        "  model_Part AS __ORG,",
+        "  md_Part AS __ORG,",
         "  JSON_TABLE(",
         "    `__ORG`.`__json`,",
         "    '$' COLUMNS (",
@@ -524,12 +524,12 @@ def test_get_sql_for_upserting_external_index_table():
     ) == sqls[1]
 
     assert join_line(
-        "DELETE FROM model_Part__names",
+        "DELETE FROM md_Part__names",
         "WHERE `__root_row_id` = %(__root_row_id)s"
     ) == sqls[2]
 
     assert join_line(
-        "INSERT INTO model_Part__names",
+        "INSERT INTO md_Part__names",
         "(",
         "  `__root_row_id`,",
         "  `__row_id`,",
@@ -540,7 +540,7 @@ def test_get_sql_for_upserting_external_index_table():
         "  `__ORG`.`__row_id`,",
         "  `__EXT_JSON_TABLE`.`_names`",
         "FROM",  
-        "  model_Part AS __ORG,",
+        "  md_Part AS __ORG,",
         "  JSON_TABLE(",
         "    `__ORG`.`_names`,",
         "    '$[*]' COLUMNS (",
@@ -595,7 +595,7 @@ def test_get_query_and_args_for_reading_for_matching():
         "            `__ORG`.`__row_id`,",
         "            MATCH (`__ORG`.`order`,`__ORG`.`name`) AGAINST (%(ORDER_NAME)s IN BOOLEAN MODE) as `__relevance`",
         "          FROM",
-        "            model_MyModel AS __ORG",
+        "            md_MyModel AS __ORG",
         "        )",
         "        AS __BASE",
         "    )",
@@ -607,7 +607,7 @@ def test_get_query_and_args_for_reading_for_matching():
         "    LIMIT 100000000000",
         "  )",
         "  AS _BASE",
-        "  JOIN model_MyModel AS _MAIN ON `_BASE`.`__row_id` = `_MAIN`.`__row_id`"
+        "  JOIN md_MyModel AS _MAIN ON `_BASE`.`__row_id` = `_MAIN`.`__row_id`"
     ) == sql
 
     assert {
@@ -646,7 +646,7 @@ def test_get_query_and_args_for_reading_for_order_by():
         "            `__ORG`.`order`,",
         "            `__ORG`.`name`",
         "          FROM",
-        "            model_MyModel AS __ORG",
+        "            md_MyModel AS __ORG",
         "        )",
         "        AS __BASE",
         "    )",
@@ -679,7 +679,7 @@ def test_build_query_for_core_table():
         '  `__ORG`.`codes`,',
         '  `__ORG`.`name`',
         'FROM',
-        '  model_Model AS __ORG',
+        '  md_Model AS __ORG',
         'WHERE',
         '  `__ORG`.`codes` = %(CODES)s',
         '  AND `__ORG`.`name` != %(NAME)s'
@@ -706,8 +706,8 @@ def test_build_query_for_core_table_for_unwind():
         '  `__ORG`.`name` AS `ns.name`,',
         '  `__UNWIND_CODES`.`codes` AS `ns.codes`',
         'FROM',
-        '  model_Model AS __ORG',
-        '  LEFT JOIN model_Model_codes AS __UNWIND_CODES ON `__ORG`.`__row_id` = `__UNWIND_CODES`.`__row_id`',
+        '  md_Model AS __ORG',
+        '  LEFT JOIN md_Model_codes AS __UNWIND_CODES ON `__ORG`.`__row_id` = `__UNWIND_CODES`.`__row_id`',
         'WHERE',
         '  `__UNWIND_CODES`.`codes` = %(NS_CODES)s',
         '  AND `__ORG`.`name` != %(NS_NAME)s'
@@ -734,8 +734,8 @@ def test_build_query_for_core_table_for_match():
         '  `__UNWIND_CODES`.`codes` AS `ns.codes`,',
         '  MATCH (`__ORG`.`name`,`__ORG`.`description`) AGAINST (%(NAME_DESCRIPTION)s IN BOOLEAN MODE) as `ns.__relevance`',
         'FROM',
-        '  model_Model AS __ORG',
-        '  LEFT JOIN model_Model_codes AS __UNWIND_CODES ON `__ORG`.`__row_id` = `__UNWIND_CODES`.`__row_id`',
+        '  md_Model AS __ORG',
+        '  LEFT JOIN md_Model_codes AS __UNWIND_CODES ON `__ORG`.`__row_id` = `__UNWIND_CODES`.`__row_id`',
         'WHERE',
         '  `__UNWIND_CODES`.`codes` = %(NS_CODES)s',
     ) == query
@@ -760,7 +760,7 @@ def test_build_query_for_core_table_for_multiple_match():
         '  `__ORG`.`__row_id`,',
         '  MATCH (`__ORG`.`name`) AGAINST (%(NAME)s IN BOOLEAN MODE) + MATCH (`__ORG`.`description`) AGAINST (%(DESCRIPTION)s IN BOOLEAN MODE) as `__relevance`',
         'FROM',
-        '  model_Model AS __ORG',
+        '  md_Model AS __ORG',
     ) == query
 
     assert ('__row_id', _RELEVANCE_FIELD) == fields

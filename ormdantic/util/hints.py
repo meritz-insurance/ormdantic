@@ -68,6 +68,9 @@ def update_forward_refs_in_generic_base(type_:Type, localns:Dict[str, Any]):
                 
 def resolve_forward_ref_in_args(base:Type, localns:Dict[str, Any]) -> Type:
     if hasattr(base, '__args__') and any(type(arg) is ForwardRef for arg in base.__args__):
+        # List[ForwardRef("Container")] will be same object 
+        # though they are declared in different scope.
+        # so, we copy current type and change ForwardRef as evaluated.
         new_type = copy.deepcopy(base)
         new_type.__args__ = tuple(resolve_forward_ref(arg, localns) for arg in base.__args__)
 
