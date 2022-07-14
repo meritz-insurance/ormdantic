@@ -1,3 +1,5 @@
+import itertools
+from time import get_clock_info
 from typing import (
     get_args, Type, get_origin, Tuple, Any, Generic, Protocol,
     ForwardRef, Dict, Generic, _collect_type_vars
@@ -101,21 +103,36 @@ def is_derived_from(type_:Type, base_type:Type) -> bool:
     # if type_ is generic, we will use __origin__
     #
     # https://stackoverflow.com/questions/49171189/whats-the-correct-way-to-check-if-an-object-is-a-typing-generic
+
+    if type_ is base_type:
+        return True
+
     if hasattr(type_, "__origin__"):
         type_ = get_origin(type_)
 
     return any(t is base_type for t in getmro(type_))
 
 
-def is_collection_type_of(type_:Type, parameters:Tuple[Type,...] | Type = tuple()) -> bool:
+def is_list_or_tuple_of(type_:Type, parameters:Tuple[Type,...] | Type = tuple()) -> bool:
+    args = get_list_or_type_type_parameters(type_)
+
+    if args is None:
+        return False
+
+    parameters = convert_tuple(parameters)
+    if not parameters:
+        return True
+
+    if len(args) == len(parameters):
+        return all(is_derived_from(t, b) for t, b in zip(args, parameters))
+    else:
+        return False
+
+
+def get_list_or_type_type_parameters(type_:Type) -> Tuple[Type,...] | None:
     generic = get_base_generic_type_of(type_, (tuple, list))
 
     if generic:
-        parameters = convert_tuple(parameters)
-
-        if not parameters:
-            return True
-
         args = get_args(generic) 
 
         # handle Tuple[str, str]
@@ -123,10 +140,10 @@ def is_collection_type_of(type_:Type, parameters:Tuple[Type,...] | Type = tuple(
             args = (args[0],)
         else:
             # handle Tuple[str, ...]
-            if args[-1] is Ellipsis:
+            if args and args[-1] is Ellipsis:
                 args = args[:-1]
 
-        return args == parameters
+        return args
 
-    return False
-            
+    return None
+

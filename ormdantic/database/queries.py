@@ -20,8 +20,8 @@ from ..schema.base import (
     IdentifyingMixin, IndexMixin, 
     StoredFieldDefinitions, PersistentModelT, StoredMixin, PartOfMixin, 
     UniqueIndexMixin, get_container_type, 
-    get_part_field_names, get_part_types, is_field_collection_type,
-    PersistentModel, is_collection_type_of, get_stored_fields,
+    get_field_names_for, get_part_types, is_field_collection_type,
+    PersistentModel, is_list_or_tuple_of, get_stored_fields,
     get_stored_fields_for
 
 )
@@ -189,7 +189,7 @@ def get_stored_fields_for_part_of(type_:Type[PersistentModelT]):
         lambda paths, type_: 
             not _is_come_from_container_field(paths) 
             or is_derived_from(type_, FullTextSearchedMixin)
-            or is_collection_type_of(type_, FullTextSearchedMixin)
+            or is_list_or_tuple_of(type_, FullTextSearchedMixin)
     )
 
 
@@ -389,14 +389,10 @@ def _generate_key_definition(type_:Type) -> str:
 
 
 def get_query_and_args_for_upserting(model:PersistentModel):
-    if model._row_id:
-        query_args = {
-            _ROW_ID_FIELD: model._row_id
-        }
-    else:
-        query_args = {
-            f: getattr(model, f) for f in _get_identifying_fields(type(model))
-        }
+    query_args : Dict[str, Any] = {}
+
+    for f in _get_identifying_fields(type(model)):
+        query_args[f] = getattr(model, f) 
 
     query_args[_JSON_FIELD] = model.json()
 
@@ -475,7 +471,7 @@ def get_sql_for_upserting_parts_table(model_type:Type) -> Dict[Type, Tuple[str, 
     sqls = []
     
     for part_type in part_types:
-        part_fields = get_part_field_names(model_type, part_type)
+        part_fields = get_field_names_for(model_type, part_type)
 
         assert part_fields
 
@@ -657,7 +653,7 @@ def _generate_json_eval(field_name:str, paths_and_type:Tuple[Tuple[str,...], Typ
         _logger.fatal(f'{field_name=}, {paths=}, {field_type=}. check paths have 2 element.')
         raise RuntimeError('paths should have 2 items for generating value from container.') 
 
-    if is_collection_type_of(field_type):
+    if is_list_or_tuple_of(field_type):
         return f"JSON_EXTRACT({field_exprs(_JSON_FIELD, table_name)}, '{paths[1]}') as {field_exprs(field_name)}"
     else:
         return f"JSON_VALUE({field_exprs(_JSON_FIELD, table_name)}, '{paths[1]}') as {field_exprs(field_name)}"
@@ -670,7 +666,7 @@ def _generate_select_field_of_json_table(target_fields:Tuple[str,...],
         if field_name in fields:
             json_path, field_type = fields[field_name]
 
-            if is_collection_type_of(field_type) and json_path[0] != '..':
+            if is_list_or_tuple_of(field_type) and json_path[0] != '..':
                 yield f"JSON_ARRAYAGG({field_exprs(field_name)}) AS {field_exprs(field_name)}"
                 continue 
 

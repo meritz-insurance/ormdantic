@@ -20,7 +20,7 @@ from ormdantic.schema.base import (
     IntegerArrayIndex, StringArrayIndex, FullTextSearchedStringIndex, 
     FullTextSearchedStr, PartOfMixin, StringReference, 
     UniqueStringIndex, StringIndex, DecimalIndex, IntIndex, DateIndex,
-    DateTimeIndex, update_part_of_forward_refs, UuidStr, 
+    DateTimeIndex, update_forward_refs, IdStr, 
     StoredFieldDefinitions
 )
 
@@ -64,7 +64,7 @@ def test_get_sql_for_create_table_with_index():
         i7: IntIndex
         i8: DateIndex
         i9: DateTimeIndex
-        i10: UuidStr
+        i10: IdStr
 
     assert (
 f"""CREATE TABLE IF NOT EXISTS `md_SampleModel` (
@@ -79,7 +79,7 @@ f"""CREATE TABLE IF NOT EXISTS `md_SampleModel` (
   `i7` TEXT AS (JSON_VALUE(`__json`, '$.i7')) STORED,
   `i8` DATE AS (JSON_VALUE(`__json`, '$.i8')) STORED,
   `i9` DATETIME(6) AS (JSON_VALUE(`__json`, '$.i9')) STORED,
-  `i10` VARCHAR(36),
+  `i10` VARCHAR(64),
   KEY `i2_index` (`i2`),
   UNIQUE KEY `i3_index` (`i3`),
   KEY `i4_index` (`i4`),
@@ -101,7 +101,7 @@ def test_get_sql_for_create_part_of_table():
     class Container(PersistentModel):
         parts: List[Part] = Field(default=[])
 
-    update_part_of_forward_refs(Part, locals())
+    update_forward_refs(Part, locals())
     sqls = get_sql_for_creating_table(Part)
 
     assert (
@@ -322,8 +322,8 @@ def test_get_stored_fields_of_parts():
     class Container(PersistentModel):
         parts: List['Part'] = Field(default=[])
 
-    update_part_of_forward_refs(Part, locals())
-    update_part_of_forward_refs(Container, locals())
+    update_forward_refs(Part, locals())
+    update_forward_refs(Container, locals())
 
     # Container에서 시작함으로 $.part.에 $.order가 된다.
     assert {'order': (('$.order',), StringIndex)} == get_stored_fields(Part)
@@ -337,7 +337,7 @@ def test_get_stored_fields_of_single_part():
     class ContainerForSingle(PersistentModel):
         part: SinglePart 
 
-    update_part_of_forward_refs(SinglePart, locals())
+    update_forward_refs(SinglePart, locals())
 
     # Container에서 시작함으로 $.part.에 $.order가 된다.
     assert {'order': (('$.order',), StringIndex)} == get_stored_fields(SinglePart)
@@ -361,7 +361,7 @@ def test_get_sql_for_upserting_parts_table():
     class Container(PersistentModel):
         parts: List[Part] = Field(default=[])
 
-    update_part_of_forward_refs(Part, locals())
+    update_forward_refs(Part, locals())
     sqls = get_sql_for_upserting_parts_table(Container)
 
     assert len(sqls[Part]) == 2
@@ -426,7 +426,7 @@ def test_get_sql_for_upserting_parts_table_with_container_fields():
         name: StringIndex
         parts: List[Part] = Field(default=[])
 
-    update_part_of_forward_refs(Part, locals())
+    update_forward_refs(Part, locals())
     sqls = get_sql_for_upserting_parts_table(Container)
 
     assert len(sqls[Part]) == 2
@@ -488,7 +488,7 @@ def test_get_sql_for_upserting_external_index_table():
         names: List[str]
         parts: List[Part] = Field(default=[])
 
-    update_part_of_forward_refs(Part, locals())
+    update_forward_refs(Part, locals())
     sqls = list(get_sql_for_upserting_external_index_table(Part))
 
     assert len(sqls) == 4
@@ -561,7 +561,7 @@ def test_get_sql_for_upserting_parts_table_throws_if_invalid_path():
     class MyModel(PersistentModel):
         paths: InvalidPath
 
-    update_part_of_forward_refs(InvalidPath, locals())
+    update_forward_refs(InvalidPath, locals())
 
     with pytest.raises(RuntimeError, match='.*2.*items'):
         get_sql_for_upserting_parts_table(MyModel)

@@ -9,7 +9,7 @@ from ormdantic.schema.base import (
     SchemaBaseModel, StringArrayIndex, FullTextSearchedStringIndex, 
     PartOfMixin, StringReference, 
     StringIndex, 
-    update_part_of_forward_refs, IdentifiedModel, UuidStr, 
+    update_forward_refs, IdentifiedModel, IdStr, 
     StoredFieldDefinitions
 )
 
@@ -21,15 +21,15 @@ class SimpleBaseModel(IdentifiedModel):
     pass
 
 def test_get_query_and_args_for_reading():
-    model = SimpleBaseModel(id=UuidStr('@'), version='0.1.0')
+    model = SimpleBaseModel(id=IdStr('@'), version='0.1.0')
 
     with use_temp_database_cursor_with_model(model, model_created=False) as cursor:
-        model.id = UuidStr("0")
+        model.id = IdStr("0")
         query_and_args = get_query_and_args_for_upserting(model)
 
         cursor.execute(*query_and_args)
 
-        model.id = UuidStr("1")
+        model.id = IdStr("1")
         query_and_args = get_query_and_args_for_upserting(model)
 
         cursor.execute(*query_and_args)
@@ -52,7 +52,7 @@ def test_get_query_and_args_for_reading():
 
 
 def test_get_query_and_args_for_deleting():
-    model = SimpleBaseModel(id=UuidStr('@'), version='0.1.0')
+    model = SimpleBaseModel(id=IdStr('@'), version='0.1.0')
 
     with use_temp_database_cursor_with_model(model) as cursor:
         query_and_args = get_query_and_args_for_deleting(
@@ -70,9 +70,9 @@ def test_get_query_and_args_for_reading_for_parts():
     class PartModel(PersistentModel, PartOfMixin[ContainerModel]):
         name: FullTextSearchedStringIndex
 
-    update_part_of_forward_refs(ContainerModel, locals())
+    update_forward_refs(ContainerModel, locals())
 
-    model = ContainerModel(id=UuidStr('@'), 
+    model = ContainerModel(id=IdStr('@'), 
                            version='0.1.0',
                            name=FullTextSearchedStringIndex('sample'),
                            parts=[
@@ -82,7 +82,7 @@ def test_get_query_and_args_for_reading_for_parts():
 
     with use_temp_database_cursor_with_model(model, 
                                              keep_database_when_except=False) as cursor:
-        model.id = UuidStr("@")
+        model.id = IdStr("@")
         query_and_args = get_query_and_args_for_reading(
             ContainerModel, ('id', 'name'), (('name', 'match', 'sample'),))
 
@@ -110,9 +110,9 @@ def test_get_query_and_args_for_reading_for_multiple_parts():
     class PartModel(PersistentModel, PartOfMixin[ContainerModel]):
         name: FullTextSearchedStringIndex
 
-    update_part_of_forward_refs(ContainerModel, locals())
+    update_forward_refs(ContainerModel, locals())
 
-    model = ContainerModel(id=UuidStr('@'), 
+    model = ContainerModel(id=IdStr('@'), 
                            version='0.1.0',
                            name=FullTextSearchedStringIndex('sample'),
                            parts=[
@@ -152,10 +152,10 @@ def test_get_query_and_args_for_reading_for_nested_parts():
     class MemberModel(PersistentModel, PartOfMixin[PartModel]):
         descriptions: StringArrayIndex
 
-    update_part_of_forward_refs(ContainerModel, locals())
-    update_part_of_forward_refs(PartModel, locals())
+    update_forward_refs(ContainerModel, locals())
+    update_forward_refs(PartModel, locals())
 
-    model = ContainerModel(id=UuidStr('@'), 
+    model = ContainerModel(id=IdStr('@'), 
                            version='0.1.0',
                            name=FullTextSearchedStringIndex('sample'),
                            part=PartModel(
@@ -168,7 +168,7 @@ def test_get_query_and_args_for_reading_for_nested_parts():
 
     with use_temp_database_cursor_with_model(model, 
                                              keep_database_when_except=False) as cursor:
-        model.id = UuidStr("@")
+        model.id = IdStr("@")
         query_and_args = get_query_and_args_for_reading(
             ContainerModel, ('id', 'name'), (('name', '=', 'sample'),))
 
@@ -252,7 +252,7 @@ def test_get_query_and_args_for_reading_for_stored_fields():
         }
         descriptions: StringArrayIndex
 
-    update_part_of_forward_refs(PartModel, locals())
+    update_forward_refs(PartModel, locals())
 
     model = PartModel(
         name=FullTextSearchedStringIndex('part1'),
@@ -293,7 +293,7 @@ def test_get_query_and_args_for_reading_for_explicit_external_index():
         codes: StringArrayIndex
         parts: List[PartModel]
 
-    update_part_of_forward_refs(PartModel, locals())
+    update_forward_refs(PartModel, locals())
      
     model = ContainerModel(
         codes=StringArrayIndex(['code1', 'code2']),
@@ -381,7 +381,7 @@ def test_get_query_and_args_for_reading_for_reference():
         name: StringIndex
         part: PartReference
 
-    update_part_of_forward_refs(PartModel, locals())
+    update_forward_refs(PartModel, locals())
      
     model = ContainerModel(
         name=StringIndex('container'),
@@ -472,7 +472,7 @@ def test_get_query_and_args_for_reading_for_reference_with_base_type():
         name: StringIndex
         part: PartReference
 
-    update_part_of_forward_refs(PartModel, locals())
+    update_forward_refs(PartModel, locals())
      
     models = [
         PartModel(name=StringIndex('part-1'), description='part 1 description'),
@@ -556,7 +556,7 @@ def test_get_query_and_args_for_reading_for_where_is_null():
         name: StringIndex
         part: PartReference
 
-    update_part_of_forward_refs(PartModel, locals())
+    update_forward_refs(PartModel, locals())
      
     models = [
         PartModel(name=StringIndex('part-1'), description='part 1 description'),
@@ -592,9 +592,9 @@ def test_get_query_and_args_for_counting():
     class PartModel(PersistentModel, PartOfMixin[ContainerModel]):
         name: FullTextSearchedStringIndex
 
-    update_part_of_forward_refs(ContainerModel, locals())
+    update_forward_refs(ContainerModel, locals())
 
-    model = ContainerModel(id=UuidStr('@'), 
+    model = ContainerModel(id=IdStr('@'), 
                            version='0.1.0',
                            name=FullTextSearchedStringIndex('sample'),
                            parts=[

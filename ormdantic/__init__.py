@@ -3,7 +3,7 @@ from .schema import (
     StoredMixin, StringIndex, StringArrayIndex, 
     PartOfMixin, StringReference, DecimalIndex, IntIndex, IntReference,
     DateIndex, DateTimeIndex, FullTextSearchedStr, FullTextSearchedStringIndex,
-    UuidStr, IntegerArrayIndex, update_part_of_forward_refs, StoredFieldDefinitions
+    IdStr, IntegerArrayIndex, update_forward_refs, StoredFieldDefinitions
 )
 from .database import (
     DatabaseConnectionPool, create_table, upsert_objects, find_object, find_objects, delete_objects
@@ -18,7 +18,7 @@ __all__ = [
     "find_object",
     "find_objects",
     "delete_objects",
-    "update_part_of_forward_refs",
+    "update_forward_refs",
     "ModelT",
     "PersistentModelT",
     "IdentifiedModelT",
@@ -37,6 +37,6 @@ __all__ = [
     "FullTextSearchedStr",
     "FullTextSearchedStringIndex",
     "IntegerArrayIndex",
-    "UuidStr",
+    "IdStr",
     "StoredFieldDefinitions"
 ]

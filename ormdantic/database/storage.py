@@ -60,6 +60,8 @@ def upsert_objects(pool:DatabaseConnectionPool, models:PersistentModelT | Iterab
 
     with pool.open_cursor(True) as cursor:
         for model in targets:
+            model._before_save()
+
             inserted_id = execute_and_get_last_id(
                 cursor, *get_query_and_args_for_upserting(model))
 
@@ -96,6 +98,8 @@ def find_objects(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], wher
 def convert_dict_to_model(type_:Type[PersistentModelT], record:Dict[str, Any]) -> PersistentModelT:
     model = type_.parse_raw(record[_JSON_FIELD].encode())
     model._row_id = record[_ROW_ID_FIELD]
+
+    model._after_load()
 
     return model
 

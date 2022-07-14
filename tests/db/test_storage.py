@@ -12,7 +12,7 @@ from ormdantic.database.storage import (
 from ormdantic.schema import PersistentModel
 from ormdantic.schema.base import (
     FullTextSearchedStringIndex, PartOfMixin, StringArrayIndex, 
-    get_identifer_of, update_part_of_forward_refs, IdentifiedModel, UuidStr,
+    get_identifer_of, update_forward_refs, IdentifiedModel, IdStr,
     StoredFieldDefinitions
 )
 
@@ -43,11 +43,11 @@ class SubPartModel(PersistentModel, PartOfMixin[PartModel]):
     name: FullTextSearchedStringIndex
     codes: StringArrayIndex
 
-update_part_of_forward_refs(ContainerModel, locals())
-update_part_of_forward_refs(PartModel, locals())
+update_forward_refs(ContainerModel, locals())
+update_forward_refs(PartModel, locals())
 
 
-model = ContainerModel(id=UuidStr('@'), 
+model = ContainerModel(id=IdStr('@'), 
                         version='0.1.0',
                         name=FullTextSearchedStringIndex('sample'),
                         parts=[

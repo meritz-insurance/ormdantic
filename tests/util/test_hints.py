@@ -4,9 +4,10 @@ import pytest
 
 from ormdantic.util import (
     get_base_generic_type_of, get_type_args, get_mro_with_generic, 
-    resolve_forward_ref, update_forward_refs_in_generic_base, is_derived_from, is_collection_type_of
+    resolve_forward_ref, update_forward_refs_in_generic_base, is_derived_from, is_list_or_tuple_of
 )
-from ormdantic.schema.base import PartOfMixin, PersistentModel
+from ormdantic.schema.base import PartOfMixin, PersistentModel, StringIndex
+from ormdantic.util.hints import get_list_or_type_type_parameters
 
 T = TypeVar('T')
 
@@ -92,11 +93,28 @@ def test_is_derived_from():
 
 
 def test_is_collection_type_of():
-    assert is_collection_type_of(List[str], str)
-    assert is_collection_type_of(Tuple[str], str)
-    assert is_collection_type_of(Tuple[str, str], str)
-    assert is_collection_type_of(Tuple[str, ...], str)
-    assert is_collection_type_of(Tuple[str, int], (str, int))
+    assert is_list_or_tuple_of(List[str], str)
+    assert is_list_or_tuple_of(List[str])
+    assert is_list_or_tuple_of(List)
+    assert is_list_or_tuple_of(List[StringIndex], str)
 
-    assert not is_collection_type_of(List[str], int)
-    assert not is_collection_type_of(int, (int,))
+    assert is_list_or_tuple_of(Tuple[str], str)
+    assert is_list_or_tuple_of(Tuple[str, str], str)
+    assert is_list_or_tuple_of(Tuple[str, ...], str)
+    assert is_list_or_tuple_of(Tuple[str, int], (str, int))
+
+    assert not is_list_or_tuple_of(List, int)
+    assert not is_list_or_tuple_of(List[str], int)
+    assert not is_list_or_tuple_of(List[str], StringIndex)
+    assert not is_list_or_tuple_of(int, (int,))
+
+
+def test_get_collection_type_parameters():
+    assert get_list_or_type_type_parameters(int) is None
+    assert get_list_or_type_type_parameters(str) is None
+
+    assert get_list_or_type_type_parameters(list) == tuple()
+    assert get_list_or_type_type_parameters(List[str]) == (str,)
+    assert get_list_or_type_type_parameters(Tuple[str, ...]) == (str,)
+    assert get_list_or_type_type_parameters(Tuple[str, str]) == (str,)
+    assert get_list_or_type_type_parameters(Tuple[str, str, int]) == (str, str, int)

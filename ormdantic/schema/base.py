@@ -12,20 +12,52 @@ import orjson
 from pydantic import (
     BaseModel, ConstrainedDecimal, ConstrainedInt, Field, ConstrainedStr, PrivateAttr,
 )
+from pydantic.main import ModelMetaclass
+
 from ..util import (
     get_logger,
     get_base_generic_type_of, get_type_args, update_forward_refs_in_generic_base,
-    is_derived_from, resolve_forward_ref, is_collection_type_of,
+    is_derived_from, resolve_forward_ref, is_list_or_tuple_of,
     resolve_forward_ref_in_args
 )
-from ormdantic.util.tools import unique
+from ..util.tools import convert_tuple, unique
 
 JsonPathAndType = Tuple[Tuple[str,...], Type[Any]]
 StoredFieldDefinitions = Dict[str, JsonPathAndType]
  
 T = TypeVar('T')
-ModelT = TypeVar('ModelT', bound='SchemaBaseModel')
-PersistentModelT = TypeVar('PersistentModelT', bound='PersistentModel')
+
+
+def _orjson_dumps(v, *, default):
+    # orjson.dumps returns bytes, to match standard json.dumps we need to decode
+    return orjson.dumps(v, default=default).decode()
+
+class SchemaBaseModel(BaseModel):
+    class Config:
+        title = 'model which can generate json schema.'
+
+        json_dumps = _orjson_dumps
+        json_loads = orjson.loads
+
+
+class PersistentModel(SchemaBaseModel):
+    _stored_fields: ClassVar[StoredFieldDefinitions] = {
+    }
+    _row_id : int = PrivateAttr(0)
+
+    def _after_load(self):
+        pass
+
+    def _before_save(self):
+        pass
+
+    class Config:
+        title = 'model which can be saved in database'
+
+
+
+ModelT = TypeVar('ModelT', bound=SchemaBaseModel)
+PersistentModelT = TypeVar('PersistentModelT', bound=PersistentModel)
 
 
 _logger = get_logger(__name__)
@@ -121,14 +153,13 @@ class UniqueStringIndex(ConstrainedStr, UniqueIndexMixin):
     pass
 
 
-class UuidStr(ConstrainedStr, IdentifyingMixin):
-    max_length = 36
+class IdStr(ConstrainedStr, IdentifyingMixin):
+    max_length = 64 # sha256 return 64 char
     ''' UUID string'''
-    pass
 
-    def new_if_empty(self) -> 'UuidStr':
+    def new_if_empty(self) -> 'IdStr':
         if self == '':
-            return UuidStr(uuid4().hex)
+            return IdStr(uuid4().hex)
 
         return self
 
@@ -153,38 +184,13 @@ class IntegerArrayIndex(ArrayIndexMixin[int]):
     pass
 
 
-
-def _orjson_dumps(v, *, default):
-    # orjson.dumps returns bytes, to match standard json.dumps we need to decode
-    return orjson.dumps(v, default=default).decode()
-
-
-class SchemaBaseModel(BaseModel):
-    class Config:
-        title = 'model which can generate json schema.'
-
-        json_dumps = _orjson_dumps
-        json_loads = orjson.loads
-
-        underscore_attrs_are_private = True
-
-
-class PersistentModel(SchemaBaseModel):
-    _stored_fields: ClassVar[StoredFieldDefinitions] = {
-    }
-    _row_id : int = PrivateAttr(0)
-
-    class Config:
-        title = 'model which can be saved in database'
-
-
 class IdentifiedModel(PersistentModel):
     ''' identified by uuid '''
     version:str = Field('0.1.0')
-    id: UuidStr = Field('', title='identifier for retreiving')
+    id: IdStr = Field('', title='identifier for retreiving')
 
     class Config:
-        title = 'unit object which can be saved or retreived by id'
+        title = 'base object which can be saved or retreived by id'
 
 
 IdentifiedModelT = TypeVar('IdentifiedModelT', bound=IdentifiedModel)
@@ -200,13 +206,14 @@ def get_container_type(type_:Type[ModelT]) -> Optional[Type[ModelT]]:
     return None
 
 
-def get_part_field_names(type_:Type[ModelT], part_types:Type | Tuple[Type, ...]
+@functools.cache
+def get_field_names_for(type_:Type[ModelT], types:Type | Tuple[Type, ...]
                         ) -> Tuple[str,...]:
-    part_types = part_types if isinstance(part_types, tuple) else (part_types,)
+    types = convert_tuple(types)
 
     return tuple(field_name for field_name, t in get_field_name_and_type(type_, 
         lambda t: any(
-            t is part_type or is_collection_type_of(t, part_type) for part_type in part_types
+            t is target_type or is_list_or_tuple_of(t, target_type) for target_type in types
         )
     ))
 
@@ -229,7 +236,8 @@ def get_field_name_and_type(type_:Type[ModelT],
         ):
             yield (field_name, model_field.outer_type_)
 
-def update_part_of_forward_refs(type_:Type[ModelT], localns:Dict[str, Any]):
+
+def update_forward_refs(type_:Type[ModelT], localns:Dict[str, Any]):
     type_.update_forward_refs(**localns)
 
     # resolve outer type also,
@@ -241,10 +249,11 @@ def update_part_of_forward_refs(type_:Type[ModelT], localns:Dict[str, Any]):
         
     update_forward_refs_in_generic_base(type_, localns)
 
+
 def is_field_collection_type(type_:Type[ModelT], field_name:str, parameters:Tuple[Type,...] | Type = tuple()) -> bool:
     model_field = type_.__fields__[field_name]
 
-    return is_collection_type_of(model_field.outer_type_, parameters)
+    return is_list_or_tuple_of(model_field.outer_type_, parameters)
 
 
 def get_part_types(type_:Type[ModelT]) -> Tuple[Type]:
@@ -335,7 +344,7 @@ def get_stored_fields_for(type_:Type[ModelT],
         return {
             k: (paths, cast(Type[T], type_)) for k, (paths, type_) in stored.items()
             if is_derived_from(type_, type_or_predicate) 
-                or is_collection_type_of(type_, type_or_predicate)
+                or is_list_or_tuple_of(type_, type_or_predicate)
         }
 
 
@@ -357,7 +366,7 @@ def _get_stored_fields(type_:Type):
     adjusted = {}
 
     for field_name, (paths, field_type) in stored_fields.items():
-        is_collection_type = is_collection_type_of(field_type)
+        is_collection_type = is_list_or_tuple_of(field_type)
 
         _validate_json_paths(paths)
 

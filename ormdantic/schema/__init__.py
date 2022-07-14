@@ -4,7 +4,7 @@ from .base import (
     StoredMixin, StringIndex, StringArrayIndex, 
     PartOfMixin, StringReference, DecimalIndex, IntIndex, IntReference,
     DateIndex, DateTimeIndex, FullTextSearchedStr, FullTextSearchedStringIndex,
-    UuidStr, IntegerArrayIndex, update_part_of_forward_refs,
+    IdStr, IntegerArrayIndex, update_forward_refs,
     StoredFieldDefinitions
 )
 
@@ -30,6 +30,6 @@ __all__ = [
     "FullTextSearchedStr",
     "FullTextSearchedStringIndex",
     "IntegerArrayIndex",
-    "UuidStr",
+    "IdStr",
     "StoredFieldDefinitions"
 ]
