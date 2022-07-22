@@ -1,5 +1,6 @@
 import pytest
 from uuid import uuid4
+import logging
 
 from pymysql.cursors import DictCursor
 
@@ -82,15 +83,25 @@ def test_connect_close_if_ping_has_error(monkeypatch:pytest.MonkeyPatch):
         original_close()
 
 
-def test_open_cursor():
+def test_open_cursor(caplog : pytest.LogCaptureFixture):
     with use_random_database_pool() as pool:
         with pool.open_cursor(True) as cursor:
             cursor.execute("CREATE TABLE SAMPLE_TABLE(ID INT)")
             cursor.execute("INSERT SAMPLE_TABLE(ID) VALUES (1)")
 
         with pool.open_cursor() as cursor:
-            cursor.execute("SELECT * FROM SAMPLE_TABLE")
-            assert [dict(ID=1)] == cursor.fetchall()
+            with caplog.at_level(logging.DEBUG):
+                cursor.execute("SELECT * FROM SAMPLE_TABLE")
+                assert [dict(ID=1)] == cursor.fetchall()
+
+            assert not caplog.text
+
+        with pool.open_cursor(query_to_log=True) as cursor:
+            with caplog.at_level(logging.DEBUG):
+                cursor.execute("SELECT * FROM SAMPLE_TABLE")
+                assert [dict(ID=1)] == cursor.fetchall()
+
+            assert 'SELECT * FROM SAMPLE_TABLE' in caplog.text
 
 
 def test_open_cursor_without_commit():
@@ -105,6 +116,7 @@ def test_open_cursor_without_commit():
             with pool.open_cursor() as cursor:
                 cursor.execute("SELECT * FROM SAMPLE_TABLE")
                 assert tuple() == cursor.fetchall()
+
 
 def test_clear_pool():
     with use_random_database_pool() as pool:
@@ -167,7 +179,7 @@ def test_str():
 
     pool = DatabaseConnectionPool(get_database_config(database_name))
 
-    assert str(pool).startswith(f'DbConnectionPool(config=')
+    assert str(pool).startswith(f'DatabaseConnectionPool(config=')
     assert 'cached' in str(pool)
 
 

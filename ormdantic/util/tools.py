@@ -12,7 +12,7 @@ def convert_tuple(items:Tuple[T]|T) -> Tuple[T]:
     return items if isinstance(items, tuple) else (items,)
 
 
-def convert_collection(items:List[T]|Tuple[T]|T) -> Collection[T]:
+def convert_as_collection(items:List[T]|Tuple[T]|T) -> Collection[T]:
     if isinstance(items, (list, tuple)):
         return items
     else:

@@ -31,20 +31,21 @@ class DatabaseConnectionPool():
         self.close_all()
 
     def __str__(self):
-        return f"DbConnectionPool(config={self._connection_config}) / _cached={self._cached}, _connected={self._connected}"
+        return f"DatabaseConnectionPool(config={self._connection_config}) / _cached={self._cached}, _connected={self._connected}"
 
     @contextmanager
-    def open_cursor(self, commit:bool = False) -> Iterator[DictCursor]:
+    def open_cursor(self, commit:bool = False, *, query_to_log:bool=False) -> Iterator[DictCursor]:
         with self.connect() as connection:
             cur = connection.cursor(DictCursor)
 
-            old = cur.execute
+            if query_to_log:
+                old = cur.execute
 
-            def _execute_and_log(*args, **kwds):
-                _logger.debug(args)
-                return old(*args, **kwds)
+                def _execute_and_log(*args, **kwds):
+                    _logger.debug(args)
+                    return old(*args, **kwds)
 
-            cur.execute = _execute_and_log
+                cur.execute = _execute_and_log
 
             try:
                 yield cur

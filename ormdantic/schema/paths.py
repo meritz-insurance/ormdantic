@@ -10,12 +10,10 @@ from ormdantic.util.hints import get_list_or_type_type_parameters
 from ormdantic.util.tools import convert_tuple
 
 
-from .base import (
-    ModelT,
-    SchemaBaseModel,
-)
+from .base import ( ModelT, SchemaBaseModel)
 from ..util import (
-    get_logger, is_derived_from, is_list_or_tuple_of, convert_collection
+    get_logger, is_derived_from, is_list_or_tuple_of, convert_as_collection,
+    is_derived_or_collection_of_derived
 )
 
 
@@ -24,8 +22,8 @@ T = TypeVar('T')
 _logger = get_logger(__name__)
 
 
-def get_paths_for_type(type_:Type[ModelT], types:Type | Tuple[Type, ...]
-                      ) -> Tuple[str, ...]:
+@functools.cache
+def get_paths_for_type(type_:Type, types:Type | Tuple[Type, ...]) -> Tuple[str, ...]:
     types = convert_tuple(types)
 
     return tuple(path for path, t in get_path_and_type(type_, 
@@ -56,7 +54,7 @@ def _get_path_and_type(type_:Type[ModelT],
         field_type = model_field.outer_type_ 
 
         if not predicate or (
-            is_derived_from(field_type, predicate)
+            is_derived_or_collection_of_derived(field_type, predicate)
             if isinstance(predicate, type) else 
             predicate(field_type)
         ):
@@ -64,7 +62,11 @@ def _get_path_and_type(type_:Type[ModelT],
 
             json_path.append(field_name)
 
-            yield (json_path, model_field.outer_type_)
+            if is_list_or_tuple_of(field_type):
+                type_param = get_list_or_type_type_parameters(field_type)
+                field_type = type_param and type_param[0]
+
+            yield (json_path, field_type)
         elif is_derived_from(field_type, SchemaBaseModel):
             yield from (([field_name] + paths, type_) 
                 for paths, type_ in 
@@ -94,7 +96,7 @@ def extract(model:SchemaBaseModel, path:str) -> Any:
 
             if is_list_or_tuple_of(type(current)):
                 current = tuple(itertools.chain(*(
-                    convert_collection(getattr(item, field_name, None))
+                    convert_as_collection(getattr(item, field_name, None))
                     for item in cast(list, current)
                 )))
             elif current is not None:

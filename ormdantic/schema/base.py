@@ -12,7 +12,8 @@ import orjson
 from pydantic import (
     BaseModel, ConstrainedDecimal, ConstrainedInt, Field, ConstrainedStr, PrivateAttr,
 )
-from pydantic.main import ModelMetaclass
+
+from ormdantic.util.hints import is_derived_or_collection_of_derived
 
 from ..util import (
     get_logger,
@@ -82,7 +83,6 @@ class IdentifyingMixin(StoredMixin):
     
     def new_if_empty(self:T) -> T:
         raise NotImplementedError('fill if exist should be implemented.')
-
 
 class IndexMixin(StoredMixin):
     ''' the json value will be indexed as table fields. '''
@@ -184,10 +184,13 @@ class IntegerArrayIndex(ArrayIndexMixin[int]):
     pass
 
 
-class IdentifiedModel(PersistentModel):
+class IdentifiedMixin(SchemaBaseModel):
+    id: IdStr = Field('', title='identifier for retreiving')
+
+
+class IdentifiedModel(PersistentModel, IdentifiedMixin):
     ''' identified by uuid '''
     version:str = Field('0.1.0')
-    id: IdStr = Field('', title='identifier for retreiving')
 
     class Config:
         title = 'base object which can be saved or retreived by id'
@@ -198,7 +201,7 @@ IdentifiedModelT = TypeVar('IdentifiedModelT', bound=IdentifiedModel)
 
 def get_container_type(type_:Type[ModelT]) -> Optional[Type[ModelT]]:
     ''' get the type of container '''
-    part_type = get_base_generic_type_of(type_, PartOfMixin)
+    part_type = get_base_generic_type_of(cast(Type, type_), PartOfMixin)
 
     if part_type:
         return get_type_args(part_type)[0]
@@ -207,34 +210,42 @@ def get_container_type(type_:Type[ModelT]) -> Optional[Type[ModelT]]:
 
 
 @functools.cache
-def get_field_names_for(type_:Type[ModelT], types:Type | Tuple[Type, ...]
-                        ) -> Tuple[str,...]:
+def get_field_names_for(type_:Type, *types:Type) -> Tuple[str,...]:
     types = convert_tuple(types)
 
-    return tuple(field_name for field_name, t in get_field_name_and_type(type_, 
-        lambda t: any(
-            t is target_type or is_list_or_tuple_of(t, target_type) for target_type in types
-        )
-    ))
+    return tuple(field_name for field_name, _ in get_field_name_and_type(type_, *types))
 
 
-def get_field_name_and_type(type_:Type[ModelT], 
-                            predicate: Type | Callable[[Type], bool] | None = None,
-                            ) -> Iterator[Tuple[str, Type]]:
+@functools.cache
+def get_field_name_and_type(type_:Type, 
+                            *target_types: Type,
+                            ) -> Tuple[Tuple[str, Type]]:
     if not is_derived_from(type_, BaseModel):
         _logger.fatal(f'type_ {type_=}should be subclass of BaseModel. '
                       f'check the mro {inspect.getmro(type_)}')
         raise RuntimeError(f'invalid type {type_}')
 
+    target_types = convert_tuple(target_types) 
+
+    name_and_types = []
+
     for field_name, model_field in type_.__fields__.items():
         field_type = model_field.outer_type_ 
 
-        if not predicate or (
-            is_derived_from(field_type, predicate)
-            if isinstance(predicate, type) else 
-            predicate(field_type)
-        ):
-            yield (field_name, model_field.outer_type_)
+        if not target_types or any(is_derived_or_collection_of_derived(field_type, t) for t in target_types):
+            name_and_types.append((field_name, model_field.outer_type_))
+
+    return tuple(name_and_types)
+
+
+@functools.cache
+def get_field_type(type_:Type[ModelT], field_name:str) -> type:
+    if not is_derived_from(type_, BaseModel):
+        _logger.fatal(f'type_ {type_=}should be subclass of BaseModel. '
+                      f'check the mro {inspect.getmro(type_)}')
+        raise RuntimeError(f'invalid type {type_}')
+
+    return type_.__fields__[field_name].outer_type_
 
 
 def update_forward_refs(type_:Type[ModelT], localns:Dict[str, Any]):
@@ -250,13 +261,15 @@ def update_forward_refs(type_:Type[ModelT], localns:Dict[str, Any]):
     update_forward_refs_in_generic_base(type_, localns)
 
 
-def is_field_collection_type(type_:Type[ModelT], field_name:str, parameters:Tuple[Type,...] | Type = tuple()) -> bool:
+@functools.cache
+def is_field_list_or_tuple_of(type_:Type, field_name:str, *parameters:Type) -> bool:
     model_field = type_.__fields__[field_name]
 
-    return is_list_or_tuple_of(model_field.outer_type_, parameters)
+    return is_list_or_tuple_of(model_field.outer_type_, *parameters)
 
 
-def get_part_types(type_:Type[ModelT]) -> Tuple[Type]:
+@functools.cache
+def get_part_types(type_:Type) -> Tuple[Type]:
     return tuple(
         unique(
             model_field.type_
@@ -331,7 +344,7 @@ def _replace_vector_if_empty_value(obj:Any, inplace:bool) -> Any:
     return None
 
 
-def get_stored_fields_for(type_:Type[ModelT], 
+def get_stored_fields_for(type_:Type,
                           type_or_predicate: Type[T] | Callable[[Tuple[str, ...], Type], bool]) -> Dict[str, Tuple[Tuple[str,...], Type[T]]]:
     stored = get_stored_fields(type_)
 
@@ -348,14 +361,10 @@ def get_stored_fields_for(type_:Type[ModelT],
         }
 
 
-def get_stored_fields(type_:Type[ModelT]):
-    return _get_stored_fields(cast(Type, type_))
-
-
 @functools.lru_cache()
-def _get_stored_fields(type_:Type):
+def get_stored_fields(type_:Type):
     stored_fields : StoredFieldDefinitions = {
-        field_name:(_get_json_paths(type_, field_name, field_type), field_type)
+        field_name:(_get_json_paths(field_name, field_type), field_type)
         for field_name, field_type in get_field_name_and_type(type_, StoredMixin)
     }
 
@@ -376,7 +385,7 @@ def _get_stored_fields(type_:Type):
     return stored_fields | adjusted
         
 
-def _get_json_paths(type_, field_name, field_type) -> Tuple[str,...]:
+def _get_json_paths(field_name, field_type) -> Tuple[str,...]:
     paths: List[str] = []
 
     if is_derived_from(field_type, ArrayIndexMixin):

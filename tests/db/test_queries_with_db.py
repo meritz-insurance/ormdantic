@@ -39,8 +39,8 @@ def test_get_query_and_args_for_reading():
 
         cursor.execute(*query_and_args)
         assert [
-            {'__row_id': 1, 'id': '0', '__json': '{"version":"0.1.0","id":"0"}'},
-            {'__row_id': 2, 'id': '1', '__json': '{"version":"0.1.0","id":"1"}'}
+            {'__row_id': 1, 'id': '0', '__json': '{"id":"0","version":"0.1.0"}'},
+            {'__row_id': 2, 'id': '1', '__json': '{"id":"1","version":"0.1.0"}'}
         ] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(

@@ -8,7 +8,7 @@ from ormdantic.schema.base import (
     IdentifiedModel, IdentifyingMixin, PersistentModel, PartOfMixin, 
     assign_identifying_fields_if_empty, get_container_type, 
     get_field_name_and_type, get_identifer_of, get_field_names_for, IdStr, 
-    update_forward_refs, is_field_collection_type
+    update_forward_refs, is_field_list_or_tuple_of
 )
 
 def test_identified_model():
@@ -37,7 +37,6 @@ def test_get_part_field_name():
     class NotPart(PersistentModel, PartOfMixin['Container']):
         pass
 
-
     class Container(PersistentModel):
         part:Part
 
@@ -61,9 +60,7 @@ def test_get_field_name_and_type():
         number: int
 
     assert [('parts', List[Part]), ('part', Part), ('number', int)] == list(get_field_name_and_type(Container))
-    assert [('parts', List[Part])] == list(get_field_name_and_type(Container, lambda t: t is List[Part]))
-    assert [('part', Part)] == list(get_field_name_and_type(Container, PartOfMixin))
-    assert [] == list(get_field_name_and_type(Container, lambda t: t is List))
+    assert [('parts', List[Part]), ('part', Part)] == list(get_field_name_and_type(Container, PartOfMixin))
 
     class WrongType():
         pass
@@ -93,9 +90,9 @@ def test_is_fields_collection_type():
         list_id: List[str]
         tuple_id: Tuple[str,...]
     
-    assert is_field_collection_type(SimpleModel, 'list_id', (str,))
-    assert not is_field_collection_type(SimpleModel, 'list_id', (int,))
-    assert is_field_collection_type(SimpleModel, 'tuple_id', str)
+    assert is_field_list_or_tuple_of(SimpleModel, 'list_id', str)
+    assert not is_field_list_or_tuple_of(SimpleModel, 'list_id', int)
+    assert is_field_list_or_tuple_of(SimpleModel, 'tuple_id', str)
 
 def test_assign_identified_if_empty():
     class SimpleModel(IdentifiedModel):

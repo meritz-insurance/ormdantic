@@ -20,7 +20,7 @@ from ..schema.base import (
     IdentifyingMixin, IndexMixin, 
     StoredFieldDefinitions, PersistentModelT, StoredMixin, PartOfMixin, 
     UniqueIndexMixin, get_container_type, 
-    get_field_names_for, get_part_types, is_field_collection_type,
+    get_field_names_for, get_part_types, is_field_list_or_tuple_of,
     PersistentModel, is_list_or_tuple_of, get_stored_fields,
     get_stored_fields_for
 
@@ -492,7 +492,7 @@ def get_sql_for_upserting_parts_table(model_type:Type) -> Dict[Type, Tuple[str, 
         root_field = 'CONTAINER.' + (field_exprs(_ROW_ID_FIELD) if is_root else field_exprs(_ROOT_ROW_ID_FIELD))
 
         for part_field in part_fields:
-            is_collection = is_field_collection_type(model_type, part_field)
+            is_collection = is_field_list_or_tuple_of(model_type, part_field)
             json_path = f'$.{part_field}'
 
             fields_from_json_table = [f for f in target_fields if f in fields and fields[f][0][0] != '..']
@@ -719,15 +719,15 @@ def get_query_and_args_for_reading(type_:Type[PersistentModelT], fields:Tuple[st
         if the fields which has collection of item, the fields can be unwound.
         it means to duplicate the row after split array into each item.
 
-        *join : will indicate the some model which is joined.
+        *join : will indicate the some model joined.
     '''
     fields = convert_tuple(fields)
 
     unwind = convert_tuple(unwind)
     order_by = convert_tuple(order_by)
 
-    where = _fill_empty_fields_for_match(
-        where, get_stored_fields_for_full_text_search(type_))
+    where = _fill_empty_fields_for_match(where, 
+                                         get_stored_fields_for_full_text_search(type_))
 
     ns_types = dict(
         _build_namespace_types(
@@ -782,7 +782,7 @@ def _get_sql_for_reading(ns_types:Tuple[Tuple[str, Type]],
                          for_count: bool) -> str:
 
     # we will build the core table which has _row_id and fields which
-    # is referenced from where clause or unwound.
+    # is referenced from where clause or unwind.
     # we will join the core tables for making a base table which
     # contains the row_id of each table
 
