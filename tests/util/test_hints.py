@@ -1,4 +1,4 @@
-from typing import ForwardRef, Generic, List, TypeVar, Tuple, get_args, get_origin
+from typing import ForwardRef, Generic, List, TypeVar, Tuple, get_args
 
 import pytest
 
@@ -110,6 +110,8 @@ def test_is_derived_from():
 
     assert is_derived_from(Derived, Base)
     assert not is_derived_from(Base, Derived)
+
+    assert not is_derived_from(Item | None, Item)
 
 
 def test_is_collection_type_of():

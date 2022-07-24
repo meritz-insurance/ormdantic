@@ -21,7 +21,7 @@ class SimpleBaseModel(IdentifiedModel):
     pass
 
 def test_get_query_and_args_for_reading():
-    model = SimpleBaseModel(id=IdStr('@'), version='0.1.0')
+    model = SimpleBaseModel(id=IdStr('@'))
 
     with use_temp_database_cursor_with_model(model, model_created=False) as cursor:
         model.id = IdStr("0")

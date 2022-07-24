@@ -1,83 +1,111 @@
 from typing import List
 import pytest
+from pydantic import Field
 
 from ormdantic.schema.base import (
-    SchemaBaseModel, IdStr
+    PersistentModel, SchemaBaseModel, IdStr
 )
 
 from ormdantic.schema.shareds import (
-    SharedModel, collect_shared_model_type_and_ids, concat_shared_models, extract_shared_models, extract_shared_models_for
+    SharedContentMixin, ContentReferenceModel, collect_shared_model_type_and_ids, concat_shared_models, extract_shared_models, extract_shared_models_for
 )
 from ormdantic.util.tools import digest
 
-class MyContent(SchemaBaseModel):
+class MyContent(SharedContentMixin):
     name:str
 
 class MyDerivedContent(MyContent):
     pass
 
-class MyAnotherContent(SchemaBaseModel):
+class MyAnotherContent(SharedContentMixin):
     name:str
 
-class MySharedContent(SharedModel[MyContent]):
-    code:str
+class MySharedModel(ContentReferenceModel[MyContent]):
+    code:str = Field(default='')
 
-class MyDerivedSharedContent(MySharedContent):
+class MyDerivedSharedModel(MySharedModel):
     name:str
 
-class MySharedAnotherContent(SharedModel[MyAnotherContent]):
+class MySharedAnotherModel(ContentReferenceModel[MyAnotherContent]):
     code:str
 
 class Container(SchemaBaseModel):
-    items: List[MySharedContent]
+    items: List[MySharedModel]
 
 class ComplexContainer(SchemaBaseModel):
-    items: List[MySharedContent]
-    other_items: List[MySharedAnotherContent]
+    items: List[MySharedModel]
+    other_items: List[MySharedAnotherModel]
+
+class MyPersistentModel(PersistentModel):
+    items: List[MySharedModel]
 
 
-def test_setattr():
-    model = MySharedContent(id=IdStr('1'), version='0', code='1', content=None)
-    assert '1' == model.id
-
+def test_refresh_id(monkeypatch:pytest.MonkeyPatch):
     content = MyContent(name='name')
-    model.content = content
 
-    assert digest(content.json(), 'sha1') == model.id
+    assert content.id == digest('{"name":"name"}')
 
-    with pytest.raises(RuntimeError, match='cannot set id.*'):
-        model.id = IdStr('1')
+    normalized_called = False
 
-    model.content = None
-    assert digest(content.json(), 'sha1') == model.id
+    def new_normalized(self):
+        nonlocal normalized_called
+        normalized_called = True
 
-    model.id = IdStr('1')
-    assert '1' == model.id
+    monkeypatch.setattr(MyContent, 'normalize', new_normalized)
+
+    assert content.refresh_id() == digest('{"name":"name"}')
+    assert normalized_called
 
 
-def test_setup_id():
-    model = MySharedContent.parse_obj(
+def test_get_content_id():
+    model = MySharedModel(content='1', code='1')
+
+    assert '1' == model.content
+    assert '1' == model.get_content_id()
+
+    model.content = MyContent(name='name')
+    assert model.content.id == model.get_content_id()
+
+
+def test_get_content():
+    content = MyContent(name='name')
+    model = MySharedModel(content=content, code='1')
+
+    assert content == model.get_content()
+
+    extract_shared_models(model, True)
+
+    with pytest.raises(RuntimeError, match='.*cannot get the content.*'):
+        model.get_content()
+
+
+def test_wrong_using_content_reference_model():
+    with pytest.raises(TypeError, match='.*requires a parameter class.*'):
+        class MissingParameter(ContentReferenceModel):
+            pass
+
+
+def test_parameter_type_will_be_created_for_parsing():
+    model = MySharedModel.parse_obj(
         {
-            'version': '0',
-            'code': 'code',
             'content': {'name':'name'}
         }
     )
 
-    assert model.id == digest('{"name":"name"}', 'sha1')
-
+    assert model.get_content_id() == digest('{"name":"name"}', 'sha1')
+    model.content = MyContent.parse_obj({'name':'name'})
 
 def test_extract_shared_models():
     content1 = MyContent(name='name1')
     content2 = MyContent(name='name2')
 
-    shared_content1 = MySharedContent.parse_obj({
+    shared_content1 = MySharedModel.parse_obj({
         'version': '0',
         'code': 'code1',
         'content': {'name':'name1'}
     })
 
-    shared_content2 = MySharedContent.parse_obj({
+    shared_content2 = MySharedModel.parse_obj({
         'version': '0',
         'code': 'code2',
         'content': {'name': 'name2'}
@@ -88,16 +116,16 @@ def test_extract_shared_models():
     ])
 
     assert {
-        digest(content1):{MyContent:content1},
-        digest(content2):{MyContent:content2}
+        content1.id:{MyContent:content1},
+        content2.id:{MyContent:content2}
     } == extract_shared_models(container)
 
     assert container.items[0].content == content1
 
     extract_shared_models(container, True)
 
-    assert container.items[0].content is None
-    assert container.items[1].content is None
+    assert container.items[0].content == content1.id
+    assert container.items[1].content == content2.id
 
     assert {} == extract_shared_models(content1)
 
@@ -110,17 +138,17 @@ def test_extract_shared_models_for():
 
     container = ComplexContainer(
         items=[
-            MySharedContent.parse_obj({
+            MySharedModel.parse_obj({
                 'version': '0',
                 'code': 'code1',
                 'content': content1
             }),
-            MySharedContent.parse_obj({
+            MySharedModel.parse_obj({
                 'version': '0',
                 'code': 'code2',
                 'content': content2
             }),
-            MyDerivedSharedContent.parse_obj({
+            MyDerivedSharedModel.parse_obj({
                 'version': '0',
                 'code': 'code2',
                 'name': 'derived',
@@ -128,7 +156,7 @@ def test_extract_shared_models_for():
             })
         ],
         other_items=[
-            MySharedAnotherContent.parse_obj({
+            MySharedAnotherModel.parse_obj({
                 'code': 'code2',
                 'name': 'derived',
                 'content': other_content1
@@ -137,12 +165,12 @@ def test_extract_shared_models_for():
     )
 
     assert {
-        digest(content1):content1, 
-        digest(content2):content2
+        content1.id:content1, 
+        content2.id:content2
     } == extract_shared_models_for(container, MyContent)
 
     assert {
-        digest(other_content1):other_content1
+        other_content1.id:other_content1
     } == extract_shared_models_for(container, MyAnotherContent, True)
 
     assert {
@@ -153,17 +181,17 @@ def test_concat_shared_models():
     content1 = MyContent(name='name1')
     content2 = MyContent(name='name2')
 
-    shared_content1 = MySharedContent.parse_obj({
+    shared_content1 = MySharedModel.parse_obj({
         'version': '0',
         'code': 'code1',
-        'id': digest(content1)
+        'content': content1.id
     })
  
 
-    shared_content2 = MySharedContent.parse_obj({
+    shared_content2 = MySharedModel.parse_obj({
         'version': '0',
         'code': 'code2',
-        'id': digest(content2)
+        'content': content2.id
     })
 
     container = Container(items=[
@@ -174,8 +202,8 @@ def test_concat_shared_models():
     } == extract_shared_models(container)
 
     contents = {
-        digest(content1):{MyContent:content1},
-        digest(content2):{MyContent:content2}
+        content1.id:{MyContent:content1},
+        content2.id:{MyContent:content2}
     } 
 
     concat_shared_models(container, contents)
@@ -185,8 +213,8 @@ def test_concat_shared_models():
     extract_shared_models(container, True)
 
     concat_shared_models(container, {
-        digest(content1):content1,
-        digest(content2):content2
+        content1.id:content1,
+        content2.id:content2
     })
 
     assert contents == extract_shared_models(container)
@@ -199,35 +227,35 @@ def test_collect_shared_model_ids():
 
     container = ComplexContainer(
         items=[
-            MySharedContent.parse_obj({
+            MySharedModel.parse_obj({
                 'version': '0',
                 'code': 'code1',
-                'id': digest(content1)
+                'id': content1.id
             }),
-            MySharedContent.parse_obj({
+            MySharedModel.parse_obj({
                 'version': '0',
                 'code': 'code2',
-                'id': digest(content2)
+                'id': content2.id
             }),
-            MyDerivedSharedContent.parse_obj({
+            MyDerivedSharedModel.parse_obj({
                 'version': '0',
                 'code': 'code2',
                 'name': 'derived',
-                'id': digest(content2)
+                'id': content2.id
             })
         ],
         other_items=[
-            MySharedAnotherContent.parse_obj({
+            MySharedAnotherModel.parse_obj({
                 'code': 'code2',
                 'name': 'derived',
-                'id': digest(other_content1)
+                'id': other_content1.id
             })
         ]
     )
 
     assert {
-        MyContent: {digest(content1), digest(content2)},
-        MyAnotherContent: {digest(other_content1)}
+        MyContent: {content1.id, content2.id},
+        MyAnotherContent: {other_content1.id}
     } == collect_shared_model_type_and_ids(container)
 
 
@@ -240,34 +268,34 @@ def test_collect_shared_model_ids():
 
     container = ComplexContainer(
         items=[
-            MySharedContent.parse_obj({
+            MySharedModel.parse_obj({
                 'version': '0',
                 'code': 'code1',
-                'id': digest(content1)
+                'content': content1.id
             }),
-            MySharedContent.parse_obj({
+            MySharedModel.parse_obj({
                 'version': '0',
                 'code': 'code2',
-                'id': digest(content2)
+                'content': content2.id
             }),
-            MyDerivedSharedContent.parse_obj({
+            MyDerivedSharedModel.parse_obj({
                 'version': '0',
                 'code': 'code2',
                 'name': 'derived',
-                'id': digest(content2)
+                'content': content2.id
             })
         ],
         other_items=[
-            MySharedAnotherContent.parse_obj({
+            MySharedAnotherModel.parse_obj({
                 'code': 'code2',
                 'name': 'derived',
-                'id': digest(other_content1)
+                'content': other_content1.id
             })
         ]
     )
 
     assert {
-        MyContent: {digest(content1), digest(content2)},
-        MyAnotherContent: {digest(other_content1)}
+        MyContent: {content1.id, content2.id},
+        MyAnotherContent: {other_content1.id}
     } == collect_shared_model_type_and_ids(container)
 

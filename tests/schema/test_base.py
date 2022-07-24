@@ -1,4 +1,4 @@
-from typing import Any, cast, List, Tuple
+from typing import Any, cast, List, Tuple, Type
 import uuid
 
 import pytest
@@ -8,7 +8,7 @@ from ormdantic.schema.base import (
     IdentifiedModel, IdentifyingMixin, PersistentModel, PartOfMixin, 
     assign_identifying_fields_if_empty, get_container_type, 
     get_field_name_and_type, get_identifer_of, get_field_names_for, IdStr, 
-    update_forward_refs, is_field_list_or_tuple_of
+    update_forward_refs, is_field_list_or_tuple_of, get_field_type
 )
 
 def test_identified_model():
@@ -29,6 +29,16 @@ def test_get_container_type():
     assert Container is get_container_type(Part)
     assert None is get_container_type(Container)
     
+
+def test_get_field_type():
+    class Container(PersistentModel):
+        name:str
+
+    assert str == get_field_type(Container, 'name')
+
+    with pytest.raises(RuntimeError, match='.*Invalid*'):
+        get_field_type(cast(Type[Container], str), 'name')
+
 
 def test_get_part_field_name():
     class Part(PersistentModel, PartOfMixin['Container']):

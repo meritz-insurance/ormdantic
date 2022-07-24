@@ -1,11 +1,11 @@
-import functools
 from typing import (
     get_args, Type, get_origin, Tuple, Any, Generic, Protocol,
-    ForwardRef, Dict, Generic, _collect_type_vars
+    ForwardRef, Dict, Generic, _collect_type_vars, Union
 )
 from inspect import getmro
 import sys
 import copy
+import functools
 
 from .tools import convert_tuple
 
@@ -56,7 +56,8 @@ def get_mro_with_generic(tp:Type):
     result = {Generic: Generic, Protocol: Protocol}
     _generic_mro(result, tp)
     cls = origin if origin is not None else tp
-    return tuple(result.get(sub_cls, sub_cls) for sub_cls in cls.__mro__)
+    mro = getattr(cls, '__mro__', (cls,))
+    return tuple(result.get(sub_cls, sub_cls) for sub_cls in mro)
 
 
 def update_forward_refs_in_generic_base(type_:Type, localns:Dict[str, Any]):
@@ -95,7 +96,6 @@ def resolve_forward_ref(type_:Type, localns:Dict[str, Any]) -> Type:
     return type_
 
 
-@functools.cache
 def is_derived_from(type_:Type, base_type:Type) -> bool:
     # if first argument is not class, the issubclass throw the exception.
     # but usually, we don't need the exception. 
@@ -111,7 +111,23 @@ def is_derived_from(type_:Type, base_type:Type) -> bool:
     if hasattr(type_, "__origin__"):
         type_ = get_origin(type_)
 
-    return any(t is base_type for t in getmro(type_))
+        if type_ is base_type:
+            return True
+
+    if hasattr(type_, '__mro__'):
+        # Union does not have __mro__ attribute
+        return any(t is base_type for t in getmro(type_))
+
+    return False
+
+
+def get_union_type_arguments(type_:Type) -> Tuple[Type,...] | None:
+    union_generic = get_base_generic_type_of(type_, Union)
+
+    if union_generic:
+        return get_args(union_generic)
+
+    return None
 
 
 @functools.cache

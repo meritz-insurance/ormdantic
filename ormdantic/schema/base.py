@@ -185,12 +185,12 @@ class IntegerArrayIndex(ArrayIndexMixin[int]):
 
 
 class IdentifiedMixin(SchemaBaseModel):
-    id: IdStr = Field('', title='identifier for retreiving')
+    id: IdStr = Field(default='', title='identifier for retreiving')
 
 
 class IdentifiedModel(PersistentModel, IdentifiedMixin):
     ''' identified by uuid '''
-    version:str = Field('0.1.0')
+    version:str = Field(default='0.1.0')
 
     class Config:
         title = 'base object which can be saved or retreived by id'
@@ -209,21 +209,19 @@ def get_container_type(type_:Type[ModelT]) -> Optional[Type[ModelT]]:
     return None
 
 
-@functools.cache
 def get_field_names_for(type_:Type, *types:Type) -> Tuple[str,...]:
     types = convert_tuple(types)
 
     return tuple(field_name for field_name, _ in get_field_name_and_type(type_, *types))
 
 
-@functools.cache
 def get_field_name_and_type(type_:Type, 
                             *target_types: Type,
                             ) -> Tuple[Tuple[str, Type]]:
     if not is_derived_from(type_, BaseModel):
         _logger.fatal(f'type_ {type_=}should be subclass of BaseModel. '
                       f'check the mro {inspect.getmro(type_)}')
-        raise RuntimeError(f'invalid type {type_}')
+        raise RuntimeError(f'Invalid type {type_}.')
 
     target_types = convert_tuple(target_types) 
 
@@ -238,12 +236,11 @@ def get_field_name_and_type(type_:Type,
     return tuple(name_and_types)
 
 
-@functools.cache
 def get_field_type(type_:Type[ModelT], field_name:str) -> type:
     if not is_derived_from(type_, BaseModel):
-        _logger.fatal(f'type_ {type_=}should be subclass of BaseModel. '
+        _logger.fatal(f'type_ {type_=} should be the subclass of BaseModel. '
                       f'check the mro {inspect.getmro(type_)}')
-        raise RuntimeError(f'invalid type {type_}')
+        raise RuntimeError(f'Invalid type {type_}.')
 
     return type_.__fields__[field_name].outer_type_
 
@@ -261,14 +258,12 @@ def update_forward_refs(type_:Type[ModelT], localns:Dict[str, Any]):
     update_forward_refs_in_generic_base(type_, localns)
 
 
-@functools.cache
 def is_field_list_or_tuple_of(type_:Type, field_name:str, *parameters:Type) -> bool:
     model_field = type_.__fields__[field_name]
 
     return is_list_or_tuple_of(model_field.outer_type_, *parameters)
 
 
-@functools.cache
 def get_part_types(type_:Type) -> Tuple[Type]:
     return tuple(
         unique(
@@ -361,7 +356,6 @@ def get_stored_fields_for(type_:Type,
         }
 
 
-@functools.lru_cache()
 def get_stored_fields(type_:Type):
     stored_fields : StoredFieldDefinitions = {
         field_name:(_get_json_paths(field_name, field_type), field_type)

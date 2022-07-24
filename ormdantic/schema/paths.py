@@ -4,11 +4,9 @@ from typing import (
     List, cast
 )
 import inspect
-import functools
 
 from ormdantic.util.hints import get_list_or_type_type_parameters
 from ormdantic.util.tools import convert_tuple
-
 
 from .base import ( ModelT, SchemaBaseModel)
 from ..util import (
@@ -22,13 +20,12 @@ T = TypeVar('T')
 _logger = get_logger(__name__)
 
 
-@functools.cache
 def get_paths_for_type(type_:Type, types:Type | Tuple[Type, ...]) -> Tuple[str, ...]:
     types = convert_tuple(types)
 
     return tuple(path for path, t in get_path_and_type(type_, 
         lambda t: any(
-            t is target_type or is_list_or_tuple_of(t, target_type) for target_type in types
+            is_derived_or_collection_of_derived(t, target_type) for target_type in types
         )
     ))
 
@@ -54,9 +51,9 @@ def _get_path_and_type(type_:Type[ModelT],
         field_type = model_field.outer_type_ 
 
         if not predicate or (
-            is_derived_or_collection_of_derived(field_type, predicate)
-            if isinstance(predicate, type) else 
             predicate(field_type)
+            if inspect.isfunction(predicate) else 
+            is_derived_or_collection_of_derived(field_type, predicate)
         ):
             json_path = []
 
@@ -96,7 +93,7 @@ def extract(model:SchemaBaseModel, path:str) -> Any:
 
             if is_list_or_tuple_of(type(current)):
                 current = tuple(itertools.chain(*(
-                    convert_as_collection(getattr(item, field_name, None))
+                    convert_as_collection(getattr(item, field_name, tuple()))
                     for item in cast(list, current)
                 )))
             elif current is not None:
@@ -106,6 +103,7 @@ def extract(model:SchemaBaseModel, path:str) -> Any:
 
     return current
             
+
 def extract_as(model:SchemaBaseModel, path:str, target_type_:Type[T]) -> T | Tuple[T] | None:
     data = extract(model, path)
 
