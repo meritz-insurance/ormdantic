@@ -3,11 +3,12 @@ import pytest
 from pydantic import Field
 
 from ormdantic.schema.base import (
-    PersistentModel, SchemaBaseModel, IdStr
+    PersistentModel, SchemaBaseModel
 )
-
 from ormdantic.schema.shareds import (
-    SharedContentMixin, ContentReferenceModel, collect_shared_model_type_and_ids, concat_shared_models, extract_shared_models, extract_shared_models_for
+    SharedContentMixin, ContentReferenceModel, 
+    collect_shared_model_type_and_ids, concat_shared_models, 
+    extract_shared_models, extract_shared_models_for, get_shared_content_types
 )
 from ormdantic.util.tools import digest
 
@@ -177,6 +178,32 @@ def test_extract_shared_models_for():
     } == extract_shared_models_for(container, MyAnotherContent)
 
 
+def test_extract_shared_models_for_with_multiple_item_with_same_id():
+    content1 = MyContent(name='name1')
+    content2 = MyDerivedContent(name='name1')
+
+    container = ComplexContainer(
+        items=[
+            MySharedModel.parse_obj({
+                'version': '0',
+                'code': 'code1',
+                'content': content1
+            }),
+            MySharedModel.parse_obj({
+                'version': '0',
+                'code': 'code2',
+                'content': content2
+            }),
+        ],
+        other_items=[]
+    )
+
+    with pytest.raises(RuntimeError, match='.*different type.*'):
+        extract_shared_models_for(container, MyContent)
+
+    extract_shared_models_for(container, MyDerivedContent)
+     
+
 def test_concat_shared_models():
     content1 = MyContent(name='name1')
     content2 = MyContent(name='name2')
@@ -259,7 +286,6 @@ def test_collect_shared_model_ids():
     } == collect_shared_model_type_and_ids(container)
 
 
-
 def test_collect_shared_model_ids():
     content1 = MyContent(name='name1')
     content2 = MyContent(name='name2')
@@ -299,3 +325,7 @@ def test_collect_shared_model_ids():
         MyAnotherContent: {other_content1.id}
     } == collect_shared_model_type_and_ids(container)
 
+
+def test_get_shared_content_types():
+    assert (MyContent, MyAnotherContent) == get_shared_content_types(ComplexContainer)
+ 

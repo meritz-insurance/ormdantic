@@ -45,6 +45,8 @@ def get_path_and_type(type_:Type[ModelT],
 def _get_path_and_type(type_:Type[ModelT], 
                       predicate: Type | Callable[[Type], bool] | None = None,
                       ) -> Iterator[Tuple[List[str], Type]]:
+    # TODO:
+    # checking recursively refere4nce should be implemented
     assert is_derived_from(type_, SchemaBaseModel)
 
     for field_name, model_field in type_.__fields__.items():

@@ -31,7 +31,10 @@ class DatabaseConnectionPool():
         self.close_all()
 
     def __str__(self):
-        return f"DatabaseConnectionPool(config={self._connection_config}) / _cached={self._cached}, _connected={self._connected}"
+        return (
+            f"DatabaseConnectionPool(config={self._connection_config}) "
+            f"/ {self._cached=}, {self._connected=}"
+        )
 
     @contextmanager
     def open_cursor(self, commit:bool = False, *, query_to_log:bool=False) -> Iterator[DictCursor]:

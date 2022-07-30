@@ -1,6 +1,7 @@
 from typing import (
-    get_args, Type, get_origin, Tuple, Any, Generic, Protocol,
-    ForwardRef, Dict, Generic, _collect_type_vars, Union
+    TypeGuard, get_args, Type, get_origin, Tuple, Any, Generic, Protocol,
+    ForwardRef, Dict, Generic, _collect_type_vars, Union, TypeVar, List, Tuple,
+    _BaseGenericAlias
 )
 from inspect import getmro
 import sys
@@ -10,7 +11,7 @@ import functools
 from .tools import convert_tuple
 
 #@functools.cache
-def get_base_generic_type_of(type_:Type, *generic_types:Type) -> Type | None:
+def get_base_generic_alias_of(type_:Type, *generic_types:Type) -> _BaseGenericAlias | None:
     generic_types = convert_tuple(generic_types)
 
     for base_type in get_mro_with_generic(type_):
@@ -18,6 +19,8 @@ def get_base_generic_type_of(type_:Type, *generic_types:Type) -> Type | None:
             return base_type
 
     return None
+
+_T = TypeVar('_T')
 
 
 def get_type_args(type_:Type) -> Tuple[Any,...]:
@@ -96,7 +99,7 @@ def resolve_forward_ref(type_:Type, localns:Dict[str, Any]) -> Type:
     return type_
 
 
-def is_derived_from(type_:Type, base_type:Type) -> bool:
+def is_derived_from(type_:Type, base_type:Type[_T]) -> TypeGuard[Type[_T]]:
     # if first argument is not class, the issubclass throw the exception.
     # but usually, we don't need the exception. 
     # we just want to know whether the type is derived or not.
@@ -122,7 +125,7 @@ def is_derived_from(type_:Type, base_type:Type) -> bool:
 
 
 def get_union_type_arguments(type_:Type) -> Tuple[Type,...] | None:
-    union_generic = get_base_generic_type_of(type_, Union)
+    union_generic = get_base_generic_alias_of(type_, Union)
 
     if union_generic:
         return get_args(union_generic)
@@ -130,7 +133,6 @@ def get_union_type_arguments(type_:Type) -> Tuple[Type,...] | None:
     return None
 
 
-@functools.cache
 def is_list_or_tuple_of(type_:Type, *parameters:Type) -> bool:
     args = get_list_or_type_type_parameters(type_)
 
@@ -153,7 +155,7 @@ def is_derived_or_collection_of_derived(type_:Type, param_type_:Type):
 
 @functools.cache
 def get_list_or_type_type_parameters(type_:Type) -> Tuple[Type,...] | None:
-    generic = get_base_generic_type_of(type_, tuple, list)
+    generic = get_base_generic_alias_of(type_, tuple, list)
 
     if generic:
         args = get_args(generic) 

@@ -1,17 +1,17 @@
 # for clearing testing database.
 # mariadb -h localhost -P 33069 -p -u root -N -B -e 'select CONCAT("drop database `", schema_name, "`;") as name from information_schema.schemata where schema_name like "TEST_%";'
 #
-from typing import  List, Tuple
+from typing import  List, Tuple, cast, Type
 import pytest
 
 from ormdantic.database.storage import (
     delete_objects, query_records, upsert_objects, find_object, 
-    find_objects, build_where
+    find_objects, build_where, load_object
 )
 
 from ormdantic.schema import PersistentModel
 from ormdantic.schema.base import (
-    FullTextSearchedStringIndex, PartOfMixin, StringArrayIndex, 
+    FullTextSearchedStringIndex, PartOfMixin, SchemaBaseModel, StringArrayIndex, 
     get_identifer_of, update_forward_refs, IdentifiedModel, IdStr,
     StoredFieldDefinitions
 )
@@ -78,13 +78,12 @@ model = ContainerModel(id=IdStr('@'),
                         ])
 
 
-@pytest.fixture
+@pytest.fixture(scope='module')
 def pool_and_model():
     with use_temp_database_pool_with_model(ContainerModel) as pool:
         upserted = upsert_objects(pool, model)
 
         yield pool, upserted
-
 
 
 def test_upsert_objects(pool_and_model):
@@ -120,6 +119,12 @@ def test_delete_objects():
 
         assert found is None
 
+        class CannotDelete(SchemaBaseModel):
+            pass
+
+        with pytest.raises(RuntimeError):
+            delete_objects(pool, cast(Type[PersistentModel], CannotDelete), tuple())
+
 
 def test_find_object(pool_and_model):
     pool, _ = pool_and_model
@@ -152,6 +157,13 @@ def test_find_objects_for_multiple_nested_parts(pool_and_model):
     found = find_objects(pool, SubPartModel, tuple())
 
     assert {'part1-sub1', 'part2-sub1', 'part2-sub2'} == {found.name for found in found}
+
+
+def test_load_object(pool_and_model):
+    pool, _ = pool_and_model
+
+    with pytest.raises(RuntimeError, match='cannot found matched item.*'):
+        load_object(pool, PartModel, (('name', '=', 'not_existed'),))
 
 
 def test_query_records_with_match(pool_and_model):

@@ -4,7 +4,6 @@ from typing import (
 )
 import datetime
 import inspect
-import functools
 from uuid import uuid4
 
 import orjson
@@ -17,7 +16,7 @@ from ormdantic.util.hints import is_derived_or_collection_of_derived
 
 from ..util import (
     get_logger,
-    get_base_generic_type_of, get_type_args, update_forward_refs_in_generic_base,
+    get_base_generic_alias_of, get_type_args, update_forward_refs_in_generic_base,
     is_derived_from, resolve_forward_ref, is_list_or_tuple_of,
     resolve_forward_ref_in_args
 )
@@ -201,7 +200,7 @@ IdentifiedModelT = TypeVar('IdentifiedModelT', bound=IdentifiedModel)
 
 def get_container_type(type_:Type[ModelT]) -> Optional[Type[ModelT]]:
     ''' get the type of container '''
-    part_type = get_base_generic_type_of(cast(Type, type_), PartOfMixin)
+    part_type = get_base_generic_alias_of(cast(Type, type_), PartOfMixin)
 
     if part_type:
         return get_type_args(part_type)[0]

@@ -1,14 +1,14 @@
-from typing import ForwardRef, Generic, List, TypeVar, Tuple, get_args
+from typing import ForwardRef, Generic, List, TypeVar, Tuple, get_args, Union
 
 import pytest
 
 from ormdantic.util import (
-    get_base_generic_type_of, get_type_args, get_mro_with_generic, 
+    get_base_generic_alias_of, get_type_args, get_mro_with_generic, 
     resolve_forward_ref, update_forward_refs_in_generic_base, is_derived_from, 
     is_list_or_tuple_of
 )
 from ormdantic.schema.base import PartOfMixin, PersistentModel, StringIndex
-from ormdantic.util.hints import get_list_or_type_type_parameters, is_derived_or_collection_of_derived, resolve_forward_ref_in_args
+from ormdantic.util.hints import get_list_or_type_type_parameters, get_union_type_arguments, is_derived_or_collection_of_derived, resolve_forward_ref_in_args
 
 T = TypeVar('T')
 
@@ -17,10 +17,10 @@ def test_get_base_generic_type_of():
     class GenericTest(PartOfMixin[PersistentModel]):
         pass
 
-    base_generic = get_base_generic_type_of(GenericTest, PartOfMixin)
+    base_generic = get_base_generic_alias_of(GenericTest, PartOfMixin)
     assert PartOfMixin[PersistentModel] == base_generic
 
-    base_generic = get_base_generic_type_of(GenericTest, PartOfMixin[PersistentModel])
+    base_generic = get_base_generic_alias_of(GenericTest, PartOfMixin[PersistentModel])
     assert PartOfMixin[PersistentModel] == base_generic
 
     assert get_type_args(base_generic)[0]
@@ -28,11 +28,11 @@ def test_get_base_generic_type_of():
     class MultipleInheritanceTest(List[str], GenericTest):
         pass
 
-    base_generic = get_base_generic_type_of(MultipleInheritanceTest, PartOfMixin)
+    base_generic = get_base_generic_alias_of(MultipleInheritanceTest, PartOfMixin)
 
     assert PartOfMixin[PersistentModel] == base_generic
 
-    base_generic = get_base_generic_type_of(MultipleInheritanceTest, list)
+    base_generic = get_base_generic_alias_of(MultipleInheritanceTest, list)
 
     assert List[str] == base_generic
 
@@ -62,7 +62,7 @@ def test_update_forward_refs_in_generic_base():
 
     update_forward_refs_in_generic_base(Derived, locals())
 
-    base_type = get_base_generic_type_of(Derived, Base)
+    base_type = get_base_generic_alias_of(Derived, Base)
 
     assert (Item,) == get_type_args(base_type)
 
@@ -156,3 +156,10 @@ def test_is_derived_or_collection_of_derived():
     assert is_derived_or_collection_of_derived(List[Derived], Base)
     assert is_derived_or_collection_of_derived(List[Derived], Derived)
     assert not is_derived_or_collection_of_derived(List[Derived], Item)
+
+
+def test_get_union_type_arguments():
+    assert get_union_type_arguments(Union[str, int]) == (str, int)
+    assert get_union_type_arguments(str) is None
+
+    

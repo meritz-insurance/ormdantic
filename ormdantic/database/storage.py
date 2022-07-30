@@ -1,23 +1,22 @@
-from typing import Optional, Iterable, Type, Iterator, Dict, Any, Tuple, overload
+from typing import Optional, Iterable, Type, Iterator, Dict, Any, Tuple, overload, cast
 from collections import deque
 from contextlib import contextmanager
-
-from pydantic import BaseModel
-
-from ormdantic.schema.shareds import ( 
-    collect_shared_model_type_and_ids, concat_shared_models, extract_shared_models_for, 
-    has_shared_models
-)
-from ormdantic.util.hints import is_derived_from
+import itertools
 
 from .connections import DatabaseConnectionPool
 
+from ..util import get_logger, is_derived_from
 from ..schema import ModelT, PersistentModel, get_container_type
 from ..schema.base import (
     PartOfMixin, SchemaBaseModel, assign_identifying_fields_if_empty, get_part_types, 
     PersistentModelT
 )
-from ..util import get_logger
+from ..schema.shareds import ( 
+    PersistentSharedContentModel, SharedContentMixin, collect_shared_model_type_and_ids, 
+    concat_shared_models, extract_shared_models_for, has_shared_models,
+    get_shared_content_types
+)
+
 from .queries import (
     Where, execute_and_get_last_id, 
     get_sql_for_creating_table,
@@ -46,14 +45,17 @@ def create_table(pool:DatabaseConnectionPool, *types:Type[PersistentModelT]):
                 cursor.execute(sql)
 
 @overload
-def upsert_objects(pool:DatabaseConnectionPool, models:PersistentModelT) -> PersistentModelT:
+def upsert_objects(pool: DatabaseConnectionPool, 
+                   models: PersistentModelT) -> PersistentModelT:
     ...
 
 @overload
-def upsert_objects(pool:DatabaseConnectionPool, models:Iterable[PersistentModelT]) -> Tuple[PersistentModelT,...]:
+def upsert_objects(pool:DatabaseConnectionPool, 
+                   models: Iterable[PersistentModelT]) -> Tuple[PersistentModelT, ...]:
     ...
 
-def upsert_objects(pool:DatabaseConnectionPool, models:PersistentModelT | Iterable[PersistentModelT]):
+def upsert_objects(pool:DatabaseConnectionPool, 
+                   models: PersistentModelT | Iterable[PersistentModelT]):
     is_single = isinstance(models, PersistentModel)
 
     model_list = [models] if is_single else models
@@ -89,7 +91,7 @@ def _iterate_extracted_persistent_shared_models(model:PersistentModel) -> Iterat
     if has_shared:
         model = model.copy()
 
-        for content_model in extract_shared_models_for(model, PersistentModel, True).values():
+        for content_model in extract_shared_models_for(model, PersistentSharedContentModel, True).values():
             yield from _iterate_extracted_persistent_shared_models(content_model)
 
         yield model
@@ -98,13 +100,44 @@ def _iterate_extracted_persistent_shared_models(model:PersistentModel) -> Iterat
 
 
 def delete_objects(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:Where):
+    if not is_derived_from(type_, PersistentModel):
+        _logger.fatal(
+            f"try to delete {type_=}. it is impossible. type should be dervied "
+            f"from PersistentModel. {type_.mro()=}"
+        )
+        raise RuntimeError(f'{type_} could not be deleted. it should be derived from PersistentModel')
+
+    if issubclass(type_, PersistentSharedContentModel):
+        _logger.fatal(
+            f"try to delete PersistentSharedContentModel {type_=}. it is impossible. "
+            "we don't know whether share context mixin can be referenced by "
+            "other entity or not"
+        )
+        raise RuntimeError(f'PersistentSharedContentModel could not be deleted. you tried to deleted {type_.__name__}')
+
     with pool.open_cursor(True) as cursor:
         cursor.execute(*get_query_and_args_for_deleting(type_, where))
 
 
+def load_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:Where, 
+                *, 
+                concat_shared_models: bool = False,
+                unwind:Tuple[str,...] | str = tuple()) -> PersistentModelT:
+    found = find_object(pool, type_, where, 
+                        concat_shared_models=concat_shared_models, unwind=unwind)
+
+    if not found:
+        _logger.fatal(f'cannot found {type_=} object for {where=} in {pool=}')
+        raise RuntimeError('cannot found matched item from database.')
+
+    return found
+        
+
 def find_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:Where, 
-                *, concat_shared_models: bool = False) -> Optional[PersistentModelT]:
-    objs = list(query_records(pool, type_, where, 2))
+                *, 
+                concat_shared_models: bool = False, 
+                unwind:Tuple[str,...] | str = tuple()) -> Optional[PersistentModelT]:
+    objs = list(query_records(pool, type_, where, 2, unwind=unwind))
 
     if len(objs) == 2:
         _logger.fatal(f'More than one object found. {type_=} {where=} in {pool=}. {[obj[_ROW_ID_FIELD] for obj in objs]}')
@@ -119,41 +152,47 @@ def find_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where
 
 def find_objects(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:Where, 
                 *, fetch_size: Optional[int] = None,
-                concat_shared_models: bool = False) -> Iterator[PersistentModelT]:
+                concat_shared_models: bool = False,
+                unwind:Tuple[str, ...] | str = tuple()) -> Iterator[PersistentModelT]:
 
     with _context_for_shared_model(pool, concat_shared_models) as convert_model:
-        for record in query_records(pool, type_, where, fetch_size, fields=(_JSON_FIELD, _ROW_ID_FIELD)):
+        for record in query_records(pool, type_, where, fetch_size, 
+                                    fields=(_JSON_FIELD, _ROW_ID_FIELD),
+                                    unwind=unwind):
             model = convert_model(type_, record)
 
             yield model
 
 
-def _build_shared_model_set(pool:DatabaseConnectionPool, model:PersistentModel, shared_set:Dict[str, Dict[Type, SchemaBaseModel]]):
+def _build_shared_model_set(pool:DatabaseConnectionPool, model:PersistentModel, 
+                            shared_set: Dict[str, Dict[Type[PersistentSharedContentModel], PersistentSharedContentModel]]):
     type_and_ids = collect_shared_model_type_and_ids(model)
 
     for shared_type, shared_ids in type_and_ids.items():
-        to_be_retreived = [id for id in shared_ids if id not in shared_set]
+        to_be_retreived = tuple(id for id in shared_ids if id not in shared_set)
 
         if not to_be_retreived:
             continue
 
-        if is_derived_from(shared_type, PersistentModel):
+        if is_derived_from(shared_type, PersistentSharedContentModel):
             for shared_model_record in query_records(pool,
-                    shared_type, ((_ROW_ID_FIELD, 'in', to_be_retreived),),
+                    shared_type, (('id', 'in', to_be_retreived),),
                     fields=(_JSON_FIELD, _ROW_ID_FIELD)):
 
-                shared_model = _convert_record_to_model(shared_type, shared_model_record)
+                shared_model = cast(PersistentSharedContentModel, _convert_record_to_model(shared_type, shared_model_record))
+                if shared_model.id not in shared_set:
+                    shared_set[shared_model.id] = {shared_type:shared_model}
                 
                 _build_shared_model_set(pool, shared_model, shared_set)
 
 
-def _concat_shared_models_recursively(model:PersistentModel, shared_set:Dict[str, Dict[Type, SchemaBaseModel]]):
-    concat_shared_models(model, shared_set)
+def _concat_shared_models_recursively(model:SchemaBaseModel, 
+                                      shared_set: Dict[str, Dict[Type, SharedContentMixin]]):
+    concatted = concat_shared_models(model, shared_set)
 
-    for type_and_shareds in shared_set.values():
-        for another_model in type_and_shareds.values():
-            if another_model and has_shared_models(another_model):
-                _concat_shared_models_recursively(another_model, shared_set)
+    for another_model in concatted:
+        if another_model and has_shared_models(another_model):
+            _concat_shared_models_recursively(another_model, shared_set)
 
 
 @contextmanager
@@ -201,14 +240,17 @@ def query_records(pool: DatabaseConnectionPool,
                   where: Where,
                   fetch_size: Optional[int] = None,
                   fields: Tuple[str, ...] = (_JSON_FIELD, _ROW_ID_FIELD),
-                  order_by: Tuple[str, ...] = tuple(),
+                  order_by: Tuple[str, ...] | str= tuple(),
                   limit: int | None = None,
                   offset: int | None = None,
+                  unwind: Tuple[str,...] | str = tuple(),
                   joined: Dict[str, Type[PersistentModelT]] | None = None
                   ) -> Iterator[Dict[str, Any]]:
 
     query_and_param = get_query_and_args_for_reading(
-        type_, fields, where, order_by=order_by, limit=limit, offset=offset, 
+        type_, fields, where, 
+        order_by=order_by, limit=limit, offset=offset, 
+        unwind=unwind,
         ns_types=joined)
 
     with pool.open_cursor() as cursor:
@@ -229,17 +271,25 @@ def _iterate_types_for_creating_order(types:Iterable[Type[ModelT]]) -> Iterator[
         else:
             yield type_
 
-            for part_type in _traverse_all_part_types(type_):
-                yield part_type
+            for sub_type in itertools.chain(_traverse_all_part_types(type_), 
+                                            _traverse_all_shared_types(type_)):
+                yield sub_type
 
-                if part_type in to_be_created:
-                    to_be_created.remove(part_type)
+                if sub_type in to_be_created:
+                    to_be_created.remove(sub_type)
 
 
 def _traverse_all_part_types(type_:Type[ModelT]):
     for part_type in get_part_types(type_):
         yield part_type
         yield from _traverse_all_part_types(part_type)
+
+
+def _traverse_all_shared_types(type_:Type[ModelT]):
+    for shared_type in get_shared_content_types(type_):
+        yield shared_type
+        yield from _traverse_all_part_types(shared_type)
+        yield from _traverse_all_shared_types(shared_type)
 
 
 def _upsert_parts_and_externals(cursor, root_inserted_id:int, type_:Type) -> None:
@@ -255,5 +305,4 @@ def _upsert_parts_and_externals(cursor, root_inserted_id:int, type_:Type) -> Non
             cursor.execute(sql, args)
 
         _upsert_parts_and_externals(cursor, root_inserted_id, part_type)
-
 

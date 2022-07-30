@@ -12,7 +12,7 @@ from pydantic import ConstrainedStr, ConstrainedDecimal
 from pymysql.cursors import DictCursor
 
 from ormdantic.util import is_derived_from, convert_tuple
-from ormdantic.util.hints import get_base_generic_type_of
+from ormdantic.util.hints import get_base_generic_alias_of
 
 from ..util import get_logger
 from ..schema.base import (
@@ -256,7 +256,7 @@ def _get_table_fields() -> Iterator[str]:
 
 def _get_external_index_table_fields(field_name:str, field_type:Type) -> Iterator[str]:
     # we don't need primary key, because there is no field which is for full text searching.
-    type = get_base_generic_type_of(field_type, ArrayIndexMixin)
+    type = get_base_generic_alias_of(field_type, ArrayIndexMixin)
 
     param_type = get_args(type)[0]
 
@@ -1253,7 +1253,7 @@ def _build_join_from_refs(current_type:Type, current_ns:str, namespaces:Set[str]
 
     for field_name, (_, field_type) in refs.items():
         if any(field_name in ns for ns in namespaces):
-            generic_type = get_base_generic_type_of(field_type, ReferenceMixin)
+            generic_type = get_base_generic_alias_of(field_type, ReferenceMixin)
 
             ref_type = get_args(generic_type)[0]
 
@@ -1291,7 +1291,7 @@ def _find_join_key(base_type:Type, target_type:Type, reversed:bool = False) -> T
     refs = get_stored_fields_for(base_type, ReferenceMixin)
 
     for field_name, (_, field_type) in refs.items():
-        generic_type = get_base_generic_type_of(field_type, ReferenceMixin)
+        generic_type = get_base_generic_alias_of(field_type, ReferenceMixin)
 
         if get_args(generic_type)[0] == target_type:
             target_field = field_type._target_field
