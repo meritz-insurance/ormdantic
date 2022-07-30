@@ -134,7 +134,7 @@ def get_union_type_arguments(type_:Type) -> Tuple[Type,...] | None:
 
 
 def is_list_or_tuple_of(type_:Type, *parameters:Type) -> bool:
-    args = get_list_or_type_type_parameters(type_)
+    args = get_type_parameter_of_list_or_tuple(type_)
 
     if args is None:
         return False
@@ -154,7 +154,7 @@ def is_derived_or_collection_of_derived(type_:Type, param_type_:Type):
 
 
 @functools.cache
-def get_list_or_type_type_parameters(type_:Type) -> Tuple[Type,...] | None:
+def get_type_parameter_of_list_or_tuple(type_:Type) -> Tuple[Type,...] | None:
     generic = get_base_generic_alias_of(type_, tuple, list)
 
     if generic:

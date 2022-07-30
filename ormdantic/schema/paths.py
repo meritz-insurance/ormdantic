@@ -5,7 +5,7 @@ from typing import (
 )
 import inspect
 
-from ormdantic.util.hints import get_list_or_type_type_parameters
+from ormdantic.util.hints import get_type_parameter_of_list_or_tuple
 from ormdantic.util.tools import convert_tuple
 
 from .base import ( ModelT, SchemaBaseModel)
@@ -62,7 +62,7 @@ def _get_path_and_type(type_:Type[ModelT],
             json_path.append(field_name)
 
             if is_list_or_tuple_of(field_type):
-                type_param = get_list_or_type_type_parameters(field_type)
+                type_param = get_type_parameter_of_list_or_tuple(field_type)
                 field_type = type_param and type_param[0]
 
             yield (json_path, field_type)
@@ -72,7 +72,7 @@ def _get_path_and_type(type_:Type[ModelT],
                 _get_path_and_type(field_type, predicate)
             )
         elif is_list_or_tuple_of(field_type, SchemaBaseModel):
-            pararmeters = get_list_or_type_type_parameters(field_type)
+            pararmeters = get_type_parameter_of_list_or_tuple(field_type)
 
             if pararmeters: 
                 yield from (([field_name] + paths, type_) 
