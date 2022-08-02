@@ -35,7 +35,7 @@ class TypeNamedModelMetaclass(ModelMetaclass):
 
  
 class TypeNamedModel(SchemaBaseModel, metaclass=TypeNamedModelMetaclass):
-    type_name: str = Field(default='')
+    type_name: str = Field(default='TypeNamedModel')
 
 
 def parse_obj_for_model(obj:Dict[str, Any]) -> Any:

@@ -1,7 +1,7 @@
 from .connections import DatabaseConnectionPool
 from .storage import (
     create_table, upsert_objects, find_object, find_objects, delete_objects,
-    load_object
+    load_object, query_records
 )
 
 __all__ = [
@@ -11,5 +11,6 @@ __all__ = [
     "find_object",
     "find_objects",
     "delete_objects",
-    "load_object"
+    "load_object",
+    "query_records"
 ]

@@ -6,7 +6,10 @@ from .schema import (
     IdStr, IntegerArrayIndex, update_forward_refs, StoredFieldDefinitions
 )
 from .database import (
-    DatabaseConnectionPool, create_table, upsert_objects, find_object, find_objects, delete_objects
+    DatabaseConnectionPool, 
+    create_table, 
+    upsert_objects, find_object, find_objects, delete_objects,
+    query_records
 )
 
 
@@ -18,6 +21,7 @@ __all__ = [
     "find_object",
     "find_objects",
     "delete_objects",
+    "query_records",
     "update_forward_refs",
     "ModelT",
     "PersistentModelT",
