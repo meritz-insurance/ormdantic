@@ -5,12 +5,14 @@ from .base import (
     PartOfMixin, StringReference, DecimalIndex, IntIndex, IntReference,
     DateIndex, DateTimeIndex, FullTextSearchedStr, FullTextSearchedStringIndex,
     IdStr, IntegerArrayIndex, update_forward_refs,
-    StoredFieldDefinitions
+    StoredFieldDefinitions, SchemaBaseModel, 
 )
 
 from .shareds import (
-    SharedContentModel, ContentReferenceModel
+    SharedContentModel, ContentReferenceModel, PersistentSharedContentModel
 )
+
+from .typed import TypeNamedModel, get_type_named_model_type
 
 __all__ = [
     'ModelT',
@@ -39,4 +41,8 @@ __all__ = [
     "StoredFieldDefinitions",
     "SharedContentModel",
     "ContentReferenceModel",
+    "TypeNamedModel",
+    "get_type_named_model_type",
+    "SchemaBaseModel",
+    "PersistentSharedContentModel"
 ]

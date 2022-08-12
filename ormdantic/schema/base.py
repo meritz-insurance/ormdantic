@@ -32,6 +32,7 @@ def _orjson_dumps(v, *, default):
     # orjson.dumps returns bytes, to match standard json.dumps we need to decode
     return orjson.dumps(v, default=default).decode()
 
+
 class SchemaBaseModel(BaseModel):
     class Config:
         title = 'model which can generate json schema.'
@@ -53,7 +54,6 @@ class PersistentModel(SchemaBaseModel):
 
     class Config:
         title = 'model which can be saved in database'
-
 
 
 ModelT = TypeVar('ModelT', bound=SchemaBaseModel)
@@ -82,6 +82,7 @@ class IdentifyingMixin(StoredMixin):
     
     def new_if_empty(self:T) -> T:
         raise NotImplementedError('fill if exist should be implemented.')
+
 
 class IndexMixin(StoredMixin):
     ''' the json value will be indexed as table fields. '''

@@ -1,7 +1,6 @@
 from typing import (
     TypeGuard, get_args, Type, get_origin, Tuple, Any, Generic, Protocol,
     ForwardRef, Dict, Generic, _collect_type_vars, Union, TypeVar, List, Tuple,
-    _BaseGenericAlias
 )
 from inspect import getmro
 import sys
@@ -11,7 +10,7 @@ import functools
 from .tools import convert_tuple
 
 #@functools.cache
-def get_base_generic_alias_of(type_:Type, *generic_types:Type) -> _BaseGenericAlias | None:
+def get_base_generic_alias_of(type_:Type, *generic_types:Type) -> Type | None:
     generic_types = convert_tuple(generic_types)
 
     for base_type in get_mro_with_generic(type_):

@@ -59,7 +59,7 @@ def test_get_query_and_args_for_deleting():
             SimpleBaseModel, tuple())
 
         cursor.execute(*query_and_args)
-        assert tuple() == cursor.fetchall()
+        assert [{'__row_id':1}] == cursor.fetchall()
 
 
 def test_get_query_and_args_for_reading_for_parts():

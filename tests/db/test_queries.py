@@ -7,11 +7,11 @@ from pydantic import condecimal, constr, Field
 
 from ormdantic.schema import PersistentModel
 from ormdantic.database.queries import (
-    get_sql_for_upserting_external_index_table, get_stored_fields, get_table_name, 
+    get_sql_for_upserting_external_index, get_stored_fields, get_table_name, 
     get_sql_for_creating_table, _get_field_db_type, _generate_json_table_for_part_of,
     _build_query_and_fields_for_core_table, field_exprs,
     get_query_and_args_for_reading,
-    get_sql_for_upserting_parts_table, 
+    get_sql_for_upserting_parts, 
     join_line, 
     _build_namespace_types, _find_join_keys, _extract_fields,
     _ENGINE, _RELEVANCE_FIELD
@@ -362,7 +362,7 @@ def test_get_sql_for_upserting_parts_table():
         parts: List[Part] = Field(default=[])
 
     update_forward_refs(Part, locals())
-    sqls = get_sql_for_upserting_parts_table(Container)
+    sqls = get_sql_for_upserting_parts(Container)
 
     assert len(sqls[Part]) == 2
     assert join_line(
@@ -427,7 +427,7 @@ def test_get_sql_for_upserting_parts_table_with_container_fields():
         parts: List[Part] = Field(default=[])
 
     update_forward_refs(Part, locals())
-    sqls = get_sql_for_upserting_parts_table(Container)
+    sqls = get_sql_for_upserting_parts(Container)
 
     assert len(sqls[Part]) == 2
     assert join_line(
@@ -489,7 +489,7 @@ def test_get_sql_for_upserting_external_index_table():
         parts: List[Part] = Field(default=[])
 
     update_forward_refs(Part, locals())
-    sqls = list(get_sql_for_upserting_external_index_table(Part))
+    sqls = list(get_sql_for_upserting_external_index(Part))
 
     assert len(sqls) == 4
     assert join_line(
@@ -564,7 +564,7 @@ def test_get_sql_for_upserting_parts_table_throws_if_invalid_path():
     update_forward_refs(InvalidPath, locals())
 
     with pytest.raises(RuntimeError, match='.*2.*items'):
-        get_sql_for_upserting_parts_table(MyModel)
+        get_sql_for_upserting_parts(MyModel)
 
 
 def test_get_query_and_args_for_reading_for_matching():

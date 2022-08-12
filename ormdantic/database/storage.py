@@ -21,9 +21,9 @@ from .queries import (
     Where, execute_and_get_last_id, 
     get_sql_for_creating_table,
     get_query_and_args_for_upserting, 
-    get_query_and_args_for_reading, 
-    get_sql_for_upserting_external_index_table, 
-    get_sql_for_upserting_parts_table,
+    get_query_and_args_for_reading, get_sql_for_deleting_external_index, get_sql_for_deleting_parts, 
+    get_sql_for_upserting_external_index, 
+    get_sql_for_upserting_parts,
     get_query_and_args_for_deleting,
     _ROW_ID_FIELD, _JSON_FIELD
 )
@@ -117,6 +117,10 @@ def delete_objects(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], wh
 
     with pool.open_cursor(True) as cursor:
         cursor.execute(*get_query_and_args_for_deleting(type_, where))
+        row_ids = tuple(row[_ROW_ID_FIELD] for row in cursor.fetchall())
+
+        _delete_parts_and_externals(cursor, row_ids, type_)
+
 
 
 def load_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:Where, 
@@ -260,24 +264,6 @@ def query_records(pool: DatabaseConnectionPool,
             yield from results
  
 
-def _iterate_types_for_creating_order(types:Iterable[Type[ModelT]]) -> Iterator[Type[ModelT]]:
-    to_be_created = deque(types)
-
-    while to_be_created and (type_ := to_be_created.popleft()):
-        container = get_container_type(type_)
-
-        if container in to_be_created:
-            to_be_created.append(type_)
-        else:
-            yield type_
-
-            for sub_type in itertools.chain(_traverse_all_part_types(type_), 
-                                            _traverse_all_shared_types(type_)):
-                yield sub_type
-
-                if sub_type in to_be_created:
-                    to_be_created.remove(sub_type)
-
 
 def _traverse_all_part_types(type_:Type[ModelT]):
     for part_type in get_part_types(type_):
@@ -297,12 +283,46 @@ def _upsert_parts_and_externals(cursor, root_inserted_id:int, type_:Type) -> Non
         '__root_row_id': root_inserted_id,
     }
 
-    for sql in get_sql_for_upserting_external_index_table(type_):
+    for sql in get_sql_for_upserting_external_index(type_):
         cursor.execute(sql, args)
 
-    for (part_type, sqls) in get_sql_for_upserting_parts_table(type_).items():
+    for (part_type, sqls) in get_sql_for_upserting_parts(type_).items():
         for sql in sqls:
             cursor.execute(sql, args)
 
         _upsert_parts_and_externals(cursor, root_inserted_id, part_type)
+
+
+def _iterate_types_for_creating_order(types:Iterable[Type[ModelT]]) -> Iterator[Type[ModelT]]:
+    to_be_created = deque(types)
+
+    while to_be_created and (type_ := to_be_created.popleft()):
+        container = get_container_type(type_)
+
+        if container in to_be_created:
+            to_be_created.append(type_)
+        else:
+            yield type_
+
+            for sub_type in itertools.chain(_traverse_all_part_types(type_), 
+                                            _traverse_all_shared_types(type_)):
+                yield sub_type
+
+                if sub_type in to_be_created:
+                    to_be_created.remove(sub_type)
+
+
+def _delete_parts_and_externals(cursor, root_deleted_ids:Tuple[int,...], type_:Type) -> None:
+    args = {
+        '__root_row_ids': root_deleted_ids,
+    }
+
+    for sql in get_sql_for_deleting_external_index(type_):
+        cursor.execute(sql, args)
+
+    for (part_type, sqls) in get_sql_for_deleting_parts(type_).items():
+        for sql in sqls:
+            cursor.execute(sql, args)
+
+        _delete_parts_and_externals(cursor, root_deleted_ids, part_type)
 

@@ -1,4 +1,3 @@
-from configparser import InterpolationSyntaxError
 from typing import (
     Tuple, TypeVar, Iterable, Iterator, List, Collection
 )
@@ -28,7 +27,7 @@ def unique(items:Iterable[T]) -> Iterator[T]:
             yield item
 
 
-def digest(item:str|BaseModel, algorithm:str = 'sha2') -> str:
+def digest(item:str|BaseModel, algorithm:str = 'sha1') -> str:
     if isinstance(item, BaseModel):
         return digest_str(item.json())
     else:

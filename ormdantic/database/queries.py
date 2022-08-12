@@ -463,7 +463,7 @@ def _get_sql_for_upserting(model_type:Type):
 #   _order
 # 
 
-def get_sql_for_upserting_parts_table(model_type:Type) -> Dict[Type, Tuple[str, ...]]:
+def get_sql_for_upserting_parts(model_type:Type) -> Dict[Type, Tuple[str, ...]]:
     type_sqls : Dict[str, Tuple[str, str]] = {}
     part_types = get_part_types(model_type)
 
@@ -557,7 +557,7 @@ def get_sql_for_upserting_parts_table(model_type:Type) -> Dict[Type, Tuple[str, 
     return type_sqls
 
 
-def get_sql_for_upserting_external_index_table(model_type:Type) -> Iterator[str]:
+def get_sql_for_upserting_external_index(model_type:Type) -> Iterator[str]:
     is_part = is_derived_from(model_type, PartOfMixin)
 
     for field_name, (json_paths, field_type) in get_stored_fields_for_external_index(model_type).items():
@@ -700,6 +700,45 @@ def _generate_nested_json_table(first_path:str,
         ),
         f")"
     )
+
+
+def get_sql_for_deleting_parts(model_type:Type) -> Dict[Type, Tuple[str, ...]]:
+    type_sqls : Dict[str, Tuple[str, str]] = {}
+    part_types = get_part_types(model_type)
+
+    is_root = not is_derived_from(model_type, PartOfMixin)
+    sqls = []
+    
+    for part_type in part_types:
+        part_fields = get_field_names_for(model_type, part_type)
+
+        assert part_fields
+
+        delete_sql = join_line([
+            f'DELETE FROM {get_table_name(part_type, _PART_BASE_TABLE)}',
+            f'WHERE {field_exprs(_ROOT_ROW_ID_FIELD)} in %(__root_row_ids)s'
+        ])
+
+        sqls.append(delete_sql)
+
+        fields = get_stored_fields_for_part_of(part_type)
+
+        type_sqls[part_type] = tuple(sqls)
+
+    return type_sqls
+
+
+def get_sql_for_deleting_external_index(model_type:Type) -> Iterator[str]:
+    is_part = is_derived_from(model_type, PartOfMixin)
+
+    for field_name, (json_paths, field_type) in get_stored_fields_for_external_index(model_type).items():
+        table_name = get_table_name(model_type, field_name)
+
+        # delete previous items.
+        yield join_line([
+            f'DELETE FROM {table_name}',
+            f'WHERE {field_exprs(_ROOT_ROW_ID_FIELD)} in %(__root_row_ids)s'
+        ])
 
 
 # fields is the json key , it can contain '.' like product.name
@@ -912,6 +951,7 @@ def _extract_fields(items:Iterable[str], ns:str) -> Tuple[str,...]:
 
 
 def get_query_and_args_for_deleting(type_:Type, where:Where):
+    # TODO delete parts and externals.
     query_args = _build_database_args(where)
 
     return _get_sql_for_deleting(type_, tuple((f, o) for f, o, _ in where)), query_args
@@ -919,7 +959,7 @@ def get_query_and_args_for_deleting(type_:Type, where:Where):
 
 @functools.lru_cache
 def _get_sql_for_deleting(type_:Type, field_and_value:FieldOp):
-    return f'DELETE FROM {get_table_name(type_)} {_build_where(field_and_value)}'
+    return f'DELETE FROM {get_table_name(type_)} {_build_where(field_and_value)} RETURNING {_ROW_ID_FIELD}'
 
 
 def _build_database_args(where:Where) -> Dict[str, Any]:
@@ -1087,11 +1127,6 @@ def _build_query_for_base_table(ns_types: Tuple[Tuple[str, PersistentModelT],...
                                 offset: int | None,
                                 limit: int | None,
                                 base_table_ns: str | None):
-    # 다른 table에 relevance가 있거나 현재 field_ops에 match가 있다면, 
-    # order_by마지막에 relevance를 넣어 주어야 한다.
-    # base type이 table과 
-
-    # '', 'home', 'company', 'home.person', 'company.members'
 
     joined, fields = _build_join_for_ns(ns_types, core_table_queries, base_table_ns) 
 

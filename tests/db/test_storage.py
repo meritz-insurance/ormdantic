@@ -110,6 +110,12 @@ def test_delete_objects():
     with use_temp_database_pool_with_model(ContainerModel) as pool:
         upserted = upsert_objects(pool, model)
 
+        found = find_objects(pool, PartModel, tuple())
+        assert found 
+
+        found = find_objects(pool, SubPartModel, tuple())
+        assert found 
+
         # multiple same object does not affect the database.
         where = build_where(get_identifer_of(upserted))
 
@@ -118,6 +124,17 @@ def test_delete_objects():
         found = find_object(pool, ContainerModel, where)
 
         assert found is None
+
+        found = list(find_objects(pool, PartModel, tuple()))
+        assert not found 
+
+        found = list(find_objects(pool, SubPartModel, tuple()))
+        assert not found
+
+        # check empty external table
+        with pool.open_cursor() as cursor:
+            cursor.execute('SELECT * FROM md_SubPartModel_codes')
+            assert tuple() == cursor.fetchall()
 
         class CannotDelete(SchemaBaseModel):
             pass

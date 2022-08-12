@@ -3,7 +3,9 @@ from .schema import (
     StoredMixin, StringIndex, StringArrayIndex, 
     PartOfMixin, StringReference, DecimalIndex, IntIndex, IntReference,
     DateIndex, DateTimeIndex, FullTextSearchedStr, FullTextSearchedStringIndex,
-    IdStr, IntegerArrayIndex, update_forward_refs, StoredFieldDefinitions
+    IdStr, IntegerArrayIndex, update_forward_refs, StoredFieldDefinitions,
+    TypeNamedModel, SchemaBaseModel, SharedContentModel, ContentReferenceModel,
+    PersistentSharedContentModel
 )
 from .database import (
     DatabaseConnectionPool, 
@@ -26,6 +28,7 @@ __all__ = [
     "ModelT",
     "PersistentModelT",
     "IdentifiedModelT",
+    "SchemaBaseModel",
     "PersistentModel",
     "IdentifiedModel",
     "StoredMixin",
@@ -42,5 +45,9 @@ __all__ = [
     "FullTextSearchedStringIndex",
     "IntegerArrayIndex",
     "IdStr",
-    "StoredFieldDefinitions"
+    "StoredFieldDefinitions",
+    "TypeNamedModel", 
+    "SharedContentModel",
+    "ContentReferenceModel",
+    "PersistentSharedContentModel"
 ]
