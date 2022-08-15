@@ -1,12 +1,13 @@
 from .schema import (
     ModelT, PersistentModelT, IdentifiedModelT, PersistentModel, IdentifiedModel,
-    StoredMixin, StringIndex, StringArrayIndex, 
+    StoredMixin, StringIndex, StringArrayIndex, UniqueStringIndex,
     PartOfMixin, StringReference, DecimalIndex, IntIndex, IntReference,
     DateIndex, DateTimeIndex, FullTextSearchedStr, FullTextSearchedStringIndex,
     IdStr, IntegerArrayIndex, update_forward_refs, StoredFieldDefinitions,
     TypeNamedModel, SchemaBaseModel, SharedContentModel, ContentReferenceModel,
-    PersistentSharedContentModel
+    PersistentSharedContentModel, get_type_named_model_type, parse_obj_for_model
 )
+
 from .database import (
     DatabaseConnectionPool, 
     create_table, 
@@ -34,6 +35,7 @@ __all__ = [
     "StoredMixin",
     "StringIndex",
     "StringArrayIndex",
+    "UniqueStringIndex",
     "PartOfMixin",
     "StringReference",
     "DecimalIndex",
@@ -49,5 +51,7 @@ __all__ = [
     "TypeNamedModel", 
     "SharedContentModel",
     "ContentReferenceModel",
-    "PersistentSharedContentModel"
+    "PersistentSharedContentModel",
+    "get_type_named_model_type",
+    "parse_obj_for_model"
 ]

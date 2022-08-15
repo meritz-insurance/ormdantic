@@ -1,6 +1,6 @@
 from typing import (
-    Dict, Generic, Iterator, Iterator, TypeVar, get_args, Union, Type, Set, DefaultDict,
-    Any, cast, Tuple, List
+    ClassVar, Dict, Generic, Iterator, Iterator, TypeVar, get_args, Union, Type, Set, DefaultDict,
+    Any, cast, Tuple, List, Set
 )
 import orjson
 from pydantic import Field
@@ -22,6 +22,8 @@ from .paths import (extract_as, get_path_and_type, get_paths_for_type)
 _logger = get_logger(__name__)
 
 class SharedContentMixin(IdentifiedMixin):
+    _id_attr : ClassVar[str] = ''
+
     def __init__(self, *args, **kwds):
         super().__init__(*args, **kwds)
 
@@ -31,8 +33,13 @@ class SharedContentMixin(IdentifiedMixin):
     def refresh_id(self):
         self.normalize()
 
-        self.id = IdStr(_get_content_id(self.dict()))
-        return self.id
+        if self._id_attr:
+            id = IdStr(getattr(self, self._id_attr))
+        else:
+            id = IdStr(_get_content_id(self.dict()))
+
+        self.id = id
+        return id
 
     def normalize(self):
         pass

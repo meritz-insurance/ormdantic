@@ -63,13 +63,17 @@ def upsert_objects(pool:DatabaseConnectionPool,
     mixins = tuple(filter(lambda x: isinstance(x, PartOfMixin), model_list))
 
     if mixins:
-        _logger.debug(mixins)
         _logger.fatal(f'{[type(m) for m in mixins]} can not be stored directly. it is part of mixin')
         raise RuntimeError(f'PartOfMixin could not be saved directly.')
 
-    targets = tuple(assign_identifying_fields_if_empty(m) for m in model_list)
-
     with pool.open_cursor(True) as cursor:
+        def next_seq_for(t):
+            return _next_seq_for(cursor, t)
+
+        targets = tuple(
+            assign_identifying_fields_if_empty(m, next_seq=next_seq_for)
+            for m in model_list)
+
         for model in targets:
             model._before_save()
 
@@ -83,6 +87,16 @@ def upsert_objects(pool:DatabaseConnectionPool,
                 _upsert_parts_and_externals(cursor, inserted_id, type(sub_model))
 
     return targets[0] if is_single else targets
+
+
+def _next_seq_for(cursor, t:Type) -> str | int:
+    type_name = (type(t).__name__).lower()
+    cursor.execute(f'SELECT next_seq_{type_name}() as NEXT_SEQ')
+    record = cursor.fetchone()
+
+    assert record
+
+    return record['NEXT_SEQ']
 
 
 def _iterate_extracted_persistent_shared_models(model:PersistentModel) -> Iterator[PersistentModel]:
@@ -183,7 +197,8 @@ def _build_shared_model_set(pool:DatabaseConnectionPool, model:PersistentModel,
                     shared_type, (('id', 'in', to_be_retreived),),
                     fields=(_JSON_FIELD, _ROW_ID_FIELD)):
 
-                shared_model = cast(PersistentSharedContentModel, _convert_record_to_model(shared_type, shared_model_record))
+                shared_model = cast(PersistentSharedContentModel, 
+                                    _convert_record_to_model(shared_type, shared_model_record))
                 if shared_model.id not in shared_set:
                     shared_set[shared_model.id] = {shared_type:shared_model}
                 

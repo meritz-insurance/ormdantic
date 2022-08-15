@@ -1,3 +1,4 @@
+from ast import Call
 from typing import (
     Any, ForwardRef, Tuple, Dict, Type, Generic, TypeVar, Iterator, Callable, Optional,
     List, ClassVar, cast 
@@ -80,7 +81,7 @@ class IdentifyingMixin(StoredMixin):
     The value of this type will be update through the sql param 
     so, this field of database will not use stored feature. '''
     
-    def new_if_empty(self:T) -> T:
+    def new_if_empty(self:T, **kwds) -> T:
         raise NotImplementedError('fill if exist should be implemented.')
 
 
@@ -157,7 +158,7 @@ class IdStr(ConstrainedStr, IdentifyingMixin):
     max_length = 64 # sha256 return 64 char
     ''' UUID string'''
 
-    def new_if_empty(self) -> 'IdStr':
+    def new_if_empty(self, **kwds) -> 'IdStr':
         if self == '':
             return IdStr(uuid4().hex)
 
@@ -280,15 +281,15 @@ def get_identifer_of(model:SchemaBaseModel) -> Iterator[Tuple[str, Any]]:
             yield (field_name, getattr(model, field_name))
 
 
-def assign_identifying_fields_if_empty(model:ModelT, inplace:bool=False) -> ModelT:
+def assign_identifying_fields_if_empty(model:ModelT, inplace:bool=False, next_seq:Callable[[Type], Any] | None = None) -> ModelT:
     to_be_updated  = None
 
     for field_name in type(model).__fields__.keys(): 
         field_value = getattr(model, field_name)
 
         updated_value = (
-            _replace_scalar_value_if_empty_value(field_value, inplace) 
-            or _replace_vector_if_empty_value(field_value, inplace)
+            _replace_scalar_value_if_empty_value(field_value, inplace, next_seq) 
+            or _replace_vector_if_empty_value(field_value, inplace, next_seq)
         )
 
         if updated_value is not None:
@@ -300,14 +301,14 @@ def assign_identifying_fields_if_empty(model:ModelT, inplace:bool=False) -> Mode
     return to_be_updated or model
 
 
-def _replace_scalar_value_if_empty_value(obj:Any, inplace:bool) -> Any:
+def _replace_scalar_value_if_empty_value(obj:Any, inplace:bool, next_seq:Callable[[Type], Any] | None = None) -> Any:
     if isinstance(obj, IdentifyingMixin):
-        new_value = obj.new_if_empty()
+        new_value = obj.new_if_empty(next_seq=next_seq)
 
         if new_value is not obj:
             return new_value
-    elif isinstance(obj, PartOfMixin) and isinstance(obj, SchemaBaseModel):
-        replaced = assign_identifying_fields_if_empty(obj, inplace)
+    elif isinstance(obj, SchemaBaseModel):
+        replaced = assign_identifying_fields_if_empty(obj, inplace, next_seq)
 
         if replaced is not obj:
             return replaced
@@ -315,7 +316,7 @@ def _replace_scalar_value_if_empty_value(obj:Any, inplace:bool) -> Any:
     return None
 
 
-def _replace_vector_if_empty_value(obj:Any, inplace:bool) -> Any:    
+def _replace_vector_if_empty_value(obj:Any, inplace:bool, next_seq:Callable[[Type], Any]) -> Any:    
     if isinstance(obj, (list, tuple)):
         if not obj:
             return None
@@ -323,7 +324,7 @@ def _replace_vector_if_empty_value(obj:Any, inplace:bool) -> Any:
         to_be_updated = None
 
         for index, item in enumerate(obj):
-            replaced = _replace_scalar_value_if_empty_value(item, inplace)
+            replaced = _replace_scalar_value_if_empty_value(item, inplace, next_seq)
 
             if not to_be_updated and replaced is not None:
                 to_be_updated = list(obj[:index])
@@ -351,7 +352,7 @@ def get_stored_fields_for(type_:Type,
     else:
         return {
             k: (paths, cast(Type[T], type_)) for k, (paths, type_) in stored.items()
-            if is_derived_from(type_, type_or_predicate) 
+            if is_derived_from(type_, cast(Type, type_or_predicate))
                 or is_list_or_tuple_of(type_, type_or_predicate)
         }
 

@@ -1,7 +1,7 @@
 from .base import (
     ModelT, PersistentModelT, IdentifiedModelT, PersistentModel, IdentifiedModel,
     get_base_generic_alias_of, get_container_type, get_field_name_and_type,
-    StoredMixin, StringIndex, StringArrayIndex, 
+    StoredMixin, StringIndex, StringArrayIndex, UniqueStringIndex,
     PartOfMixin, StringReference, DecimalIndex, IntIndex, IntReference,
     DateIndex, DateTimeIndex, FullTextSearchedStr, FullTextSearchedStringIndex,
     IdStr, IntegerArrayIndex, update_forward_refs,
@@ -12,7 +12,7 @@ from .shareds import (
     SharedContentModel, ContentReferenceModel, PersistentSharedContentModel
 )
 
-from .typed import TypeNamedModel, get_type_named_model_type
+from .typed import TypeNamedModel, get_type_named_model_type, parse_obj_for_model
 
 __all__ = [
     'ModelT',
@@ -26,6 +26,7 @@ __all__ = [
     "StoredMixin",
     "StringIndex",
     "StringArrayIndex",
+    "UniqueStringIndex",
     "PartOfMixin",
     "StringReference",
     "DecimalIndex",
@@ -43,6 +44,7 @@ __all__ = [
     "ContentReferenceModel",
     "TypeNamedModel",
     "get_type_named_model_type",
+    "parse_obj_for_model",
     "SchemaBaseModel",
     "PersistentSharedContentModel"
 ]

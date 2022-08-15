@@ -95,6 +95,7 @@ def test_get_identifier_of():
 
     assert {'id':'00000000000000000000000000000000'} == dict(get_identifer_of(model))
 
+
 def test_is_fields_collection_type():
     class SimpleModel(PersistentModel):
         list_id: List[str]
@@ -103,6 +104,7 @@ def test_is_fields_collection_type():
     assert is_field_list_or_tuple_of(SimpleModel, 'list_id', str)
     assert not is_field_list_or_tuple_of(SimpleModel, 'list_id', int)
     assert is_field_list_or_tuple_of(SimpleModel, 'tuple_id', str)
+
 
 def test_assign_identified_if_empty():
     class SimpleModel(IdentifiedModel):

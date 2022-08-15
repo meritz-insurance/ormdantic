@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, ClassVar
 import pytest
 from pydantic import Field
 
@@ -41,6 +41,11 @@ class MyPersistentModel(PersistentModel):
     items: List[MySharedModel]
 
 
+class MyCode(SharedContentMixin):
+    _id_attr: ClassVar[str] = 'code'
+    code: str
+
+
 def test_refresh_id(monkeypatch:pytest.MonkeyPatch):
     content = MyContent(name='name')
 
@@ -56,6 +61,16 @@ def test_refresh_id(monkeypatch:pytest.MonkeyPatch):
 
     assert content.refresh_id() == digest('{"name":"name"}')
     assert normalized_called
+
+
+def test_refresh_id_with_id_attr(monkeypatch:pytest.MonkeyPatch):
+    content = MyCode(code='code')
+
+    assert content.id == 'code'
+
+    content.code = 'Q12'
+
+    assert content.refresh_id() == 'Q12'
 
 
 def test_get_content_id():

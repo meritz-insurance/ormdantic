@@ -38,8 +38,8 @@ class TypeNamedModel(SchemaBaseModel, metaclass=TypeNamedModelMetaclass):
     type_name: str = Field(default='TypeNamedModel')
 
 
-def parse_obj_for_model(obj:Dict[str, Any]) -> Any:
-    model_type = get_type_named_model_type(obj[_TYPE_NAME_FIELD])
+def parse_obj_for_model(obj:Dict[str, Any], model_type:Type|None = None) -> Any:
+    model_type = model_type or get_type_named_model_type(obj[_TYPE_NAME_FIELD])
 
     return _parse_obj(obj, model_type)
 
