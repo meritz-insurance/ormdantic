@@ -18,7 +18,7 @@ from ..schema.shareds import (
 )
 
 from .queries import (
-    Where, execute_and_get_last_id, 
+    Where, 
     get_sql_for_creating_table,
     get_query_and_args_for_upserting, 
     get_query_and_args_for_reading, get_sql_for_deleting_external_index, get_sql_for_deleting_parts, 
@@ -81,10 +81,11 @@ def upsert_objects(pool:DatabaseConnectionPool,
             # for not updating original model.
 
             for sub_model in _iterate_extracted_persistent_shared_models(model):
-                inserted_id = execute_and_get_last_id(
-                    cursor, *get_query_and_args_for_upserting(sub_model))
+                cursor.execute(*get_query_and_args_for_upserting(sub_model))
+                fetched = cursor.fetchall()
 
-                _upsert_parts_and_externals(cursor, inserted_id, type(sub_model))
+                for item in fetched:
+                    _upsert_parts_and_externals(cursor, item[_ROW_ID_FIELD], type(sub_model))
 
     return targets[0] if is_single else targets
 

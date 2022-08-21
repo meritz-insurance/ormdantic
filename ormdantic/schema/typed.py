@@ -5,7 +5,7 @@ import copy
 from pydantic import BaseModel, parse_obj_as
 from pydantic.fields import Field, FieldInfo
 from pydantic.main import ModelMetaclass, __dataclass_transform__
-from .base import SchemaBaseModel
+from .base import SchemaBaseModel, register_class_postprocessor
 from ormdantic.util.hints import get_type_parameter_of_list_or_tuple, is_derived_from
 from ..util import get_base_generic_alias_of, get_logger
 
@@ -15,28 +15,32 @@ _logger = get_logger(__name__)
 
 _all_type_named_models : Dict[str, Type] = {}
 
-@__dataclass_transform__(kw_only_default=True, field_descriptors=(Field, FieldInfo))
-class TypeNamedModelMetaclass(ModelMetaclass):
-    def __new__(cls, name, bases, namespace, **kwds):
-        new_one = cast(BaseModel, super().__new__(cls, name, bases, namespace, **kwds))
+# @__dataclass_transform__(kw_only_default=True, field_descriptors=(Field, FieldInfo))
+# class TypeNamedModelMetaclass(ModelMetaclass):
+#     def __new__(cls, name, bases, namespace, **kwds):
+#         new_one = cast(BaseModel, super().__new__(cls, name, bases, namespace, **kwds))
 
-        model_field = copy.copy(new_one.__fields__[_TYPE_NAME_FIELD])
-        model_field.default = name
+#         return new_one
 
-        new_one.__fields__[_TYPE_NAME_FIELD] = model_field
+def _fill_type_name_field(class_type:Type):
+    name = class_type.__name__
+    model_field = copy.copy(class_type.__fields__[_TYPE_NAME_FIELD])
+    model_field.default = name
 
-        if name in _all_type_named_models:
-            _logger.fatal(f'duplicated type name class {name=}. {_all_type_named_models=}')
-            raise RuntimeError(f'duplicated name {name}')
+    class_type.__fields__[_TYPE_NAME_FIELD] = model_field
 
-        _all_type_named_models[name] = new_one
+    if name in _all_type_named_models:
+        _logger.fatal(f'duplicated type name class {name=}. {_all_type_named_models=}')
+        raise RuntimeError(f'duplicated name {name}')
 
-        return new_one
+    _all_type_named_models[name] = class_type
 
  
-class TypeNamedModel(SchemaBaseModel, metaclass=TypeNamedModelMetaclass):
+class TypeNamedModel(SchemaBaseModel):
+    # this field will be update by Metaclass. so, 
     type_name: str = Field(default='TypeNamedModel')
 
+register_class_postprocessor(TypeNamedModel, _fill_type_name_field)
 
 def parse_obj_for_model(obj:Dict[str, Any], model_type:Type|None = None) -> Any:
     model_type = model_type or get_type_named_model_type(obj[_TYPE_NAME_FIELD])

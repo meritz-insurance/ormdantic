@@ -13,8 +13,8 @@ app = FastAPI()
 
 pool = DatabaseConnectionPool({})
 
-@app.get('/models/{model_name}')
-async def get_models(model_name:str, request:Request) -> List[Dict[str, Any]]:
+@app.post('/models/{model_name}')
+async def query_models(model_name:str, request:Request) -> List[Dict[str, Any]]:
     where = build_where(await request.body())
 
     records = list(
@@ -40,7 +40,7 @@ async def delete_models(model_name:str, id:str, request:Request):
     delete_objects(pool, get_type_named_model_type(model_name), where)
 
 
-@app.put('/model/{model_name}')
+@app.put('/models/{model_name}')
 async def save_models(model_name:str, id:str, request:Request):
     models = loads(await request.body())
     model_type = get_type_named_model_type(model_name)

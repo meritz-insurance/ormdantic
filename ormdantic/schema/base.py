@@ -1,4 +1,3 @@
-from ast import Call
 from typing import (
     Any, ForwardRef, Tuple, Dict, Type, Generic, TypeVar, Iterator, Callable, Optional,
     List, ClassVar, cast 
@@ -12,16 +11,16 @@ import orjson
 from pydantic import (
     BaseModel, ConstrainedDecimal, ConstrainedInt, Field, ConstrainedStr, PrivateAttr,
 )
-
-from ormdantic.util.hints import is_derived_or_collection_of_derived
+from pydantic.fields import FieldInfo
+from pydantic.main import ModelMetaclass, __dataclass_transform__
 
 from ..util import (
-    get_logger,
-    get_base_generic_alias_of, get_type_args, update_forward_refs_in_generic_base,
+    get_logger, get_base_generic_alias_of, get_type_args, 
+    update_forward_refs_in_generic_base,
     is_derived_from, resolve_forward_ref, is_list_or_tuple_of,
-    resolve_forward_ref_in_args
+    resolve_forward_ref_in_args, is_derived_or_collection_of_derived,
+    unique, convert_tuple
 )
-from ..util.tools import convert_tuple, unique
 
 JsonPathAndType = Tuple[Tuple[str,...], Type[Any]]
 StoredFieldDefinitions = Dict[str, JsonPathAndType]
@@ -34,7 +33,44 @@ def _orjson_dumps(v, *, default):
     return orjson.dumps(v, default=default).decode()
 
 
-class SchemaBaseModel(BaseModel):
+_postprocessors: Dict[Type, Callable[[Type], None]] = {}
+
+def _postprocess_class(new_one:Type):
+    for base_type, processor in _postprocessors.items():
+        if any(b is base_type for b in inspect.getmro(new_one)):
+            processor(new_one)
+            continue
+
+
+_preprocessors: Dict[Type, Callable[[str, Tuple[Type,...], Dict[str, Any]], None]] = {}
+
+def _preprocess_class(name:str, bases:Tuple[Type,...], namespace:Dict[str, Any]):
+    for base_type, processor in _preprocessors.items():
+        if any(a is base_type for base in bases for a in inspect.getmro(base)):
+            processor(name, bases, namespace)
+            continue
+
+
+def register_class_preprocessor(base_type:Type, processor:Callable[[str, Tuple[Type,...], Dict[str, Any]], None]):
+    _preprocessors[base_type] = processor
+
+
+def register_class_postprocessor(base_type:Type, processor:Callable[[Type], None]):
+    _postprocessors[base_type] = processor
+
+
+@__dataclass_transform__(kw_only_default=True, field_descriptors=(Field, FieldInfo))
+class SchemaBaseMetaclass(ModelMetaclass):
+    def __new__(cls, name, bases, namespace, **kwargs):
+        _preprocess_class(name, bases, namespace)
+
+        new_one = super().__new__(cls, name, bases, namespace, **kwargs)
+
+        _postprocess_class(new_one)
+
+        return new_one
+ 
+class SchemaBaseModel(BaseModel, metaclass=SchemaBaseMetaclass):
     class Config:
         title = 'model which can generate json schema.'
 
@@ -316,7 +352,7 @@ def _replace_scalar_value_if_empty_value(obj:Any, inplace:bool, next_seq:Callabl
     return None
 
 
-def _replace_vector_if_empty_value(obj:Any, inplace:bool, next_seq:Callable[[Type], Any]) -> Any:    
+def _replace_vector_if_empty_value(obj:Any, inplace:bool, next_seq:Callable[[Type], Any] | None = None) -> Any:    
     if isinstance(obj, (list, tuple)):
         if not obj:
             return None

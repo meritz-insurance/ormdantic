@@ -9,7 +9,6 @@ import itertools
 import functools
 
 from pydantic import ConstrainedStr, ConstrainedDecimal
-from pymysql.cursors import DictCursor
 
 from ormdantic.util import is_derived_from, convert_tuple
 from ormdantic.util.hints import get_base_generic_alias_of
@@ -426,6 +425,11 @@ def _get_sql_for_upserting(model_type:Type):
         f'ON DUPLICATE KEY UPDATE',
         tab_each_line(
             f'{field_exprs(_JSON_FIELD)} = %(__json)s'
+        ),
+        f'RETURNING',
+        tab_each_line(
+            _ROW_ID_FIELD,
+            use_comma=True
         )
     ) 
 
@@ -1031,17 +1035,6 @@ def _build_match(fields:str, variable:str, table_name:str = ''):
 def _get_parameter_variable_for_multiple_fields(fields:str):
     variable = _normalize_database_object_name(fields)
     return variable
-
-
-def execute_and_get_last_id(cursor:DictCursor, sql:str, params:Dict[str, Any]) -> int:
-    _logger.debug(sql)
-    cursor.execute(sql, params)
-    cursor.execute('SELECT LAST_INSERT_ID() as inserted_id')
-    row = cursor.fetchone()
-
-    assert row
-
-    return row['inserted_id']
 
 
 def _build_query_and_fields_for_core_table(

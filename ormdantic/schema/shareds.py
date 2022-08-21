@@ -1,6 +1,6 @@
 from typing import (
-    ClassVar, Dict, Generic, Iterator, Iterator, TypeVar, get_args, Union, Type, Set, DefaultDict,
-    Any, cast, Tuple, List, Set
+    ClassVar, Dict, Generic, Iterator, Iterator, TypeVar, get_args, Union, Type, 
+    Set, DefaultDict, Any, cast, Tuple, List, Set
 )
 import orjson
 from pydantic import Field
@@ -15,7 +15,8 @@ from ..util import (
     unique,
 )
 
-from .base import (IdentifiedMixin, IdStr, PersistentModel,  SchemaBaseModel, get_field_type)
+from .base import (IdentifiedMixin, IdStr, PersistentModel,  SchemaBaseModel, 
+                   get_field_type, register_class_preprocessor)
 from .paths import (extract_as, get_path_and_type, get_paths_for_type)
 
 
@@ -58,44 +59,40 @@ SharedContentModelT = TypeVar('SharedContentModelT', bound=SharedContentMixin)
 class _ReferenceMarker(Generic[SharedContentModelT]):
     pass
 
+def _update_annotation_for_shared_content(name:str, bases:Tuple[Type, ...], namespace:Dict[str, Any]) -> None:
+    orgs = namespace.get('__orig_bases__', tuple())
 
-@__dataclass_transform__(kw_only_default=True, field_descriptors=(Field, FieldInfo))
-class ContentReferencedMetaclass(ModelMetaclass):
-    def __new__(cls, name, bases, namespace, **kwargs):
-        orgs = namespace.get('__orig_bases__', tuple())
+    if _is_inherit_from_content_reference_model(bases):
+        if not orgs:
+            _logger.fatal(
+                f'{bases=} is derived from "ContentReferenceModel". {orgs=}'
+                f'but {name=} class should have parameter class for content'
+            )
+            raise TypeError(
+                'ContentReferenceModel requires a parameter class for '
+                f'holding the content. check the "{name}" class is derived '
+                'from the ContentReferenceModel[T]')
 
-        if _is_inherit_from_content_reference_model(bases):
-            if not orgs:
-                _logger.fatal(
-                    f'{bases=} is derived from "ContentReferenceModel". {orgs=}'
-                    f'but {name=} class should have parameter class for content'
-                )
-                raise TypeError(
-                    'ContentReferenceModel requires a parameter class for '
-                    f'holding the content. check the "{name}" class is derived '
-                    'from the ContentReferenceModel[T]')
+    for org in orgs:
+        shared_mixin = get_base_generic_alias_of(org, _ReferenceMarker)
 
-        for org in orgs:
-            shared_mixin = get_base_generic_alias_of(org, _ReferenceMarker)
+        if shared_mixin:
+            args = get_args(shared_mixin)
 
-            if shared_mixin:
-                args = get_args(shared_mixin)
+            if args:
+                # it is possible that __annntations__ does not exist.
+                # __annotations__ will keep the field which is existed only 
+                # current class.
+                # but we should forced set the __annotations__ for
+                # override.
+                annotations = namespace.get('__annotations__', {})
+                content_type = cast(Any, args[0])
+                annotations['content'] = Union[content_type, str]
 
-                if args:
-                    # it is possible that __annntations__ does not exist.
-                    # __annotations__ will keep the field which is existed only 
-                    # current class.
-                    # but we should forced set the __annotations__ for
-                    # override.
-                    annotations = namespace.get('__annotations__', {})
-                    content_type = cast(Any, args[0])
-                    annotations['content'] = Union[content_type, str]
+                namespace['__annotations__'] = annotations
 
-                    namespace['__annotations__'] = annotations
 
-        newed = super().__new__(cls, name, bases, namespace, **kwargs)
-
-        return newed
+register_class_preprocessor(_ReferenceMarker, _update_annotation_for_shared_content)
 
 
 def _is_inherit_from_content_reference_model(bases:Tuple[Type,...]) -> bool:
@@ -109,8 +106,7 @@ def _is_inherit_from_content_reference_model(bases:Tuple[Type,...]) -> bool:
 
 
 class ContentReferenceModel(SchemaBaseModel, 
-                            _ReferenceMarker[SharedContentModelT], 
-                            metaclass=ContentReferencedMetaclass):
+                            _ReferenceMarker[SharedContentModelT]):
     ''' identified by content '''
     content : SharedContentModelT | str = Field(default='', title='content')
 

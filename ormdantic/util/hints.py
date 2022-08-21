@@ -1,7 +1,8 @@
 from typing import (
     TypeGuard, get_args, Type, get_origin, Tuple, Any, Generic, Protocol,
-    ForwardRef, Dict, Generic, _collect_type_vars, Union, TypeVar, List, Tuple,
+    ForwardRef, Dict, Generic, Union, TypeVar, List, Tuple,
 )
+from typing_extensions import _collect_type_vars
 from inspect import getmro
 import sys
 import copy
