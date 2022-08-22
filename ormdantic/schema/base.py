@@ -192,11 +192,23 @@ class UniqueStringIndex(ConstrainedStr, UniqueIndexMixin):
 
 class IdStr(ConstrainedStr, IdentifyingMixin):
     max_length = 64 # sha256 return 64 char
-    ''' UUID string'''
+    ''' id string sha256 or uuid'''
 
     def new_if_empty(self, **kwds) -> 'IdStr':
         if self == '':
             return IdStr(uuid4().hex)
+
+        return self
+
+
+class SequenceIdStr(IdStr):
+    max_length = 16 
+    prefix = 'C'
+
+    def new_if_empty(self, **kwds) -> 'IdStr':
+        if self == '':
+            next_seq = kwds['next_seq']
+            return SequenceIdStr(next_seq())
 
         return self
 
@@ -317,15 +329,16 @@ def get_identifer_of(model:SchemaBaseModel) -> Iterator[Tuple[str, Any]]:
             yield (field_name, getattr(model, field_name))
 
 
-def assign_identifying_fields_if_empty(model:ModelT, inplace:bool=False, next_seq:Callable[[Type], Any] | None = None) -> ModelT:
+def assign_identifying_fields_if_empty(model:ModelT, inplace:bool=False, 
+                                       next_seq: Callable[[str], Any] | None = None) -> ModelT:
     to_be_updated  = None
 
     for field_name in type(model).__fields__.keys(): 
         field_value = getattr(model, field_name)
 
         updated_value = (
-            _replace_scalar_value_if_empty_value(field_value, inplace, next_seq) 
-            or _replace_vector_if_empty_value(field_value, inplace, next_seq)
+            _replace_scalar_value_if_empty_value(field_name, field_value, inplace, next_seq) 
+            or _replace_vector_if_empty_value(field_name, field_value, inplace, next_seq)
         )
 
         if updated_value is not None:
@@ -337,9 +350,14 @@ def assign_identifying_fields_if_empty(model:ModelT, inplace:bool=False, next_se
     return to_be_updated or model
 
 
-def _replace_scalar_value_if_empty_value(obj:Any, inplace:bool, next_seq:Callable[[Type], Any] | None = None) -> Any:
+def _replace_scalar_value_if_empty_value(field_name:str, obj:Any, inplace:bool, next_seq:Callable[[str], Any] | None = None) -> Any:
     if isinstance(obj, IdentifyingMixin):
-        new_value = obj.new_if_empty(next_seq=next_seq)
+        if next_seq:
+            kwds = {'next_seq': lambda: next_seq(field_name)}
+        else:
+            kwds = {}
+
+        new_value = obj.new_if_empty(**kwds)
 
         if new_value is not obj:
             return new_value
@@ -352,7 +370,7 @@ def _replace_scalar_value_if_empty_value(obj:Any, inplace:bool, next_seq:Callabl
     return None
 
 
-def _replace_vector_if_empty_value(obj:Any, inplace:bool, next_seq:Callable[[Type], Any] | None = None) -> Any:    
+def _replace_vector_if_empty_value(field_name:str, obj:Any, inplace:bool, next_seq:Callable[[str], Any] | None = None) -> Any:    
     if isinstance(obj, (list, tuple)):
         if not obj:
             return None
@@ -360,7 +378,7 @@ def _replace_vector_if_empty_value(obj:Any, inplace:bool, next_seq:Callable[[Typ
         to_be_updated = None
 
         for index, item in enumerate(obj):
-            replaced = _replace_scalar_value_if_empty_value(item, inplace, next_seq)
+            replaced = _replace_scalar_value_if_empty_value(field_name, item, inplace, next_seq)
 
             if not to_be_updated and replaced is not None:
                 to_be_updated = list(obj[:index])

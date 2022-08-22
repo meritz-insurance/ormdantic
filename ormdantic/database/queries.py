@@ -16,7 +16,7 @@ from ormdantic.util.hints import get_base_generic_alias_of
 from ..util import get_logger
 from ..schema.base import (
     ArrayIndexMixin, PersistentModelT, ReferenceMixin, FullTextSearchedMixin, 
-    IdentifyingMixin, IndexMixin, 
+    IdentifyingMixin, IndexMixin, SequenceIdStr, 
     StoredFieldDefinitions, PersistentModelT, StoredMixin, PartOfMixin, 
     UniqueIndexMixin, get_container_type, 
     get_field_names_for, get_part_types, is_field_list_or_tuple_of,
@@ -42,6 +42,8 @@ _JSON_PATH_FIELD = '__json_path'
 _PART_ORDER_FIELD = '__part_order'
 _RELEVANCE_FIELD = '__relevance'
 _MODEL_TABLE_PREFIX = 'md'
+_SEQ_PREFIX = 'sq'
+_FUNC_PREFIX = 'fn'
 
 # for cjk full text search (mroonga). It seemed to be slow that records are inserted in mroonga.
 # _ENGINE = r""" ENGINE=mroonga COMMENT='engine "innodb" DEFAULT CHARSET=utf8'"""
@@ -56,6 +58,13 @@ _logger = get_logger(__name__)
 
 def get_table_name(type_:Type[PersistentModelT], postfix:str = ''):
     return f'{_MODEL_TABLE_PREFIX}_{type_.__name__}{"_" + postfix if postfix else ""}' 
+
+
+def get_seq_name(type_:Type[PersistentModelT], postfix:str):
+    return f'{_SEQ_PREFIX}_{type_.__name__}{"_" + postfix if postfix else ""}' 
+
+def get_seq_func_name(type_:Type[PersistentModelT], postfix:str):
+    return f'{_FUNC_PREFIX}_{type_.__name__}{"_" + postfix if postfix else ""}' 
 
 
 @overload
@@ -132,7 +141,7 @@ def get_sql_for_creating_table(type_:Type[PersistentModelT]):
         # even it is in part's stored fields.
         part_stored = get_stored_fields_for_part_of(type_)
 
-        yield _build_create_model_table_statement(
+        yield _build_model_table_statement(
             get_table_name(type_, _PART_BASE_TABLE), 
             _get_part_table_fields(),
             _get_table_stored_fields(part_stored, False),
@@ -156,7 +165,7 @@ def get_sql_for_creating_table(type_:Type[PersistentModelT]):
             (container_table_name, _ROW_ID_FIELD)
         )
 
-        yield _build_create_part_of_model_view_statement(
+        yield _build_part_of_model_view_statement(
             get_table_name(type_), 
             joined_table,
             iter([
@@ -169,14 +178,16 @@ def get_sql_for_creating_table(type_:Type[PersistentModelT]):
             })
         )
     else:
-        yield _build_create_model_table_statement(
+        yield _build_model_table_statement(
             get_table_name(type_), 
             _get_table_fields(),
             _get_table_stored_fields(stored, True),
             _get_table_indexes(stored)
         )
 
-    yield from _build_create_external_index_tables(type_)
+        yield from _build_code_seq_statement(type_)
+
+    yield from _build_statement_for_external_index_tables(type_)
 
 
 def get_stored_fields_for_full_text_search(type_:Type[PersistentModelT]):
@@ -200,7 +211,7 @@ def get_stored_fields_for_external_index(type_:Type[PersistentModelT]):
     return get_stored_fields_for(type_, ArrayIndexMixin)
 
 
-def _build_create_model_table_statement(table_name:str, 
+def _build_model_table_statement(table_name:str, 
                                         *field_definitions: Iterator[str]) -> str:
     return join_line(
         f'CREATE TABLE IF NOT EXISTS {field_exprs(table_name)} (',
@@ -211,7 +222,32 @@ def _build_create_model_table_statement(table_name:str,
     )
 
 
-def _build_create_part_of_model_view_statement(view_name:str, joined_table:str,
+def _build_code_seq_statement(type_:Type[PersistentModel]) -> Iterator[str]:
+    for name, modle_field in type_.__fields__.items():
+        field_element_type = modle_field.type_
+
+        if is_derived_from(field_element_type, SequenceIdStr):
+            prefix = field_element_type.prefix
+
+            yield join_line(
+                f'CREATE SEQUENCE {get_seq_name(type_, name)} START WITH 1 INCREMENT 1'
+            )
+            yield join_line(
+                f'CREATE FUNCTION {get_seq_func_name(type_, name)}() RETURNS VARCHAR(16)',
+                'BEGIN',
+                tab_each_line(
+                    f"SELECT CONCAT('{prefix}', NEXTVAL({get_seq_name(type_, name)})) INTO @R;"
+                    f'RETURN @R;'
+                ),
+                'END'
+            )
+
+
+def get_query_for_next_seq(type_:Type, field:str) -> str:
+    return f'SELECT {get_seq_func_name(type_, field)}() as NEXT_SEQ'
+
+
+def _build_part_of_model_view_statement(view_name:str, joined_table:str,
                                                *view_fields:Iterator[str],
                                                ) -> str:
     return join_line(
@@ -225,9 +261,9 @@ def _build_create_part_of_model_view_statement(view_name:str, joined_table:str,
     )
 
 
-def _build_create_external_index_tables(type_:Type):
+def _build_statement_for_external_index_tables(type_:Type):
     for field_name, (_, field_type) in get_stored_fields_for_external_index(type_).items():
-        yield _build_create_model_table_statement(
+        yield _build_model_table_statement(
             get_table_name(type_, field_name), 
             _get_external_index_table_fields(field_name, field_type),
             _get_external_index_table_indexes(field_name, field_type),
@@ -271,9 +307,9 @@ def _get_part_table_fields() -> Iterator[str]:
     yield f'{field_exprs(_JSON_PATH_FIELD)} VARCHAR(255)'
 
 
-def _get_table_stored_fields(stored_fields:StoredFieldDefinitions, json_stored:bool = False) -> Iterator[str]:
+def _get_table_stored_fields(stored_fields:StoredFieldDefinitions, generated:bool = False) -> Iterator[str]:
     for field_name, (paths, field_type) in stored_fields.items():
-        stored = '' if not json_stored else _generate_stored_for_json_path(paths, field_type)
+        stored = '' if not generated else _generate_stored_for_json_path(paths, field_type)
         yield f"""{field_exprs(field_name)} {_get_field_db_type(field_type)}{stored}"""
 
 

@@ -1,4 +1,4 @@
-from typing import List, ClassVar
+from typing import List, ClassVar, Dict, Any
 import pytest
 from pydantic import Field
 
@@ -243,7 +243,7 @@ def test_concat_shared_models():
     assert {
     } == extract_shared_models(container)
 
-    contents = {
+    contents : Dict[str, Any] = {
         content1.id:{MyContent:content1},
         content2.id:{MyContent:content2}
     } 
@@ -260,45 +260,6 @@ def test_concat_shared_models():
     })
 
     assert contents == extract_shared_models(container)
-
-def test_collect_shared_model_ids():
-    content1 = MyContent(name='name1')
-    content2 = MyContent(name='name2')
-
-    other_content1 = MyAnotherContent(name='name1')
-
-    container = ComplexContainer(
-        items=[
-            MySharedModel.parse_obj({
-                'version': '0',
-                'code': 'code1',
-                'id': content1.id
-            }),
-            MySharedModel.parse_obj({
-                'version': '0',
-                'code': 'code2',
-                'id': content2.id
-            }),
-            MyDerivedSharedModel.parse_obj({
-                'version': '0',
-                'code': 'code2',
-                'name': 'derived',
-                'id': content2.id
-            })
-        ],
-        other_items=[
-            MySharedAnotherModel.parse_obj({
-                'code': 'code2',
-                'name': 'derived',
-                'id': other_content1.id
-            })
-        ]
-    )
-
-    assert {
-        MyContent: {content1.id, content2.id},
-        MyAnotherContent: {other_content1.id}
-    } == collect_shared_model_type_and_ids(container)
 
 
 def test_collect_shared_model_ids():

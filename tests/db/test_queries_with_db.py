@@ -1,4 +1,7 @@
+from telnetlib import SE
 from typing import List, ClassVar
+
+from pydantic import Field
 
 from ormdantic.schema import PersistentModel
 from ormdantic.database.queries import (
@@ -6,7 +9,7 @@ from ormdantic.database.queries import (
     get_query_and_args_for_deleting, 
 )
 from ormdantic.schema.base import (
-    SchemaBaseModel, StringArrayIndex, FullTextSearchedStringIndex, 
+    SchemaBaseModel, SequenceIdStr, StringArrayIndex, FullTextSearchedStringIndex, 
     PartOfMixin, StringReference, 
     StringIndex, 
     update_forward_refs, IdentifiedModel, IdStr, 
@@ -650,5 +653,36 @@ def test_get_query_and_args_for_reading_with_limit():
             {'name': 'part-4'},
             {'name': 'part-5'},
             {'name': 'part-6'},
+        ] == cursor.fetchall()
+        
+
+def test_seq_id():
+    class RiskIdStr(SequenceIdStr):
+        prefix = 'Q'
+
+    class Model(PersistentModel):
+        seq_1: SequenceIdStr = Field(default=SequenceIdStr(''))
+        seq_2: RiskIdStr = Field(default=RiskIdStr(''))
+        name: StringIndex
+
+
+    models = [
+        Model(name=StringIndex('first'), seq_2=RiskIdStr('QQ1')),
+        Model(name=StringIndex('second')),
+        Model(name=StringIndex('third'))
+    ]
+
+    with use_temp_database_cursor_with_model(*models,
+                                             keep_database_when_except=False) as cursor:
+        # simple one
+        query_and_args = get_query_and_args_for_reading(
+            Model, ('name', 'seq_1', 'seq_2'), tuple())
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'name': 'first', 'seq_1': 'C1', 'seq_2': 'QQ1'},
+            {'name': 'second', 'seq_1': 'C2', 'seq_2': 'Q1'},
+            {'name': 'third', 'seq_1': 'C3', 'seq_2': 'Q2'},
         ] == cursor.fetchall()
         

@@ -1,8 +1,6 @@
-from typing import Any, cast, List, Tuple, cast
-import uuid
+from typing import cast, List, cast, Type
 
 import pytest
-from pydantic import ConstrainedStr
 
 from ormdantic.schema.base import (
     SchemaBaseModel, StringIndex, 
@@ -98,7 +96,7 @@ def test_get_path_and_type():
 
 def test_get_path_and_type_throw_exception():
     with pytest.raises(RuntimeError, match='invalid type .*'):
-        list(get_path_and_type(cast(SchemaBaseModel, dict), StringIndex))
+        list(get_path_and_type(cast(Type, dict), StringIndex))
 
 
 def test_get_paths_for_type():

@@ -18,10 +18,12 @@ from ..schema.shareds import (
 )
 
 from .queries import (
-    Where, 
+    Where,
+    get_query_for_next_seq, 
     get_sql_for_creating_table,
     get_query_and_args_for_upserting, 
-    get_query_and_args_for_reading, get_sql_for_deleting_external_index, get_sql_for_deleting_parts, 
+    get_query_and_args_for_reading, 
+    get_sql_for_deleting_external_index, get_sql_for_deleting_parts, 
     get_sql_for_upserting_external_index, 
     get_sql_for_upserting_parts,
     get_query_and_args_for_deleting,
@@ -67,12 +69,10 @@ def upsert_objects(pool:DatabaseConnectionPool,
         raise RuntimeError(f'PartOfMixin could not be saved directly.')
 
     with pool.open_cursor(True) as cursor:
-        def next_seq_for(t):
-            return _next_seq_for(cursor, t)
-
         targets = tuple(
-            assign_identifying_fields_if_empty(m, next_seq=next_seq_for)
-            for m in model_list)
+            assign_identifying_fields_if_empty(m, next_seq=lambda f: _next_seq_for(cursor, type(m), f))
+            for m in model_list
+        )
 
         for model in targets:
             model._before_save()
@@ -90,9 +90,10 @@ def upsert_objects(pool:DatabaseConnectionPool,
     return targets[0] if is_single else targets
 
 
-def _next_seq_for(cursor, t:Type) -> str | int:
-    type_name = (type(t).__name__).lower()
-    cursor.execute(f'SELECT next_seq_{type_name}() as NEXT_SEQ')
+def _next_seq_for(cursor, t:Type, field:str) -> str | int:
+    sql = get_query_for_next_seq(t, field)
+
+    cursor.execute(sql)
     record = cursor.fetchone()
 
     assert record
