@@ -39,7 +39,6 @@ def _postprocess_class(new_one:Type):
     for base_type, processor in _postprocessors.items():
         if any(b is base_type for b in inspect.getmro(new_one)):
             processor(new_one)
-            continue
 
 
 _preprocessors: Dict[Type, Callable[[str, Tuple[Type,...], Dict[str, Any]], None]] = {}
@@ -48,7 +47,6 @@ def _preprocess_class(name:str, bases:Tuple[Type,...], namespace:Dict[str, Any])
     for base_type, processor in _preprocessors.items():
         if any(a is base_type for base in bases for a in inspect.getmro(base)):
             processor(name, bases, namespace)
-            continue
 
 
 def register_class_preprocessor(base_type:Type, processor:Callable[[str, Tuple[Type,...], Dict[str, Any]], None]):
@@ -234,7 +232,7 @@ class IntegerArrayIndex(ArrayIndexMixin[int]):
 
 
 class IdentifiedMixin(SchemaBaseModel):
-    id: IdStr = Field(default='', title='identifier for retreiving')
+    id: IdStr = Field(default=IdStr(''), title='identifier for retreiving')
 
 
 class IdentifiedModel(PersistentModel, IdentifiedMixin):
