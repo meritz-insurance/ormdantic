@@ -103,6 +103,7 @@ def test_get_query_and_args_for_reading_for_parts():
             {'__row_id':2, '__json':'{"name": "part2"}', 'name':'part2'}
         ] == cursor.fetchall()
 
+
 def test_get_query_and_args_for_reading_for_multiple_parts():
     class ContainerModel(IdentifiedModel):
         name: FullTextSearchedStringIndex
@@ -218,6 +219,7 @@ def test_get_query_and_args_for_reading_for_external_index():
                                              keep_database_when_except=False) as cursor:
         query_and_args = get_query_and_args_for_reading(
             PartModel, ('__row_id', 'name', 'codes'), (('codes', '=', 'code1'),), unwind='codes')
+
 
         cursor.execute(*query_and_args)
 
@@ -624,26 +626,26 @@ def test_get_query_and_args_for_counting():
 
 
 def test_get_query_and_args_for_reading_with_limit():
-    class PartModel(PersistentModel):
+    class EntryModel(PersistentModel):
         name: StringIndex
         description: str
 
     models = [
-        PartModel(name=StringIndex('part-1'), description='part 1 description'),
-        PartModel(name=StringIndex('part-2'), description='part 2 description'),
-        PartModel(name=StringIndex('part-3'), description='part 3 description'),
-        PartModel(name=StringIndex('part-4'), description='part 4 description'),
-        PartModel(name=StringIndex('part-5'), description='part 5 description'),
-        PartModel(name=StringIndex('part-6'), description='part 6 description'),
-        PartModel(name=StringIndex('part-7'), description='part 7 description'),
-        PartModel(name=StringIndex('part-8'), description='part 8 description'),
+        EntryModel(name=StringIndex('part-1'), description='part 1 description'),
+        EntryModel(name=StringIndex('part-2'), description='part 2 description'),
+        EntryModel(name=StringIndex('part-3'), description='part 3 description'),
+        EntryModel(name=StringIndex('part-4'), description='part 4 description'),
+        EntryModel(name=StringIndex('part-5'), description='part 5 description'),
+        EntryModel(name=StringIndex('part-6'), description='part 6 description'),
+        EntryModel(name=StringIndex('part-7'), description='part 7 description'),
+        EntryModel(name=StringIndex('part-8'), description='part 8 description'),
     ]
 
     with use_temp_database_cursor_with_model(*models,
                                              keep_database_when_except=False) as cursor:
         # simple one
         query_and_args = get_query_and_args_for_reading(
-            PartModel, ('name',), tuple(),
+            EntryModel, ('name',), tuple(),
             offset=2, limit=4, order_by='name')
 
         cursor.execute(*query_and_args)

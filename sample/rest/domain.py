@@ -2,10 +2,11 @@ from typing import Tuple
 from pydantic import Field
 
 import ormdantic as od
-from datetime import date 
+from datetime import date
+
 
 class Person(od.IdentifiedModel, od.TypeNamedModel):
-	name: str
+	name: od.StringIndex
 	birth: date
 
 
