@@ -35,6 +35,7 @@ _PART_BASE_TABLE = 'pbase'
 
 # field name for internal use.
 _ROW_ID_FIELD = '__row_id'
+_ORG_ROW_ID_FIELD = '__org_row_id'
 _CONTAINER_ROW_ID_FIELD = '__container_row_id'
 _ROOT_ROW_ID_FIELD = '__root_row_id'
 _JSON_FIELD = '__json'
@@ -295,7 +296,7 @@ def _get_external_index_table_fields(field_name:str, field_type:Type) -> Iterato
 
     param_type = get_args(type)[0]
 
-    yield f'{field_exprs(_ROW_ID_FIELD)} BIGINT'
+    yield f'{field_exprs(_ORG_ROW_ID_FIELD)} BIGINT'
     yield f'{field_exprs(_ROOT_ROW_ID_FIELD)} BIGINT'
     yield f'{field_exprs(field_name)} {_get_field_db_type(param_type)}'
 
@@ -345,7 +346,7 @@ def _get_part_table_indexes() -> Iterator[str]:
 
 
 def _get_external_index_table_indexes(field_name:str, field_type:Type) -> Iterator[str]:
-    yield f"""KEY `{_ROW_ID_FIELD}_index` ({field_exprs(_ROW_ID_FIELD)})"""
+    yield f"""KEY `{_ORG_ROW_ID_FIELD}_index` ({field_exprs(_ORG_ROW_ID_FIELD)})"""
     yield f"""KEY `{field_name}_index` ({field_exprs(field_name)})"""
 
     # for external, we don't need full text search index.
@@ -623,7 +624,7 @@ def get_sql_for_upserting_external_index(model_type:Type) -> Iterator[str]:
             f'INSERT INTO {table_name}',
             f'(',
             tab_each_line(
-                field_exprs([_ROOT_ROW_ID_FIELD, _ROW_ID_FIELD, field_name]),
+                field_exprs([_ROOT_ROW_ID_FIELD, _ORG_ROW_ID_FIELD, field_name]),
                 use_comma=True
             ),
             f')',
@@ -1121,7 +1122,7 @@ def _build_query_and_fields_for_core_table(
             [
                 _alias_table(get_table_name(target_type, f), _get_alias_for_unwind(f, unwind)) 
                 + f' ON {field_exprs(_ROW_ID_FIELD, "__ORG")} = '
-                + f'{field_exprs(_ROW_ID_FIELD, _get_alias_for_unwind(f, unwind))}'
+                + f'{field_exprs(_ORG_ROW_ID_FIELD, _get_alias_for_unwind(f, unwind))}'
                 for f in unwind
             ]
         )

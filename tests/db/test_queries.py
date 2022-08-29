@@ -150,19 +150,19 @@ def test_get_sql_for_creating_external_index_table():
         ),
         join_line(
             "CREATE TABLE IF NOT EXISTS `md_Target_codes` (",
-            "  `__row_id` BIGINT,",
+            "  `__org_row_id` BIGINT,",
             "  `__root_row_id` BIGINT,",
             "  `codes` TEXT,",
-            "  KEY `__row_id_index` (`__row_id`),",
+            "  KEY `__org_row_id_index` (`__org_row_id`),",
             "  KEY `codes_index` (`codes`)",
             ")"
         ),
         join_line(
             "CREATE TABLE IF NOT EXISTS `md_Target_ids` (",
-            "  `__row_id` BIGINT,",
+            "  `__org_row_id` BIGINT,",
             "  `__root_row_id` BIGINT,",
             "  `ids` BIGINT,",
-            "  KEY `__row_id_index` (`__row_id`),",
+            "  KEY `__org_row_id_index` (`__org_row_id`),",
             "  KEY `ids_index` (`ids`)",
             ")"
         )
@@ -501,7 +501,7 @@ def test_get_sql_for_upserting_external_index_table():
         "INSERT INTO md_Part_codes",
         "(",
         "  `__root_row_id`,",
-        "  `__row_id`,",
+        "  `__org_row_id`,",
         "  `codes`",
         ")",
         "SELECT",
@@ -532,7 +532,7 @@ def test_get_sql_for_upserting_external_index_table():
         "INSERT INTO md_Part__names",
         "(",
         "  `__root_row_id`,",
-        "  `__row_id`,",
+        "  `__org_row_id`,",
         "  `_names`",
         ")",
         "SELECT",
@@ -707,7 +707,7 @@ def test_build_query_for_core_table_for_unwind():
         '  `__UNWIND_CODES`.`codes` AS `ns.codes`',
         'FROM',
         '  md_Model AS __ORG',
-        '  LEFT JOIN md_Model_codes AS __UNWIND_CODES ON `__ORG`.`__row_id` = `__UNWIND_CODES`.`__row_id`',
+        '  LEFT JOIN md_Model_codes AS __UNWIND_CODES ON `__ORG`.`__row_id` = `__UNWIND_CODES`.`__org_row_id`',
         'WHERE',
         '  `__UNWIND_CODES`.`codes` = %(NS_CODES)s',
         '  AND `__ORG`.`name` != %(NS_NAME)s'
@@ -735,7 +735,7 @@ def test_build_query_for_core_table_for_match():
         '  MATCH (`__ORG`.`name`,`__ORG`.`description`) AGAINST (%(NAME_DESCRIPTION)s IN BOOLEAN MODE) as `ns.__relevance`',
         'FROM',
         '  md_Model AS __ORG',
-        '  LEFT JOIN md_Model_codes AS __UNWIND_CODES ON `__ORG`.`__row_id` = `__UNWIND_CODES`.`__row_id`',
+        '  LEFT JOIN md_Model_codes AS __UNWIND_CODES ON `__ORG`.`__row_id` = `__UNWIND_CODES`.`__org_row_id`',
         'WHERE',
         '  `__UNWIND_CODES`.`codes` = %(NS_CODES)s',
     ) == query
