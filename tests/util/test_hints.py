@@ -121,7 +121,7 @@ def test_is_collection_type_of():
     assert is_list_or_tuple_of(List[StringIndex], str)
 
     assert is_list_or_tuple_of(Tuple[str], str)
-    assert is_list_or_tuple_of(Tuple[str, str], str)
+    assert is_list_or_tuple_of(Tuple[str, str], str, str)
     assert is_list_or_tuple_of(Tuple[str, ...], str)
     assert is_list_or_tuple_of(Tuple[str, int], str, int)
 
@@ -136,9 +136,9 @@ def test_get_collection_type_parameters():
     assert get_type_parameter_of_list_or_tuple(str) is None
 
     assert get_type_parameter_of_list_or_tuple(list) == tuple()
-    assert get_type_parameter_of_list_or_tuple(List[str]) == (str,)
-    assert get_type_parameter_of_list_or_tuple(Tuple[str, ...]) == (str,)
-    assert get_type_parameter_of_list_or_tuple(Tuple[str, str]) == (str,)
+    assert get_type_parameter_of_list_or_tuple(List[str]) == str
+    assert get_type_parameter_of_list_or_tuple(Tuple[str, ...]) == str
+    assert get_type_parameter_of_list_or_tuple(Tuple[str, str]) == (str, str)
     assert get_type_parameter_of_list_or_tuple(Tuple[str, str, int]) == (str, str, int)
 
 

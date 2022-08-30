@@ -152,10 +152,16 @@ def is_list_or_tuple_of(type_:Type, *parameters:Type) -> bool:
     if not parameters:
         return True
 
-    if len(args) == len(parameters):
-        return all(is_derived_from(t, b) for t, b in zip(args, parameters))
-    else:
+    if isinstance(args, tuple):
+        if len(args) == len(parameters):
+            return all(is_derived_from(t, b) for t, b in zip(args, parameters))
+
         return False
+    else:
+        if len(parameters) != 1:
+            raise RuntimeError('mimatched parameters')
+
+        return is_derived_from(args, parameters[0])
 
 
 @functools.cache
@@ -164,19 +170,24 @@ def is_derived_or_collection_of_derived(type_:Type, param_type_:Type):
 
 
 @functools.cache
-def get_type_parameter_of_list_or_tuple(type_:Type) -> Tuple[Type,...] | None:
-    generic = get_base_generic_alias_of(type_, tuple, list)
+def get_type_parameter_of_list_or_tuple(type_:Type) -> Type | Tuple[Type,...] | None:
+    generic = get_base_generic_alias_of(type_, list)
+
+    if generic:
+        args = get_args(generic) 
+        if len(args) == 1:
+            return args[0]
+
+        return args
+
+    generic = get_base_generic_alias_of(type_, tuple)
 
     if generic:
         args = get_args(generic) 
 
-        # handle Tuple[str, str]
-        if len(args) > 1 and len(set(args)) == 1:
-            args = (args[0],)
-        else:
-            # handle Tuple[str, ...]
-            if args and args[-1] is Ellipsis:
-                args = args[:-1]
+        # handle Tuple[str, ...] = List[str]
+        if len(args) == 2 and args[-1] is Ellipsis:
+            return args[0]
 
         return args
 

@@ -4,7 +4,7 @@ from fastapi import FastAPI, Request
 from orjson import loads
 
 from ormdantic import (
-    get_type_named_model_type, DatabaseConnectionPool, query_records, parse_obj_for_model, 
+    get_type_named_model_type, DatabaseConnectionPool, query_records, parse_object_for_model, 
     delete_objects, find_object, upsert_objects, create_table
 )
 from ormdantic.database import Where
@@ -37,8 +37,9 @@ async def query_models(model_name:str, fields:str, where:Tuple[Tuple[str, str, A
 
 
 @app.get('/model/{model_name}/{id}')
-def load_models(model_name:str, id:str):
-    obj = find_object(pool, get_type_named_model_type(model_name), (('id', '=', id),))
+def load_models(model_name:str, id:str, concat_shared_model:bool = True):
+    obj = find_object(pool, get_type_named_model_type(model_name), (('id', '=', id),), 
+                      concat_shared_models=concat_shared_model)
 
     if obj is None:
         raise RuntimeError('no such object')
@@ -59,7 +60,7 @@ async def save_models(model_name:str, models:List[Dict[str, Any]]):
     model_type = get_type_named_model_type(model_name)
 
     return upsert_objects(pool, 
-                          [parse_obj_for_model(obj, model_type) for obj in models]
+                          [parse_object_for_model(obj, model_type) for obj in models]
                           )
 
 if __name__ == "__main__":

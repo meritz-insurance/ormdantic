@@ -62,8 +62,12 @@ def _get_path_and_type(type_:Type[ModelT],
             json_path.append(field_name)
 
             if is_list_or_tuple_of(field_type):
-                type_param = get_type_parameter_of_list_or_tuple(field_type)
-                field_type = type_param and type_param[0]
+                generic_param = get_type_parameter_of_list_or_tuple(field_type)
+
+                # path에서 tuple[int, str] 같은 형태는 지원하지 않는다.
+                assert not isinstance(generic_param, tuple), "not support heterogeneous type for collection"
+
+                field_type = generic_param
 
             yield (json_path, field_type)
         elif is_derived_from(field_type, SchemaBaseModel):
@@ -72,12 +76,14 @@ def _get_path_and_type(type_:Type[ModelT],
                 _get_path_and_type(field_type, predicate)
             )
         elif is_list_or_tuple_of(field_type, SchemaBaseModel):
-            pararmeters = get_type_parameter_of_list_or_tuple(field_type)
+            generic_param = get_type_parameter_of_list_or_tuple(field_type)
 
-            if pararmeters: 
+            assert not isinstance(generic_param, tuple), "not support heterogeneous type for collection"
+
+            if generic_param: 
                 yield from (([field_name] + paths, type_) 
                     for paths, type_ in 
-                    _get_path_and_type(pararmeters[0], predicate)
+                    _get_path_and_type(generic_param, predicate)
                 )
 
 

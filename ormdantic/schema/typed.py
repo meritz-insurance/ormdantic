@@ -70,13 +70,21 @@ def _parse_obj(obj:Any, target_type:Type) -> Any:
 
         assert params
 
-        if get_origin(alias) is list:
-            return [_parse_obj(item, params[0]) for item in obj]
-        else:
+        if isinstance(params, tuple):
+            if not params:
+                # type unknown. List, Tuple
+                return tuple(_parse_obj(item, None) for item in obj)
+ 
+            if len(obj) != len(params):
+                _logger.fatal(f'{target_type=} requires {params=} but {obj=}')
+                raise RuntimeError('mismatched size of array item.')
+
             return tuple(
                 _parse_obj(item, item_type) for item, item_type 
-                in itertools.zip_longest(obj, params, fillvalue=params[-1])
+                in zip(obj, params)
             )
+        else:
+            return [_parse_obj(item, params) for item in obj]
     else:
         # target_type can be generic alias because we will lookup outer_type_
         # for looking __fields__ we should check orginal type not generic alias.
