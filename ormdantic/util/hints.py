@@ -1,6 +1,6 @@
 from typing import (
     TypeGuard, get_args, Type, get_origin, Tuple, Any, Generic, Protocol,
-    ForwardRef, Dict, Generic, Union, TypeVar, List, Tuple,
+    ForwardRef, Dict, Generic, Union, TypeVar, List, Tuple, overload,
 )
 from typing_extensions import _collect_type_vars
 from inspect import getmro
@@ -99,7 +99,15 @@ def resolve_forward_ref(type_:Type, localns:Dict[str, Any]) -> Type:
     return type_
 
 
+@overload
 def is_derived_from(type_:Type, base_type:Type[_T]) -> TypeGuard[Type[_T]]:
+    ...
+
+@overload
+def is_derived_from(type_:Type, base_type:Tuple[Type,...]) -> bool:
+    ...
+
+def is_derived_from(type_:Type, base_type:Type[_T] | Tuple[Type,...]) -> TypeGuard[Type[_T]] | bool:
     # if first argument is not class, the issubclass throw the exception.
     # but usually, we don't need the exception. 
     # we just want to know whether the type is derived or not.
@@ -108,18 +116,20 @@ def is_derived_from(type_:Type, base_type:Type[_T]) -> TypeGuard[Type[_T]]:
     #
     # https://stackoverflow.com/questions/49171189/whats-the-correct-way-to-check-if-an-object-is-a-typing-generic
 
-    if type_ is base_type:
+    base_types = convert_tuple(base_type)
+
+    if type_ in base_types:
         return True
 
     if hasattr(type_, "__origin__"):
         type_ = get_origin(type_)
 
-        if type_ is base_type:
+        if type_ in base_types:
             return True
 
     if hasattr(type_, '__mro__'):
         # Union does not have __mro__ attribute
-        return any(t is base_type for t in getmro(type_))
+        return any(t in base_types for t in getmro(type_))
 
     return False
 

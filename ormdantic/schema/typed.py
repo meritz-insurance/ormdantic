@@ -1,4 +1,5 @@
-from typing import Type, Any, Dict, cast, get_origin
+from readline import insert_text
+from typing import Type, Any, Dict, cast, get_origin, Union, get_args
 import itertools
 import copy 
 
@@ -42,7 +43,7 @@ class TypeNamedModel(SchemaBaseModel):
 
 register_class_postprocessor(TypeNamedModel, _fill_type_name_field)
 
-def parse_obj_for_model(obj:Dict[str, Any], model_type:Type|None = None) -> Any:
+def parse_object_for_model(obj:Dict[str, Any], model_type:Type|None = None) -> Any:
     model_type = model_type or get_type_named_model_type(obj[_TYPE_NAME_FIELD])
 
     return _parse_obj(obj, model_type)
@@ -53,7 +54,18 @@ def get_type_named_model_type(type_name:str) -> Type:
 
 
 def _parse_obj(obj:Any, target_type:Type) -> Any:
-    if alias := get_base_generic_alias_of(target_type, list, tuple):
+    if alias := get_base_generic_alias_of(target_type, Union):
+        generic_args = get_args(target_type)
+
+        for arg in generic_args:
+            if is_derived_from(arg, SchemaBaseModel) and isinstance(obj, dict):
+                return _parse_obj(obj, arg)
+            if is_derived_from(arg, (list, tuple)) and isinstance(obj, (list, tuple)):
+                return _parse_obj(obj, arg)
+        else:
+            return parse_obj_as(target_type, obj)
+
+    elif alias := get_base_generic_alias_of(target_type, list, tuple):
         params = get_type_parameter_of_list_or_tuple(target_type)       
 
         assert params
@@ -66,14 +78,21 @@ def _parse_obj(obj:Any, target_type:Type) -> Any:
                 in itertools.zip_longest(obj, params, fillvalue=params[-1])
             )
     else:
+        # target_type can be generic alias because we will lookup outer_type_
+        # for looking __fields__ we should check orginal type not generic alias.
+        type_ = get_origin(target_type) or target_type
+
         obj = dict(obj)
 
         if _TYPE_NAME_FIELD in obj:
-            target_type = get_type_named_model_type(obj[_TYPE_NAME_FIELD])
+            type_ = get_type_named_model_type(obj[_TYPE_NAME_FIELD])
 
-        if issubclass(target_type, SchemaBaseModel):
-            for field_name, model_field in target_type.__fields__.items():
-                if is_derived_from(model_field.type_, SchemaBaseModel):
-                    obj[field_name] = _parse_obj(obj[field_name], model_field.outer_type_)
+        if is_derived_from(target_type, SchemaBaseModel):
+            for field_name, model_field in type_.__fields__.items():
+                if is_derived_from(model_field.type_, (SchemaBaseModel, Union)):
+                    type = model_field.outer_type_
+
+                    obj[field_name] = _parse_obj(obj[field_name], type)
 
         return parse_obj_as(target_type, obj)
+

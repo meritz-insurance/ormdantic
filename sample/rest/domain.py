@@ -23,11 +23,15 @@ class Flag(od.PersistentSharedContentModel, od.TypeNamedModel):
 	color: str
 
 
+class FlagReferenceModel(od.ContentReferenceModel[Flag]):
+	pass
+
+
 class Company(od.IdentifiedModel, od.TypeNamedModel):
 	name: str
 	address: str
 
-	flags: Tuple[od.ContentReferenceModel[Flag]] = Field(default=tuple())
+	flags: Tuple[FlagReferenceModel,...] = Field(default=tuple())
 	members: Tuple[Member,...] = Field(default=tuple())
 
 

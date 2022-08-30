@@ -8,7 +8,7 @@ from ormdantic import (
     delete_objects, find_object, upsert_objects, create_table
 )
 from ormdantic.database import Where
-from domain import Company, Person, Flag
+from sample.rest.domain import Company, Person, Flag
 
 import uvicorn
 

@@ -12,7 +12,7 @@ from .shareds import (
     SharedContentModel, ContentReferenceModel, PersistentSharedContentModel
 )
 
-from .typed import TypeNamedModel, get_type_named_model_type, parse_obj_for_model
+from .typed import TypeNamedModel, get_type_named_model_type, parse_object_for_model
 
 __all__ = [
     'ModelT',
@@ -44,7 +44,7 @@ __all__ = [
     "ContentReferenceModel",
     "TypeNamedModel",
     "get_type_named_model_type",
-    "parse_obj_for_model",
+    "parse_object_for_model",
     "SchemaBaseModel",
     "PersistentSharedContentModel"
 ]

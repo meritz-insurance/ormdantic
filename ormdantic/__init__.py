@@ -5,7 +5,7 @@ from .schema import (
     DateIndex, DateTimeIndex, FullTextSearchedStr, FullTextSearchedStringIndex,
     IdStr, IntegerArrayIndex, update_forward_refs, StoredFieldDefinitions,
     TypeNamedModel, SchemaBaseModel, SharedContentModel, ContentReferenceModel,
-    PersistentSharedContentModel, get_type_named_model_type, parse_obj_for_model
+    PersistentSharedContentModel, get_type_named_model_type, parse_object_for_model
 )
 
 from .database import (
@@ -53,5 +53,5 @@ __all__ = [
     "ContentReferenceModel",
     "PersistentSharedContentModel",
     "get_type_named_model_type",
-    "parse_obj_for_model"
+    "parse_object_for_model"
 ]
