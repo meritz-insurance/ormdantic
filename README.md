@@ -20,14 +20,15 @@ class Person(od.PersistentModel, od.PartOfMixin['Company']):
     }
 
     name: od.StringIndex
-    birth_date : date
+    birth : date
 
 
 class Company(od.IdentifiedModel):
     address: od.FullTextSearchedStringIndex
     members: List[Person]
 
-od.update_part_of_forward_refs(Person, locals())
+
+od.update_forward_refs(Person, locals())
 
 pool = od.DatabaseConnectionPool({
     'user':'orm',
@@ -39,23 +40,24 @@ pool = od.DatabaseConnectionPool({
 
 od.create_table(pool, Company)
 
-
 apple_company = Company.parse_obj({
     'address':'California', 
     'members':[
-        {'name':'Steve Jobs', 'birth_date':'1955-02-24'},
-        {'name':'Steve Wozniak', 'birth_date':'1950-09-11'},
+        {'name':'Steve Jobs', 'birth':'1955-02-24'},
+        {'name':'Steve Wozniak', 'birth':'1950-09-11'},
     ]
 })
 
 apple_company = od.upsert_objects(pool, apple_company)
 
-apple_company.members[1].birth_date = date(1950, 8, 11)
+apple_company.members[1].birth = date(1950, 8, 11)
 
 od.upsert_objects(pool, apple_company)
 
-companies_in_california = od.find_objects(pool, Company, (('address', 'match', '+California'),))
+companies_in_california = od.find_objects(
+    pool, Company, (('address', 'match', '+California'),))
 
-persons = od.find_objects(pool, Person, (('name', 'like', '%Stev%'),))
+persons = od.find_objects(
+    pool, Person, (('name', 'like', '%Steve%'),))
 
 ```
