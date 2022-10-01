@@ -4,7 +4,6 @@ from weakref import ref
 from pyparsing import oneOf
 import pytest
 from pydantic import Field
-from tblib import Code
 
 from ormdantic.database.storage import (
     delete_objects, upsert_objects, load_object, 
