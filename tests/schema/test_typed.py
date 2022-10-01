@@ -27,6 +27,10 @@ class UseFlag(TypeNamedModel):
 class UnionList(TypeNamedModel):
     items: Union[List[FlagReferenceModel], str]
 
+class UnionTuple(TypeNamedModel):
+    items: Tuple[int, str, FlagReferenceModel] | Tuple[str, FlagReferenceModel] | FlagReferenceModel
+
+
 class MyTuple(TypeNamedModel):
     items: Tuple[FlagReferenceModel, str, Union[str, int], None]
 
@@ -133,6 +137,34 @@ def test_duplicate_type_named_model():
         }
     ),
     (
+        'union tuple int string flag',
+        UnionTuple(
+            items=(0, 'test', FlagReferenceModel(content=Flag(color='red')))
+        ),
+        {
+            'type_name': 'UnionTuple',
+            'items': (0, 'test', { 
+                'content': {
+                    'color': 'red'
+                } 
+            })
+        }
+    ),
+    (
+        'union tuple string flag',
+        UnionTuple(
+            items=('test', FlagReferenceModel(content=Flag(color='red')))
+        ),
+        {
+            'type_name': 'UnionTuple',
+            'items': ('test', { 
+                'content': {
+                    'color': 'red'
+                } 
+            })
+        }
+    ),
+    (
         'tuple with various type',
         MyTuple(
             items=(
@@ -159,3 +191,4 @@ def test_duplicate_type_named_model():
 ])
 def test_parse_obj_for_model(message, expected, object):
     assert expected == parse_object_for_model(object)
+

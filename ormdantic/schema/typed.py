@@ -58,10 +58,13 @@ def _parse_obj(obj:Any, target_type:Type) -> Any:
         generic_args = get_args(target_type)
 
         for arg in generic_args:
-            if is_derived_from(arg, SchemaBaseModel) and isinstance(obj, dict):
-                return _parse_obj(obj, arg)
-            if is_derived_from(arg, (list, tuple)) and isinstance(obj, (list, tuple)):
-                return _parse_obj(obj, arg)
+            try:
+                if is_derived_from(arg, SchemaBaseModel) and isinstance(obj, dict):
+                    return _parse_obj(obj, arg)
+                if is_derived_from(arg, (list, tuple)) and isinstance(obj, (list, tuple)):
+                    return _parse_obj(obj, arg)
+            except RuntimeError as e:
+                continue
         else:
             return parse_obj_as(target_type, obj)
 
@@ -90,12 +93,13 @@ def _parse_obj(obj:Any, target_type:Type) -> Any:
         # for looking __fields__ we should check orginal type not generic alias.
         type_ = get_origin(target_type) or target_type
 
-        obj = dict(obj)
-
-        if _TYPE_NAME_FIELD in obj:
-            type_ = get_type_named_model_type(obj[_TYPE_NAME_FIELD])
 
         if is_derived_from(target_type, SchemaBaseModel):
+            obj = dict(obj)
+
+            if _TYPE_NAME_FIELD in obj:
+                type_ = get_type_named_model_type(obj[_TYPE_NAME_FIELD])
+
             for field_name, model_field in type_.__fields__.items():
                 if is_derived_from(model_field.type_, (SchemaBaseModel, Union)):
                     type = model_field.outer_type_
