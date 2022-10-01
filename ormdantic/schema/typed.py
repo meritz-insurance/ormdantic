@@ -1,4 +1,5 @@
 from readline import insert_text
+from types import UnionType
 from typing import Type, Any, Dict, cast, get_origin, Union, get_args
 import itertools
 import copy 
@@ -54,7 +55,7 @@ def get_type_named_model_type(type_name:str) -> Type:
 
 
 def _parse_obj(obj:Any, target_type:Type) -> Any:
-    if alias := get_base_generic_alias_of(target_type, Union):
+    if get_base_generic_alias_of(target_type, Union, UnionType):
         generic_args = get_args(target_type)
 
         for arg in generic_args:
@@ -68,7 +69,7 @@ def _parse_obj(obj:Any, target_type:Type) -> Any:
         else:
             return parse_obj_as(target_type, obj)
 
-    elif alias := get_base_generic_alias_of(target_type, list, tuple):
+    elif get_base_generic_alias_of(target_type, list, tuple):
         params = get_type_parameter_of_list_or_tuple(target_type)       
 
         assert params

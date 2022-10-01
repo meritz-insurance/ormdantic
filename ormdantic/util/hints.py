@@ -1,3 +1,4 @@
+from types import UnionType
 from typing import (
     TypeGuard, get_args, Type, get_origin, Tuple, Any, Generic, Protocol,
     ForwardRef, Dict, Generic, Union, TypeVar, List, Tuple, overload,
@@ -135,7 +136,7 @@ def is_derived_from(type_:Type, base_type:Type[_T] | Tuple[Type,...]) -> TypeGua
 
 
 def get_union_type_arguments(type_:Type) -> Tuple[Type,...] | None:
-    union_generic = get_base_generic_alias_of(type_, Union)
+    union_generic = get_base_generic_alias_of(type_, Union, UnionType)
 
     if union_generic:
         return get_args(union_generic)

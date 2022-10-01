@@ -160,6 +160,7 @@ def test_is_derived_or_collection_of_derived():
 
 def test_get_union_type_arguments():
     assert get_union_type_arguments(Union[str, int]) == (str, int)
+    assert get_union_type_arguments(str | int) == (str, int)
     assert get_union_type_arguments(str) is None
 
     
