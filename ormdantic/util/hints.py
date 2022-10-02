@@ -3,7 +3,7 @@ from typing import (
     TypeGuard, get_args, Type, get_origin, Tuple, Any, Generic, Protocol,
     ForwardRef, Dict, Generic, Union, TypeVar, List, Tuple, overload,
 )
-from typing_extensions import _collect_type_vars
+from typing_extensions import _collect_type_vars # type: ignore
 from inspect import getmro
 import sys
 import copy

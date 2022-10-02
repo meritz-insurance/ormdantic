@@ -228,7 +228,9 @@ def collect_shared_model_type_and_ids(model:SchemaBaseModel) -> DefaultDict[Type
         shared_type = get_base_generic_alias_of(field_type, ContentReferenceModel)
         ref_type = get_args(shared_type)[0]
 
-        for sharedModel in convert_as_collection(extract_as(model, path, ContentReferenceModel) or []):
+        for sharedModel in convert_as_collection(
+                extract_as(model, path, ContentReferenceModel)
+                or cast(List[ContentReferenceModel], [])):
             type_and_ids[ref_type].add(sharedModel.get_content_id())
 
     return type_and_ids
@@ -241,5 +243,7 @@ def _iterate_content_reference_models(model:SchemaBaseModel) -> Iterator[Content
         yield cast(ContentReferenceModel, model)
 
     for path in get_paths_for_type(model_type, ContentReferenceModel) :
-        for shared_model in convert_as_collection(extract_as(model, path, ContentReferenceModel) or []):
+        for shared_model in convert_as_collection(
+                extract_as(model, path, ContentReferenceModel)
+                or cast(List[ContentReferenceModel], [])):
             yield shared_model

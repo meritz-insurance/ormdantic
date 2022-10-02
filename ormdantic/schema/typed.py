@@ -1,12 +1,9 @@
-from readline import insert_text
 from types import UnionType
-from typing import Type, Any, Dict, cast, get_origin, Union, get_args
-import itertools
+from typing import Type, Any, Dict, get_origin, Union, get_args
 import copy 
 
-from pydantic import BaseModel, parse_obj_as
-from pydantic.fields import Field, FieldInfo
-from pydantic.main import ModelMetaclass, __dataclass_transform__
+from pydantic import parse_obj_as
+from pydantic.fields import Field 
 from .base import SchemaBaseModel, register_class_postprocessor
 from ormdantic.util.hints import get_type_parameter_of_list_or_tuple, is_derived_from
 from ..util import get_base_generic_alias_of, get_logger
@@ -17,12 +14,11 @@ _logger = get_logger(__name__)
 
 _all_type_named_models : Dict[str, Type] = {}
 
-# @__dataclass_transform__(kw_only_default=True, field_descriptors=(Field, FieldInfo))
-# class TypeNamedModelMetaclass(ModelMetaclass):
-#     def __new__(cls, name, bases, namespace, **kwds):
-#         new_one = cast(BaseModel, super().__new__(cls, name, bases, namespace, **kwds))
 
-#         return new_one
+class TypeNamedModel(SchemaBaseModel):
+    # this field will be update by Metaclass. so, 
+    type_name: str = Field(default='TypeNamedModel')
+
 
 def _fill_type_name_field(class_type:Type):
     name = class_type.__name__
@@ -38,10 +34,6 @@ def _fill_type_name_field(class_type:Type):
     _all_type_named_models[name] = class_type
 
  
-class TypeNamedModel(SchemaBaseModel):
-    # this field will be update by Metaclass. so, 
-    type_name: str = Field(default='TypeNamedModel')
-
 register_class_postprocessor(TypeNamedModel, _fill_type_name_field)
 
 def parse_object_for_model(obj:Dict[str, Any], model_type:Type|None = None) -> Any:
@@ -102,7 +94,7 @@ def _parse_obj(obj:Any, target_type:Type) -> Any:
                 type_ = get_type_named_model_type(obj[_TYPE_NAME_FIELD])
 
             for field_name, model_field in type_.__fields__.items():
-                if is_derived_from(model_field.type_, (SchemaBaseModel, Union)):
+                if is_derived_from(model_field.type_, (SchemaBaseModel, Union, UnionType)):
                     type = model_field.outer_type_
 
                     obj[field_name] = _parse_obj(obj[field_name], type)
