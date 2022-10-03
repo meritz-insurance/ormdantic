@@ -17,12 +17,11 @@ from ..util import get_logger
 from ..schema.base import (
     ArrayIndexMixin, PersistentModelT, ReferenceMixin, FullTextSearchedMixin, 
     IdentifyingMixin, IndexMixin, SequenceIdStr, 
-    StoredFieldDefinitions, PersistentModelT, StoredMixin, PartOfMixin, 
+    StoredFieldDefinitions, PersistentModelT, StoredMixin, PartOfMixin, TemporalModel, 
     UniqueIndexMixin, get_container_type, 
     get_field_names_for, get_part_types, is_field_list_or_tuple_of,
     PersistentModel, is_list_or_tuple_of, get_stored_fields,
     get_stored_fields_for
-
 )
 
 _MAX_VAR_CHAR_LENGTH = 200
@@ -34,6 +33,11 @@ _JSON_CHECK = 'CHECK (JSON_VALID({}))'
 _PART_BASE_TABLE = 'pbase'
 
 # field name for internal use.
+_VALID_FROM_FIELD = '__valid_from'
+_VALID_TO_FIELD = '__valid_to'
+
+_AUDIT_ID_FIELD = '__audit_id'
+
 _ROW_ID_FIELD = '__row_id'
 _ORG_ROW_ID_FIELD = '__org_row_id'
 _CONTAINER_ROW_ID_FIELD = '__container_row_id'
@@ -63,6 +67,7 @@ def get_table_name(type_:Type[PersistentModelT], postfix:str = ''):
 
 def get_seq_name(type_:Type[PersistentModelT], postfix:str):
     return f'{_SEQ_PREFIX}_{type_.__name__}{"_" + postfix if postfix else ""}' 
+
 
 def get_seq_func_name(type_:Type[PersistentModelT], postfix:str):
     return f'{_FUNC_PREFIX}_{type_.__name__}{"_" + postfix if postfix else ""}' 
@@ -132,6 +137,25 @@ def tab_each_line(*statements:Iterable[str] | str, use_comma: bool = False) -> s
 
     return join_line(['  ' + item for item in line.split('\n')], use_comma=False, new_line=True)
 
+def get_sql_for_creating_audit_table():
+    yield _build_model_table_statement(
+        '_audit',
+        iter(['audit_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY',
+              'who VARCHAR(64)',
+              'when DATETIME(6)',
+              'where VARCHAR(64)',
+              ])
+    )
+
+    yield _build_model_table_statement(
+        '_audit_to_id',
+        iter([
+            'audit_id BIGINT',
+            'table_name VARCHAR(64)',
+            'row_id BIGINT',
+        ])
+    )
+     
 
 def get_sql_for_creating_table(type_:Type[PersistentModelT]):
     stored = get_stored_fields(type_)
@@ -310,7 +334,7 @@ def _get_part_table_fields() -> Iterator[str]:
 
 def _get_table_stored_fields(stored_fields:StoredFieldDefinitions, generated:bool = False) -> Iterator[str]:
     for field_name, (paths, field_type) in stored_fields.items():
-        stored = '' if not generated else _generate_stored_for_json_path(paths, field_type)
+        stored = '' if not generated or not paths else _generate_stored_for_json_path(paths, field_type)
         yield f"""{field_exprs(field_name)} {_get_field_db_type(field_type)}{stored}"""
 
 
@@ -1426,3 +1450,7 @@ def _get_populated_table_query_from_base(query_for_base:str,
 
 def _normalize_database_object_name(value:str) -> str:
     return value.replace('.', '_').replace(',', '_').replace(' ', '').upper()
+
+
+def _is_temporal_type(type_:Type) -> bool:
+    return is_derived_from(type, TemporalModel)
