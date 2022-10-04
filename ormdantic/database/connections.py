@@ -5,6 +5,7 @@ from contextlib import contextmanager
 
 from pymysql import Connection, connect
 from pymysql.cursors import DictCursor
+from pymysql.constants import CLIENT
 
 from ..util import get_logger
 
@@ -23,7 +24,7 @@ class DatabaseConnectionPool():
         return self._connection_config[_DATABASE]
 
     def __init__(self, config:Dict[str, Any]):
-        self._connection_config = config
+        self._connection_config = config | {'client_flag':CLIENT.MULTI_STATEMENTS}
         self._cached : Deque[Connection] = deque()
         self._connected : Set[Connection] = set()
 
