@@ -70,23 +70,6 @@ def test_get_sql_for_create_table_for_temporal():
         f'){_ENGINE}'
     ) == next(get_sql_for_creating_table(SimpleBaseModel))
 
-
-def test_get_sql_for_create_table_for_temporal():
-    class SimpleBaseModel(PersistentModel, TemporalMixin):
-        id: IdStr
-
-    assert (
-        'CREATE TABLE IF NOT EXISTS `md_SimpleBaseModel` (\n'
-        '  `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,\n'
-        '  `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`)),\n'
-        '  `__valid_start` BIGINT,\n'
-        '  `__valid_end` BIGINT DEFAULT 9223372036854775807,\n'
-        '  `__squashed_from` BIGINT,\n'
-        '  `id` VARCHAR(64),\n'
-        '  UNIQUE KEY `id_index` (`id`,`__valid_start`)\n'
-        f'){_ENGINE}'
-    ) == next(get_sql_for_creating_table(SimpleBaseModel))
-
     class PartModel(PersistentModel, PartOfMixin['RootModel']):
         order: StringIndex
 
