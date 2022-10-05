@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from typing import (
     Type, Iterator, overload, Iterable, List, Tuple, cast, Dict, 
     Any, DefaultDict, Optional, get_args, Set
@@ -9,6 +10,7 @@ import itertools
 import functools
 
 from pydantic import ConstrainedStr, ConstrainedDecimal
+from ormdantic.schema.verinfo import VersionInfo
 
 from ormdantic.util import is_derived_from, convert_tuple
 from ormdantic.util.hints import get_base_generic_alias_of
@@ -17,8 +19,8 @@ from ..util import get_logger
 from ..schema.base import (
     ArrayIndexMixin, PersistentModelT, ReferenceMixin, FullTextSearchedMixin, 
     IdentifyingMixin, IndexMixin, SequenceIdStr, 
-    StoredFieldDefinitions, PersistentModelT, StoredMixin, PartOfMixin, TemporalModel, 
-    UniqueIndexMixin, get_container_type, 
+    StoredFieldDefinitions, PersistentModelT, StoredMixin, PartOfMixin, TemporalMixin, TemporalMixin, 
+    UniqueIndexMixin, get_container_type, get_root_container_type,
     get_field_names_for, get_part_types, is_field_list_or_tuple_of,
     PersistentModel, is_list_or_tuple_of, get_stored_fields,
     get_stored_fields_for
@@ -27,16 +29,31 @@ from ..schema.base import (
 _MAX_VAR_CHAR_LENGTH = 200
 _MAX_DECIMAL_DIGITS = 65
 
+_BIG_INT_MAX = 9223372036854775807
+
 _JSON_TYPE = 'LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin'
 _JSON_CHECK = 'CHECK (JSON_VALID({}))'
 
 _PART_BASE_TABLE = 'pbase'
 
 # field name for internal use.
-_VALID_FROM_FIELD = '__valid_from'
-_VALID_TO_FIELD = '__valid_to'
+_VALID_START_FIELD = '__valid_start'
+_VALID_END_FIELD = '__valid_end'
+_SQUASHED_FROM_FIELD = '__squashed_from'
 
-_AUDIT_ID_FIELD = '__audit_id'
+_AUDIT_VERSION_FIELD = 'version'
+
+_AUDIT_WHO_FIELD = 'who'
+_AUDIT_WHY_FIELD = 'why'
+_AUDIT_WHERE_FIELD = 'where'
+_AUDIT_WHEN_FIELD = 'when'
+_AUDIT_TAG_FIELD = 'tag'
+
+_VERSION_INFO_TABLE = '_version_info'
+_VERSION_CHANGE_TABLE = '_model_change'
+
+_AUDIT_OP_FIELD = 'op'
+_AUDIT_TABLE_NAME_FIELD = 'table_name'
 
 _ROW_ID_FIELD = '__row_id'
 _ORG_ROW_ID_FIELD = '__org_row_id'
@@ -137,25 +154,80 @@ def tab_each_line(*statements:Iterable[str] | str, use_comma: bool = False) -> s
 
     return join_line(['  ' + item for item in line.split('\n')], use_comma=False, new_line=True)
 
-def get_sql_for_creating_audit_table():
+
+def get_sql_for_creating_version_info_table():
     yield _build_model_table_statement(
-        '_audit',
-        iter(['audit_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY',
-              'who VARCHAR(64)',
-              'when DATETIME(6)',
-              'where VARCHAR(64)',
-              ])
+        _VERSION_INFO_TABLE,
+        iter([
+            f'{field_exprs(_AUDIT_VERSION_FIELD)} BIGINT AUTO_INCREMENT PRIMARY KEY',
+            f'{field_exprs(_AUDIT_WHO_FIELD)} VARCHAR(80)',
+            f'{field_exprs(_AUDIT_WHERE_FIELD)} VARCHAR(80)',
+            f'{field_exprs(_AUDIT_WHEN_FIELD)} DATETIME(6)',
+            f'{field_exprs(_AUDIT_WHY_FIELD)} VARCHAR(256)',
+            f'{field_exprs(_AUDIT_TAG_FIELD)} VARCHAR(80)',
+        ])
     )
 
     yield _build_model_table_statement(
-        '_audit_to_id',
+        _VERSION_CHANGE_TABLE,
         iter([
-            'audit_id BIGINT',
-            'table_name VARCHAR(64)',
-            'row_id BIGINT',
+            f'{field_exprs(_AUDIT_VERSION_FIELD)} BIGINT',
+            f'{field_exprs(_AUDIT_OP_FIELD)} VARCHAR(32)',
+            f'{field_exprs(_AUDIT_TABLE_NAME_FIELD)} VARCHAR(80)',
+            f'{field_exprs(_ROW_ID_FIELD)} BIGINT',
+            f"KEY `__row_id_index` ({field_exprs(_ROW_ID_FIELD)})",
+            f"KEY `__version_index` ({field_exprs(_AUDIT_VERSION_FIELD)})"
         ])
     )
-     
+
+@functools.cache
+def _get_sql_for_auditing_model():
+    return join_line(
+        f'INSERT INTO {field_exprs(_VERSION_CHANGE_TABLE)}',
+        '(',
+        tab_each_line(
+            field_exprs([_AUDIT_VERSION_FIELD, _AUDIT_OP_FIELD, _AUDIT_TABLE_NAME_FIELD, _ROW_ID_FIELD]),
+            use_comma=True
+        ),
+        ')',
+        'VALUES'
+        '(',
+        tab_each_line(
+            '@VERSION',
+            '%(op)s',
+            '%(table_name)s',
+            '%(__row_id)s',
+            use_comma=True
+        ),
+        ')'
+    )
+
+ 
+@functools.cache
+def _get_sql_for_allocating_version():
+    return join_line(
+        f'INSERT INTO {field_exprs(_VERSION_INFO_TABLE)}',
+        '(',
+        tab_each_line(
+            field_exprs([_AUDIT_WHO_FIELD, _AUDIT_WHERE_FIELD, _AUDIT_WHEN_FIELD, _AUDIT_WHY_FIELD, _AUDIT_TAG_FIELD]),
+            use_comma=True
+        ),
+        ')',
+        'VALUES'
+        '(',
+        tab_each_line(
+            '%(who)s',
+            '%(where)s',
+            'CURRENT_TIMESTAMP(6)',
+            '%(why)s',
+            '%(tag)s',
+            use_comma=True
+        ),
+        ')',
+        'RETURNING',
+        f'  @VERSION := {field_exprs(_AUDIT_VERSION_FIELD)} as {field_exprs(_AUDIT_VERSION_FIELD)}'
+    )
+
 
 def get_sql_for_creating_table(type_:Type[PersistentModelT]):
     stored = get_stored_fields(type_)
@@ -171,23 +243,36 @@ def get_sql_for_creating_table(type_:Type[PersistentModelT]):
             _get_part_table_fields(),
             _get_table_stored_fields(part_stored, False),
             _get_part_table_indexes(),
-            _get_table_indexes(part_stored),
+            _get_table_indexes(type_, part_stored),
         )
 
         part_table_name = get_table_name(type_, _PART_BASE_TABLE)
 
         container_type = get_container_type(type_)
-        assert container_type 
+
+        assert container_type
+
+        if _is_temporal_type(type_):
+            _logger.fatal(
+                f'{type_=} is temporal type. but it was PartOfMxin. '
+                'if the root container type is Temporal Mixin, the PartOfMixin may be handled as TemporalMixin ')
+            raise RuntimeError('TemporalMixin is not support for PartOfMixin.')
+
+        if _is_temporal_type(get_root_container_type(type_)):
+            valid_fields = (_VALID_START_FIELD, _VALID_END_FIELD)
+        else:
+            valid_fields = (_VALID_START_FIELD,)
 
         container_table_name = get_table_name(container_type)
 
         part_fields = (_ROW_ID_FIELD, _ROOT_ROW_ID_FIELD, _CONTAINER_ROW_ID_FIELD, 
                        *part_stored.keys())
-        container_fields = tuple(set(stored.keys()) - set(part_fields))
+
+        container_fields = tuple(set(stored.keys()) - set(part_fields)) + valid_fields
 
         joined_table = _build_join_table(
             (part_table_name, _CONTAINER_ROW_ID_FIELD), 
-            (container_table_name, _ROW_ID_FIELD)
+            (container_table_name, _ROW_ID_FIELD),
         )
 
         yield _build_part_of_model_view_statement(
@@ -203,11 +288,17 @@ def get_sql_for_creating_table(type_:Type[PersistentModelT]):
             })
         )
     else:
+        if _is_temporal_type(type_):
+            if not get_identifying_fields(type_):
+                _logger.fatal(f'{type_=} does not have any id fields.')
+                raise RuntimeError('identifying fields needs for TemporalMixin type.')
+
         yield _build_model_table_statement(
             get_table_name(type_), 
             _get_table_fields(),
+            _get_table_temporal_fields(type_),
             _get_table_stored_fields(stored, True),
-            _get_table_indexes(stored)
+            _get_table_indexes(type_, stored)
         )
 
         yield from _build_code_seq_statement(type_)
@@ -237,7 +328,7 @@ def get_stored_fields_for_external_index(type_:Type[PersistentModelT]):
 
 
 def _build_model_table_statement(table_name:str, 
-                                        *field_definitions: Iterator[str]) -> str:
+                                 *field_definitions: Iterator[str]) -> str:
     return join_line(
         f'CREATE TABLE IF NOT EXISTS {field_exprs(table_name)} (',
         tab_each_line(
@@ -314,6 +405,14 @@ def _get_table_fields() -> Iterator[str]:
     yield f'{field_exprs(_JSON_FIELD)} {_JSON_TYPE} {_JSON_CHECK.format(field_exprs(_JSON_FIELD))}'
 
 
+def _get_table_temporal_fields(type_:Type) -> Iterator[str]:
+    yield f'{field_exprs(_VALID_START_FIELD)} BIGINT'
+
+    if _is_temporal_type(type_):
+        yield f'{field_exprs(_VALID_END_FIELD)} BIGINT DEFAULT {_BIG_INT_MAX}'
+        yield f'{field_exprs(_SQUASHED_FROM_FIELD)} BIGINT'
+
+
 def _get_external_index_table_fields(field_name:str, field_type:Type) -> Iterator[str]:
     # we don't need primary key, because there is no field which is for full text searching.
     type = get_base_generic_alias_of(field_type, ArrayIndexMixin)
@@ -344,12 +443,17 @@ def _get_view_fields(fields:Dict[str, Tuple[str, ...]]) -> Iterator[str]:
             yield f'{field_exprs(field_name, table_name)}'
 
 
-def _get_table_indexes(stored_fields:StoredFieldDefinitions) -> Iterator[str]:
+def _get_table_indexes(type_:Type, stored_fields:StoredFieldDefinitions) -> Iterator[str]:
     for field_name, (_, field_type) in stored_fields.items():
         key_def = _generate_key_definition(field_type)
 
         if key_def: 
-            yield f"""{key_def} `{field_name}_index` ({field_exprs(field_name)})"""
+            if key_def == 'UNIQUE KEY' and _is_temporal_type(type_):
+                index_fields = (field_name, _VALID_START_FIELD)
+            else:
+                index_fields = (field_name,)
+
+            yield f"""{key_def} `{field_name}_index` ({join_line(field_exprs(index_fields), new_line=False, use_comma=True)})"""
 
     full_text_searched_fields = set(
         field_name for field_name, (_, field_type) in stored_fields.items()
@@ -448,10 +552,33 @@ def _generate_key_definition(type_:Type) -> str:
     return ''
 
 
+def get_query_and_args_for_inserting_audit(audit:VersionInfo):
+    return _get_sql_for_allocating_version(), asdict(audit)
+
+
+def get_query_and_args_for_auditing(item:Dict[str, Any]):
+    return _get_sql_for_auditing_model(), item
+
+
+def get_query_and_args_for_getting_version(ref_date:datetime | None):
+    if ref_date is None:
+        return f'SELECT MAX(version) as version FROM {field_exprs(_VERSION_INFO_TABLE)}', {}
+    else:
+        return f'SELECT MAX(version) as version FROM {field_exprs(_VERSION_INFO_TABLE)} WHERE `when` <= %(ref_date)s', {'ref_date': ref_date}
+
+
+def get_query_and_args_for_getting_version_info(audit_version:int):
+    return f'SELECT * FROM {field_exprs(_VERSION_INFO_TABLE)} where version = %(version)s', {'version':audit_version}
+
+
+def get_query_and_args_for_getting_model_change_of_version(audit_version:int):
+    return f'SELECT * FROM {field_exprs(_VERSION_CHANGE_TABLE)} where version = %(version)s', {'version':audit_version}
+
+
 def get_query_and_args_for_upserting(model:PersistentModel):
     query_args : Dict[str, Any] = {}
 
-    for f in _get_identifying_fields(type(model)):
+    for f in get_identifying_fields(type(model)):
         query_args[f] = getattr(model, f) 
 
     query_args[_JSON_FIELD] = model.json()
@@ -459,40 +586,214 @@ def get_query_and_args_for_upserting(model:PersistentModel):
     return _get_sql_for_upserting(cast(Type, type(model))), query_args
 
 
-def _get_identifying_fields(model_type:Type[PersistentModelT]) -> Tuple[str]:
+def get_identifying_fields(model_type:Type[PersistentModelT]) -> Tuple[str,...]:
     stored_fields = get_stored_fields_for(model_type, IdentifyingMixin)
 
     return tuple(field_name for field_name, _ in stored_fields.items())
-            
+
+
+def get_query_and_args_for_squashing(type_:Type[PersistentModelT], identifier:Dict[str, Any]):
+    if not _is_temporal_type(type_):
+        raise RuntimeError('to squash is not supported for non temporal type.')
+
+    return _get_sql_for_squashing(cast(Type, type_)), identifier
+    
 
 @functools.lru_cache
-def _get_sql_for_upserting(model_type:Type):
-    fields = _get_identifying_fields(model_type)
+def _get_sql_for_squashing(model_type:Type):
+    table_name = get_table_name(model_type)
+    id_fields = get_identifying_fields(model_type)
+    for_id_fields = [f'{field_exprs(f)} = %({f})s' for f in id_fields]
 
     return join_line(
-        f'INSERT INTO {get_table_name(model_type)} (',
+        # find SQUASHED_FROM from current 
+        f'SELECT MIN({field_exprs(_SQUASHED_FROM_FIELD)})',
+        f'INTO @SQUASHED_FROM',
+        f'FROM {table_name}',
+        f'WHERE',
         tab_each_line(
-            field_exprs([_JSON_FIELD, *fields]),
-            use_comma=True
+            '\n AND '.join(
+                itertools.chain(
+                    for_id_fields,
+                    [
+                        f'{field_exprs(_VALID_START_FIELD)} <= @VERSION',
+                        f'@VERSION < {field_exprs(_VALID_END_FIELD)}',
+                        f'{field_exprs(_SQUASHED_FROM_FIELD)} IS NOT NULL'
+                    ]
+                )
+            )
         ),
-        ')',
-        f'VALUES (',
+        ';',
+
+        # find new_valid_start
+        # find minimum of _valid_start which have same @SQUASHED_FROM.
+        f'SELECT MIN({field_exprs(_VALID_START_FIELD)})',
+        f'INTO @NEW_VALID_START',
+        f'FROM {table_name}',
+        f'WHERE',
         tab_each_line(
-            '%(__json)s',
-            [f'%({f})s' for f in fields],
-            use_comma=True
+            '\n AND '.join(
+                itertools.chain(
+                    for_id_fields,
+                    [
+                        f'{field_exprs(_SQUASHED_FROM_FIELD)} = @SQUASHED_FROM',
+                    ]
+                )
+            )
         ),
-        ')',
-        f'ON DUPLICATE KEY UPDATE',
+        ';',
+
+        # delete records from SQUASHED_FROM and previous of current
+        f'DELETE FROM {table_name}',
+        f'WHERE',
         tab_each_line(
-            f'{field_exprs(_JSON_FIELD)} = %(__json)s'
+            '\n AND '.join(
+                itertools.chain(
+                    for_id_fields,
+                    [
+                        f'@SQUASHED_FROM <= {field_exprs(_VALID_START_FIELD)}',
+                        f'{field_exprs(_VALID_END_FIELD)} <= @VERSION',
+                    ]
+                )
+            )
         ),
         f'RETURNING',
         tab_each_line(
-            _ROW_ID_FIELD,
+            field_exprs(_ROW_ID_FIELD),
+            "'DELETE:SQUASHED' as op",
+            f"'{table_name}' as table_name",
             use_comma=True
+        ),
+        ';',
+ 
+        # reset SQAUSHED_FROM and extend the valid period of current record by
+        # setting NEW_VALID_START
+        f'UPDATE {table_name}',
+        f'SET',
+        tab_each_line(
+            f'{field_exprs(_SQUASHED_FROM_FIELD)} = NULL',
+            f'{field_exprs(_VALID_START_FIELD)} = @NEW_VALID_START',
+            use_comma=True
+        ),
+        f'WHERE',
+        tab_each_line(
+            '\n AND '.join(
+                itertools.chain(
+                    for_id_fields,
+                    [
+                        f'{field_exprs(_VALID_START_FIELD)} <= @VERSION',
+                        f'@VERSION < {field_exprs(_VALID_END_FIELD)}',
+                    ]
+                )
+            )
+        ),
+        ';',
+   )
+
+
+@functools.lru_cache
+def _get_sql_for_upserting(model_type:Type):
+    table_name = get_table_name(model_type)
+    id_fields = get_identifying_fields(model_type)
+
+    if _is_temporal_type(model_type):
+        assert id_fields
+
+        for_id_fields = [f'{field_exprs(f)} = %({f})s' for f in id_fields]
+
+        where_cond = tab_each_line(
+            '\nAND '.join(
+                itertools.chain(
+                    for_id_fields,
+                    [
+                        f'{field_exprs(_VALID_START_FIELD)} <= @VERSION',
+                        f'@VERSION < {field_exprs(_VALID_END_FIELD)}',
+                    ]
+                )
+            )
         )
-    ) 
+
+        return join_line(                    
+            # get squashed_from.
+            # MIN(squashed_from_field) of current record will be SQUASHED_FROM
+            f'SELECT MIN({field_exprs(_SQUASHED_FROM_FIELD)})',
+            f'INTO @SQUASHED_FROM',
+            f'FROM {table_name}',
+            f'WHERE',
+            where_cond, 
+            ';',
+
+            # update valid_end of current record 
+            f'UPDATE {table_name}',
+            f'SET {field_exprs(_VALID_END_FIELD)} = @VERSION',
+            f'WHERE',
+            where_cond,
+            ';',
+
+            ## we will insert new record which is be new current record.
+            # insert new record which start from current.
+            f'INSERT INTO {table_name}',
+            '(',
+            tab_each_line(
+                field_exprs([
+                    _JSON_FIELD, 
+                    _VALID_START_FIELD, 
+                    _SQUASHED_FROM_FIELD, 
+                    *id_fields
+                ]),
+                use_comma=True
+            ),
+            ')',
+            'VALUES',
+            '(',
+            tab_each_line(
+                '%(__json)s',
+                '@VERSION',
+                'IFNULL(@SQUASHED_FROM, @VERSION)',
+                [f'%({f})s' for f in id_fields],
+                use_comma=True
+            ),
+            ')',
+            f'RETURNING',
+            tab_each_line(
+                field_exprs(_ROW_ID_FIELD),
+                "'UPSERT' as op",
+                f"'{table_name}' as table_name",
+                use_comma=True
+            )
+        )
+    else:
+        return join_line(
+            f'INSERT INTO {table_name}', 
+            '(',
+            tab_each_line(
+                field_exprs([_JSON_FIELD, _VALID_START_FIELD, *id_fields]),
+                use_comma=True
+            ),
+            ')',
+            f'VALUES',
+            '(',
+            tab_each_line(
+                '%(__json)s',
+                '@VERSION',
+                [f'%({f})s' for f in id_fields],
+                use_comma=True
+            ),
+            ')',
+            f'ON DUPLICATE KEY UPDATE',
+            tab_each_line(
+                f'{field_exprs(_JSON_FIELD)} = %(__json)s',
+                f'{field_exprs(_VALID_START_FIELD)} = @VERSION',
+                use_comma=True
+            ),
+            f'RETURNING',
+            tab_each_line(
+                field_exprs(_ROW_ID_FIELD),
+                "'UPSERT' as op",
+                f"'{table_name}' as table_name",
+                use_comma=True
+            )
+        ) 
 
 
 # At first, I would use the JSON_TABLE function in mariadb. 
@@ -554,7 +855,10 @@ def get_sql_for_upserting_parts(model_type:Type) -> Dict[Type, Tuple[str, ...]]:
             fields.keys()
         ))
 
-        root_field = 'CONTAINER.' + (field_exprs(_ROW_ID_FIELD) if is_root else field_exprs(_ROOT_ROW_ID_FIELD))
+        root_field = 'CONTAINER.' + (
+            field_exprs(_ROW_ID_FIELD) 
+            if is_root else field_exprs(_ROOT_ROW_ID_FIELD)
+        )
 
         for part_field in part_fields:
             is_collection = is_field_list_or_tuple_of(model_type, part_field)
@@ -815,7 +1119,8 @@ def get_query_and_args_for_reading(type_:Type[PersistentModelT], fields:Tuple[st
                                    unwind: Tuple[str, ...] | str = tuple(),
                                    ns_types:Dict[str, Type[PersistentModelT]] | None = None,
                                    base_type:Optional[Type[PersistentModelT]] = None,
-                                   for_count:bool = False
+                                   for_count:bool = False,
+                                   version:int = 0
                                    ):
     '''
         Get 'field' values of record which is all satified the where conditions.
@@ -849,7 +1154,7 @@ def get_query_and_args_for_reading(type_:Type[PersistentModelT], fields:Tuple[st
             order_by, offset, limit, 
             unwind, 
             cast(Type, base_type), for_count), 
-        _build_database_args(where)
+        _build_database_args(where) | {'VERSION':version}
     )
 
     # first, we make a group for each table.
@@ -1024,7 +1329,8 @@ def get_query_and_args_for_deleting(type_:Type, where:Where):
 
 @functools.lru_cache
 def _get_sql_for_deleting(type_:Type, field_and_value:FieldOp):
-    return f'DELETE FROM {get_table_name(type_)} {_build_where(field_and_value)} RETURNING {_ROW_ID_FIELD}'
+    table_name = get_table_name(type_)
+    return f"DELETE FROM {table_name} {_build_where(field_and_value)} RETURNING {_ROW_ID_FIELD}, 'DELETE' as op, '{table_name}' as table_name"
 
 
 def _build_database_args(where:Where) -> Dict[str, Any]:
@@ -1111,7 +1417,7 @@ def _build_query_and_fields_for_core_table(
     # 4. fields which is looked up from base table by field_ops.
 
     matches = []
-    prefix_fields : DefaultDict[str, Dict[str, None]]= defaultdict(dict)
+    prefix_fields : DefaultDict[str, Dict[str, None]] = defaultdict(dict)
 
     prefix_fields['__ORG'][_ROW_ID_FIELD] = None
 
@@ -1128,6 +1434,12 @@ def _build_query_and_fields_for_core_table(
         (field_exprs(f, _get_alias_for_unwind(f, unwind)), o, f)
         for f, o in field_ops if o != 'match'
     )
+
+    if _is_temporal_type(get_root_container_type(target_type) or target_type):
+        field_op_var = field_op_var + (
+            (field_exprs(_VALID_START_FIELD, '__ORG'), '<=', 'version'),
+            (field_exprs(_VALID_END_FIELD, '__ORG'), '>', 'version')
+        )
 
     field_list = [] 
 
@@ -1453,4 +1765,4 @@ def _normalize_database_object_name(value:str) -> str:
 
 
 def _is_temporal_type(type_:Type) -> bool:
-    return is_derived_from(type, TemporalModel)
+    return is_derived_from(type_, TemporalMixin)
