@@ -5,7 +5,7 @@ from typing import (
 )
 import inspect
 
-from ormdantic.util.hints import get_type_parameter_of_list_or_tuple
+from ormdantic.util.hints import get_args_of_list_or_tuple
 from ormdantic.util.tools import convert_tuple
 
 from .base import ( ModelT, SchemaBaseModel)
@@ -62,7 +62,7 @@ def _get_path_and_type(type_:Type[ModelT],
             json_path.append(field_name)
 
             if is_list_or_tuple_of(field_type):
-                generic_param = get_type_parameter_of_list_or_tuple(field_type)
+                generic_param = get_args_of_list_or_tuple(field_type)
 
                 # path에서 tuple[int, str] 같은 형태는 지원하지 않는다.
                 assert not isinstance(generic_param, tuple), "not support heterogeneous type for collection"
@@ -76,7 +76,7 @@ def _get_path_and_type(type_:Type[ModelT],
                 _get_path_and_type(field_type, predicate)
             )
         elif is_list_or_tuple_of(field_type, SchemaBaseModel):
-            generic_param = get_type_parameter_of_list_or_tuple(field_type)
+            generic_param = get_args_of_list_or_tuple(field_type)
 
             assert not isinstance(generic_param, tuple), "not support heterogeneous type for collection"
 

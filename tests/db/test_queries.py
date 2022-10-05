@@ -1,4 +1,4 @@
-from typing import Type, List, ClassVar
+from typing import Type, List, ClassVar, cast, Any
 import pytest
 from decimal import Decimal
 from datetime import date, datetime
@@ -7,7 +7,7 @@ from pydantic import condecimal, constr, Field
 
 from ormdantic.schema import PersistentModel
 from ormdantic.database.queries import (
-    get_sql_for_upserting_external_index, get_stored_fields, get_table_name, 
+    _get_sql_for_upserting, get_sql_for_creating_version_info_table, get_sql_for_upserting_external_index, get_stored_fields, get_table_name, 
     get_sql_for_creating_table, _get_field_db_type, _generate_json_table_for_part_of,
     _build_query_and_fields_for_core_table, field_exprs,
     get_query_and_args_for_reading,
@@ -18,7 +18,7 @@ from ormdantic.database.queries import (
 )
 from ormdantic.schema.base import (
     IntegerArrayIndex, StringArrayIndex, FullTextSearchedStringIndex, 
-    FullTextSearchedStr, PartOfMixin, StringReference, 
+    FullTextSearchedStr, PartOfMixin, StringReference, TemporalMixin, 
     UniqueStringIndex, StringIndex, DecimalIndex, IntIndex, DateIndex,
     DateTimeIndex, update_forward_refs, IdStr, 
     StoredFieldDefinitions
@@ -48,9 +48,77 @@ def test_get_sql_for_create_table():
     assert (
         'CREATE TABLE IF NOT EXISTS `md_SimpleBaseModel` (\n'
         '  `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,\n'
-        '  `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`))\n'
+        '  `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`)),\n'
+        '  `__valid_start` BIGINT\n'
         f'){_ENGINE}'
     ) == next(get_sql_for_creating_table(SimpleBaseModel))
+
+
+def test_get_sql_for_create_table_for_temporal():
+    class SimpleBaseModel(PersistentModel, TemporalMixin):
+        id: IdStr
+
+    assert (
+        'CREATE TABLE IF NOT EXISTS `md_SimpleBaseModel` (\n'
+        '  `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,\n'
+        '  `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`)),\n'
+        '  `__valid_start` BIGINT,\n'
+        '  `__valid_end` BIGINT DEFAULT 9223372036854775807,\n'
+        '  `__squashed_from` BIGINT,\n'
+        '  `id` VARCHAR(64),\n'
+        '  UNIQUE KEY `id_index` (`id`,`__valid_start`)\n'
+        f'){_ENGINE}'
+    ) == next(get_sql_for_creating_table(SimpleBaseModel))
+
+
+def test_get_sql_for_create_table_for_temporal():
+    class SimpleBaseModel(PersistentModel, TemporalMixin):
+        id: IdStr
+
+    assert (
+        'CREATE TABLE IF NOT EXISTS `md_SimpleBaseModel` (\n'
+        '  `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,\n'
+        '  `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`)),\n'
+        '  `__valid_start` BIGINT,\n'
+        '  `__valid_end` BIGINT DEFAULT 9223372036854775807,\n'
+        '  `__squashed_from` BIGINT,\n'
+        '  `id` VARCHAR(64),\n'
+        '  UNIQUE KEY `id_index` (`id`,`__valid_start`)\n'
+        f'){_ENGINE}'
+    ) == next(get_sql_for_creating_table(SimpleBaseModel))
+
+    class PartModel(PersistentModel, PartOfMixin['RootModel']):
+        order: StringIndex
+
+    class RootModel(PersistentModel, TemporalMixin):
+        id: IdStr
+
+    update_forward_refs(PartModel, locals())
+
+    assert [
+        'CREATE TABLE IF NOT EXISTS `md_PartModel_pbase` (\n'
+        '  `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,\n'
+        '  `__root_row_id` BIGINT,\n'
+        '  `__container_row_id` BIGINT,\n'
+        '  `__json_path` VARCHAR(255),\n'
+        '  `order` VARCHAR(200),\n'
+        '  KEY `__root_row_id_index` (`__root_row_id`),\n'
+        '  KEY `order_index` (`order`)\n'
+        f'){_ENGINE}',
+        'CREATE VIEW IF NOT EXISTS `md_PartModel` AS (\n'
+        '  SELECT\n'
+        '    JSON_EXTRACT(`md_RootModel`.`__json`, `md_PartModel_pbase`.`__json_path`) AS `__json`,\n'
+        '    `md_PartModel_pbase`.`__row_id`,\n'
+        '    `md_PartModel_pbase`.`__root_row_id`,\n'
+        '    `md_PartModel_pbase`.`__container_row_id`,\n'
+        '    `md_PartModel_pbase`.`order`,\n'
+        '    `md_RootModel`.`__valid_start`,\n'
+        '    `md_RootModel`.`__valid_end`\n'
+        '  FROM `md_PartModel_pbase`\n'
+        '  JOIN `md_RootModel` ON `md_RootModel`.`__row_id` = `md_PartModel_pbase`.`__container_row_id`\n'
+        ')'
+    ] == list(get_sql_for_creating_table(PartModel))
+
 
 
 def test_get_sql_for_create_table_with_index():
@@ -70,6 +138,7 @@ def test_get_sql_for_create_table_with_index():
 f"""CREATE TABLE IF NOT EXISTS `md_SampleModel` (
   `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`)),
+  `__valid_start` BIGINT,
   `i1` VARCHAR(200) AS (JSON_VALUE(`__json`, '$.i1')) STORED,
   `i2` VARCHAR(200) AS (JSON_VALUE(`__json`, '$.i2')) STORED,
   `i3` VARCHAR(200) AS (JSON_VALUE(`__json`, '$.i3')) STORED,
@@ -123,13 +192,74 @@ def test_get_sql_for_create_part_of_table():
         '    `md_Part_pbase`.`__row_id`,\n'
         '    `md_Part_pbase`.`__root_row_id`,\n'
         '    `md_Part_pbase`.`__container_row_id`,\n'
-        '    `md_Part_pbase`.`order`\n'
+        '    `md_Part_pbase`.`order`,\n'
+        '    `md_Container`.`__valid_start`\n'
         '  FROM `md_Part_pbase`\n'
         '  JOIN `md_Container` ON `md_Container`.`__row_id` = `md_Part_pbase`.`__container_row_id`\n'
         ')'
     ) == next(sqls, None)
 
     assert None is next(sqls, None)
+
+
+def test_get_sql_for_create_part_of_part_table():
+    
+    class PartOfPart(PersistentModel, PartOfMixin['Part']):
+        order: StringIndex
+
+    class Part(PersistentModel, PartOfMixin['Container']):
+        order: StringIndex
+
+    class Container(PersistentModel):
+        parts: List[Part] = Field(default=[])
+
+    update_forward_refs(Part, locals())
+    update_forward_refs(PartOfPart, locals())
+
+    sqls = get_sql_for_creating_table(PartOfPart)
+
+    assert (
+        'CREATE TABLE IF NOT EXISTS `md_PartOfPart_pbase` (\n'
+        '  `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,\n'
+        '  `__root_row_id` BIGINT,\n'
+        '  `__container_row_id` BIGINT,\n'
+        '  `__json_path` VARCHAR(255),\n'
+        '  `order` VARCHAR(200),\n'
+        '  KEY `__root_row_id_index` (`__root_row_id`),\n'
+        '  KEY `order_index` (`order`)\n'
+        ')'
+    ) == next(sqls, None)
+
+    assert (
+        'CREATE VIEW IF NOT EXISTS `md_PartOfPart` AS (\n'
+        '  SELECT\n'
+        '    JSON_EXTRACT(`md_Part`.`__json`, `md_PartOfPart_pbase`.`__json_path`) AS `__json`,\n'
+        '    `md_PartOfPart_pbase`.`__row_id`,\n'
+        '    `md_PartOfPart_pbase`.`__root_row_id`,\n'
+        '    `md_PartOfPart_pbase`.`__container_row_id`,\n'
+        '    `md_PartOfPart_pbase`.`order`,\n'
+        '    `md_Part`.`__valid_start`\n'
+        '  FROM `md_PartOfPart_pbase`\n'
+        '  JOIN `md_Part` ON `md_Part`.`__row_id` = `md_PartOfPart_pbase`.`__container_row_id`\n'
+        ')'
+    ) == next(sqls, None)
+
+    assert None is next(sqls, None)
+
+def test_get_sql_for_create_table_raises():
+    class Part(PersistentModel, PartOfMixin['Container'], TemporalMixin):
+        order: StringIndex
+
+    class Container(PersistentModel, TemporalMixin):
+        parts: List[Part] = Field(default=[])
+
+    update_forward_refs(Part, locals())
+
+    with pytest.raises(RuntimeError, match='TemporalMixin is not support for PartOfMixin.'):
+        list(get_sql_for_creating_table(Part))
+
+    with pytest.raises(RuntimeError, match='identifying fields needs for TemporalMixin type.'):
+        list(get_sql_for_creating_table(Container))
 
 
 def test_get_sql_for_creating_external_index_table():
@@ -142,6 +272,7 @@ def test_get_sql_for_creating_external_index_table():
             "CREATE TABLE IF NOT EXISTS `md_Target` (",
             "  `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,",
             "  `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`)),",
+            "  `__valid_start` BIGINT,",
             "  `codes` TEXT AS (JSON_EXTRACT(`__json`, '$.codes[*]')) STORED,",
             "  `ids` TEXT AS (JSON_EXTRACT(`__json`, '$.ids[*]')) STORED,",
             "  KEY `codes_index` (`codes`),",
@@ -167,6 +298,31 @@ def test_get_sql_for_creating_external_index_table():
             ")"
         )
     ] == list(get_sql_for_creating_table(Target))
+
+
+def test_get_sql_for_creating_audit_version_table():
+    assert [
+        join_line(
+            'CREATE TABLE IF NOT EXISTS `_version_info` (',
+            '  `version` BIGINT AUTO_INCREMENT PRIMARY KEY,',
+            '  `who` VARCHAR(80),',
+            '  `where` VARCHAR(80),',
+            '  `when` DATETIME(6),',
+            '  `why` VARCHAR(256),',
+            '  `tag` VARCHAR(80)',
+            ')'
+        ),
+        join_line(
+            'CREATE TABLE IF NOT EXISTS `_model_change` (',
+            '  `version` BIGINT,',
+            '  `op` VARCHAR(32),',
+            '  `table_name` VARCHAR(80),',
+            '  `__row_id` BIGINT,',
+            '  KEY `__row_id_index` (`__row_id`),',
+            '  KEY `__version_index` (`version`)',
+            ')'
+        ),
+    ] == list(get_sql_for_creating_version_info_table())
 
 
 @pytest.mark.parametrize('type_, expected', [
@@ -328,6 +484,77 @@ def test_get_stored_fields_of_parts():
     # Container에서 시작함으로 $.part.에 $.order가 된다.
     assert {'order': (('$.order',), StringIndex)} == get_stored_fields(Part)
     assert {} == get_stored_fields(Container)
+
+
+def test_get_sql_for_upserting():
+    class SimpleModel(PersistentModel):
+        order: StringIndex
+        
+    sql = _get_sql_for_upserting(cast(Any, SimpleModel))
+
+    assert join_line(
+        "INSERT INTO md_SimpleModel",
+        "(",
+        "  `__json`,",
+        "  `__valid_start`",
+        ")",
+        "VALUES",
+        "(",
+        "  %(__json)s,",
+        "  @VERSION",
+        ")",
+        "ON DUPLICATE KEY UPDATE",  
+        "  `__json` = %(__json)s,",
+        "  `__valid_start` = @VERSION",
+        "RETURNING",
+        "  `__row_id`,",
+        "  'UPSERT' as op,",
+        "  'md_SimpleModel' as table_name",
+    ) == sql
+
+
+def test_get_sql_for_upserting_temporal():
+    class TemporalModel(PersistentModel, TemporalMixin):
+        id: IdStr
+        order: StringIndex
+        
+    sql = _get_sql_for_upserting(cast(Any, TemporalModel))
+
+    assert join_line(
+        "SELECT MIN(`__squashed_from`)",
+        "INTO @SQUASHED_FROM",
+        "FROM md_TemporalModel",
+        "WHERE",
+        "  `id` = %(id)s",
+        "  AND `__valid_start` <= @VERSION",
+        "  AND @VERSION < `__valid_end`",
+        ";",
+        "UPDATE md_TemporalModel",
+        "SET `__valid_end` = @VERSION",
+        "WHERE",
+        "  `id` = %(id)s",
+        "  AND `__valid_start` <= @VERSION",
+        "  AND @VERSION < `__valid_end`",
+        ";",
+        "INSERT INTO md_TemporalModel",
+        "(",
+        "  `__json`,",
+        "  `__valid_start`,",
+        "  `__squashed_from`,",
+        "  `id`",
+        ")",
+        "VALUES",
+        "(",
+        "  %(__json)s,",
+        "  @VERSION,",
+        "  IFNULL(@SQUASHED_FROM, @VERSION),",
+        "  %(id)s",
+        ")",
+        "RETURNING",
+        "  `__row_id`,",
+        "  'UPSERT' as op,",
+        "  'md_TemporalModel' as table_name"
+    ) == sql
 
 
 def test_get_stored_fields_of_single_part():
@@ -611,7 +838,8 @@ def test_get_query_and_args_for_reading_for_matching():
     ) == sql
 
     assert {
-        "ORDER_NAME": "+FAST"
+        "ORDER_NAME": "+FAST",
+        "VERSION": 0
     } == args
 
 

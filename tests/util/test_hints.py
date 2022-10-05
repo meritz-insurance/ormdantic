@@ -8,7 +8,7 @@ from ormdantic.util import (
     is_list_or_tuple_of
 )
 from ormdantic.schema.base import PartOfMixin, PersistentModel, StringIndex
-from ormdantic.util.hints import get_type_parameter_of_list_or_tuple, get_union_type_arguments, is_derived_or_collection_of_derived, resolve_forward_ref_in_args
+from ormdantic.util.hints import get_args_of_list_or_tuple, get_union_type_arguments, is_derived_or_collection_of_derived, resolve_forward_ref_in_args
 
 T = TypeVar('T')
 
@@ -128,18 +128,19 @@ def test_is_collection_type_of():
     assert not is_list_or_tuple_of(List, int)
     assert not is_list_or_tuple_of(List[str], int)
     assert not is_list_or_tuple_of(List[str], StringIndex)
+    assert not is_list_or_tuple_of(List[str], StringIndex, str)
     assert not is_list_or_tuple_of(int, int)
 
 
 def test_get_collection_type_parameters():
-    assert get_type_parameter_of_list_or_tuple(int) is None
-    assert get_type_parameter_of_list_or_tuple(str) is None
+    assert get_args_of_list_or_tuple(int) is None
+    assert get_args_of_list_or_tuple(str) is None
 
-    assert get_type_parameter_of_list_or_tuple(list) == tuple()
-    assert get_type_parameter_of_list_or_tuple(List[str]) == str
-    assert get_type_parameter_of_list_or_tuple(Tuple[str, ...]) == str
-    assert get_type_parameter_of_list_or_tuple(Tuple[str, str]) == (str, str)
-    assert get_type_parameter_of_list_or_tuple(Tuple[str, str, int]) == (str, str, int)
+    assert get_args_of_list_or_tuple(list) == tuple()
+    assert get_args_of_list_or_tuple(List[str]) == str
+    assert get_args_of_list_or_tuple(Tuple[str, ...]) == str
+    assert get_args_of_list_or_tuple(Tuple[str, str]) == (str, str)
+    assert get_args_of_list_or_tuple(Tuple[str, str, int]) == (str, str, int)
 
 
 def test_is_derived_or_collection_of_derived():

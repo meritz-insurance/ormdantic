@@ -235,6 +235,11 @@ class IdentifiedMixin(SchemaBaseModel):
     id: IdStr = Field(default=IdStr(''), title='identifier for retreiving')
 
 
+class TemporalMixin(SchemaBaseModel):
+    ''' Marker for temporal (valid_from, valid_to)'''
+    pass
+
+
 class IdentifiedModel(PersistentModel, IdentifiedMixin):
     ''' identified by uuid '''
     version:str = Field(default='0.1.0')
@@ -246,12 +251,22 @@ class IdentifiedModel(PersistentModel, IdentifiedMixin):
 IdentifiedModelT = TypeVar('IdentifiedModelT', bound=IdentifiedModel)
 
 
-def get_container_type(type_:Type[ModelT]) -> Optional[Type[ModelT]]:
+def get_container_type(type_:Type[ModelT]) -> Type[ModelT] | None:
     ''' get the type of container '''
     part_type = get_base_generic_alias_of(cast(Type, type_), PartOfMixin)
 
     if part_type:
         return get_type_args(part_type)[0]
+
+    return None
+
+
+def get_root_container_type(type_:Type[ModelT]) -> Type[ModelT] | None:
+    while container_type := get_container_type(type_):
+        if not is_derived_from(container_type, PartOfMixin):
+            return container_type
+        else:
+            type_ = cast(Type[ModelT], container_type)
 
     return None
 
@@ -348,7 +363,8 @@ def assign_identifying_fields_if_empty(model:ModelT, inplace:bool=False,
     return to_be_updated or model
 
 
-def _replace_scalar_value_if_empty_value(field_name:str, obj:Any, inplace:bool, next_seq:Callable[[str], Any] | None = None) -> Any:
+def _replace_scalar_value_if_empty_value(field_name:str, obj:Any, inplace:bool, 
+                                         next_seq: Callable[[str], Any] | None = None) -> Any:
     if isinstance(obj, IdentifyingMixin):
         if next_seq:
             kwds = {'next_seq': lambda: next_seq(field_name)}
@@ -368,7 +384,8 @@ def _replace_scalar_value_if_empty_value(field_name:str, obj:Any, inplace:bool, 
     return None
 
 
-def _replace_vector_if_empty_value(field_name:str, obj:Any, inplace:bool, next_seq:Callable[[str], Any] | None = None) -> Any:    
+def _replace_vector_if_empty_value(field_name:str, obj:Any, inplace:bool, 
+                                   next_seq: Callable[[str], Any] | None = None) -> Any:
     if isinstance(obj, (list, tuple)):
         if not obj:
             return None
@@ -393,7 +410,8 @@ def _replace_vector_if_empty_value(field_name:str, obj:Any, inplace:bool, next_s
 
 
 def get_stored_fields_for(type_:Type,
-                          type_or_predicate: Type[T] | Callable[[Tuple[str, ...], Type], bool]) -> Dict[str, Tuple[Tuple[str,...], Type[T]]]:
+                          type_or_predicate: Type[T] | Callable[[Tuple[str, ...], Type], bool]
+                          ) -> Dict[str, Tuple[Tuple[str, ...], Type[T]]]:
     stored = get_stored_fields(type_)
 
     if inspect.isfunction(type_or_predicate):
@@ -415,8 +433,11 @@ def get_stored_fields(type_:Type):
         for field_name, field_type in get_field_name_and_type(type_, StoredMixin)
     }
 
-    for fields in reversed([cast(PersistentModel, base)._stored_fields
-        for base in inspect.getmro(type_) if is_derived_from(base, PersistentModel)]):
+    for fields in reversed(
+        [cast(PersistentModel, base)._stored_fields
+            for base in inspect.getmro(type_) 
+            if is_derived_from(base, PersistentModel)]
+    ):
         stored_fields.update(fields)
 
     adjusted = {}

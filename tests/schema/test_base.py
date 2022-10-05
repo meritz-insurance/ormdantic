@@ -8,7 +8,8 @@ from ormdantic.schema.base import (
     IdentifiedModel, IdentifyingMixin, PersistentModel, PartOfMixin, 
     assign_identifying_fields_if_empty, get_container_type, 
     get_field_name_and_type, get_identifer_of, get_field_names_for, IdStr, 
-    update_forward_refs, is_field_list_or_tuple_of, get_field_type
+    update_forward_refs, is_field_list_or_tuple_of, get_field_type,
+    get_root_container_type
 )
 
 def test_identified_model():
@@ -28,7 +29,26 @@ def test_get_container_type():
 
     assert Container is get_container_type(Part)
     assert None is get_container_type(Container)
+
+
+def test_get_root_container_type():
+    class Container(PersistentModel):
+        pass
+
+    class Part(PersistentModel, PartOfMixin[Container]):
+        pass
+
+    class PartOfPart(PersistentModel, PartOfMixin[Part]):
+        pass
+
+    assert Container is get_container_type(Part)
+    assert Container is get_root_container_type(Part)
+    assert Container is get_root_container_type(PartOfPart)
+
+    assert None is get_container_type(Container)
     
+
+   
 
 def test_get_field_type():
     class Container(PersistentModel):

@@ -192,3 +192,11 @@ def test_duplicate_type_named_model():
 def test_parse_obj_for_model(message, expected, object):
     assert expected == parse_object_for_model(object)
 
+def test_parse_obj_list():
+    class ListWithoutArgs(TypeNamedModel):
+        items: List
+
+    assert ListWithoutArgs(items=[1, 'a']) == parse_object_for_model(
+        dict(type_name='ListWithoutArgs', items=[1, 'a'])
+    )
+
