@@ -1,17 +1,19 @@
 # for clearing testing database.
 # mariadb -h localhost -P 33069 -p -u root -N -B -e 'select CONCAT("drop database `", schema_name, "`;") as name from information_schema.schemata where schema_name like "TEST_%";'
 #
+from dataclasses import asdict
 from typing import  List, Tuple, cast, Type
 import pytest
 
 from ormdantic.database.storage import (
-    delete_objects, query_records, upsert_objects, find_object, 
+    delete_objects, get_model_change_of_version, get_version_info, query_records, squash_objects, upsert_objects, find_object, 
     find_objects, build_where, load_object
 )
 
 from ormdantic.schema import PersistentModel
+from ormdantic.schema.verinfo import VersionInfo
 from ormdantic.schema.base import (
-    FullTextSearchedStringIndex, PartOfMixin, SchemaBaseModel, StringArrayIndex, 
+    FullTextSearchedStringIndex, PartOfMixin, SchemaBaseModel, StringArrayIndex, TemporalMixin, 
     get_identifer_of, update_forward_refs, IdentifiedModel, IdStr,
     StoredFieldDefinitions
 )
@@ -204,4 +206,128 @@ def test_query_records(pool_and_model):
         {'name':'part1', '_container_name':'sample'},
         {'name':'part2', '_container_name':'sample'},
     ] == objects
+
+
+def test_upsert_objects_makes_entry_in_audit_models():
+    class TemporalModel(PersistentModel, TemporalMixin):
+        id:IdStr
+        message:str
+
+    with use_temp_database_pool_with_model(TemporalModel) as pool:
+        first = TemporalModel(id=IdStr('test'), message='first')
+        audit_info = VersionInfo.create('who', 'why', 'where', 'tag')
+
+        upsert_objects(pool, first, audit_info)
+
+        version_info = get_version_info(pool, None)
+
+        assert 1 == version_info.version
+        assert 'who' == version_info.who
+        assert 'why' == version_info.why
+        assert 'where' == version_info.where
+        assert 'tag' == version_info.tag
+
+        model_changes = get_model_change_of_version(pool, 1)
+
+        assert [
+            {'version':1, 'op':'UPSERT', 'table_name':'md_TemporalModel', '__row_id':1}
+        ] == list(model_changes)
+
+
+def test_upsert_objects_for_temporal():
+    class TemporalModel(PersistentModel, TemporalMixin):
+        id:IdStr
+        message:str
+
+    with use_temp_database_pool_with_model(TemporalModel) as pool:
+        first = TemporalModel(id=IdStr('test'), message='first')
+        second = TemporalModel(id=IdStr('test'), message='second')
+        third = TemporalModel(id=IdStr('test'), message='third')
+
+        upsert_objects(pool, first)
+        upsert_objects(pool, second)
+        upsert_objects(pool, third)
+
+        assert first == load_object(pool, TemporalModel, (('id', '=', 'test'),), version=1)
+        assert second == load_object(pool, TemporalModel, (('id', '=', 'test'),), version=2)
+        assert third == load_object(pool, TemporalModel, (('id', '=', 'test'),), version=3)
+
+
+def test_get_version():
+    class SimpleModel(PersistentModel):
+        id:IdStr
+        message:str
+
+    with use_temp_database_pool_with_model(SimpleModel) as pool:
+        first = SimpleModel(id=IdStr('test'), message='first')
+        second = SimpleModel(id=IdStr('test'), message='second')
+        third = SimpleModel(id=IdStr('test'), message='third')
+
+        upsert_objects(pool, first)
+
+        assert 1 == get_version_info(pool).version
+
+        upsert_objects(pool, second)
+
+        second_version = get_version_info(pool)
+
+        assert second_version == get_version_info(pool, second_version.when)
+
+        upsert_objects(pool, third)
+
+        assert 3 == get_version_info(pool).version
+
+
+
+def test_squash_objects():
+    class TemporalModel(PersistentModel, TemporalMixin):
+        id:IdStr
+        message:str
+
+    with use_temp_database_pool_with_model(TemporalModel) as pool:
+        first = TemporalModel(id=IdStr('test'), message='first')
+        second = TemporalModel(id=IdStr('test'), message='second')
+        third = TemporalModel(id=IdStr('test'), message='third')
+        fourth = TemporalModel(id=IdStr('test'), message='fourth')
+
+        upsert_objects(pool, first)
+        upsert_objects(pool, second)
+        upsert_objects(pool, third)
+
+        squash_objects(pool, TemporalModel, (('id', '=', 'test'),))
+
+        assert third == load_object(pool, TemporalModel, (('id', '=', 'test'),), version=1)
+        assert third == load_object(pool, TemporalModel, (('id', '=', 'test'),), version=2)
+        assert third == load_object(pool, TemporalModel, (('id', '=', 'test'),), version=3)
+        assert third == load_object(pool, TemporalModel, (('id', '=', 'test'),), version=4)
+
+        assert [{'__row_id': 1, 'op': 'UPSERT', 'table_name': 'md_TemporalModel', 'version': 1}] == list(get_model_change_of_version(pool, 1))
+        assert [
+            {'__row_id': 1, 'op': 'DELETE:SQUASHED', 'table_name': 'md_TemporalModel', 'version': 4},
+            {'__row_id': 2, 'op': 'DELETE:SQUASHED', 'table_name': 'md_TemporalModel', 'version': 4},
+        ] == list(get_model_change_of_version(pool, 4))
+
+        upsert_objects(pool, fourth)
+
+        assert fourth == load_object(pool, TemporalModel, (('id', '=', 'test'),))
+
+        squash_objects(pool, TemporalModel, (('id', '=', 'test'),))
+
+        assert third == load_object(pool, TemporalModel, (('id', '=', 'test'),), version=4)
+        assert fourth == load_object(pool, TemporalModel, (('id', '=', 'test'),), version=5)
+        assert fourth == load_object(pool, TemporalModel, (('id', '=', 'test'),), version=6)
+
+
+def test_squash_objects_raises():
+    class NonTemporalModel(PersistentModel):
+        id:IdStr
+        message:str
+
+    with pytest.raises(RuntimeError, match='to squash is not supported for non temporal type.'):
+        with use_temp_database_pool_with_model(NonTemporalModel) as pool:
+            first = NonTemporalModel(id=IdStr('test'), message='first')
+            upsert_objects(pool, first)
+
+            squash_objects(pool, NonTemporalModel, (('id', '=', 'test'),))
+
  

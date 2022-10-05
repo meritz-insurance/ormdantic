@@ -145,7 +145,7 @@ def get_union_type_arguments(type_:Type) -> Tuple[Type,...] | None:
 
 
 def is_list_or_tuple_of(type_:Type, *parameters:Type) -> bool:
-    args = get_type_parameter_of_list_or_tuple(type_)
+    args = get_args_of_list_or_tuple(type_)
 
     if args is None:
         return False
@@ -160,7 +160,7 @@ def is_list_or_tuple_of(type_:Type, *parameters:Type) -> bool:
         return False
     else:
         if len(parameters) != 1:
-            raise RuntimeError('mimatched parameters')
+            return False
 
         return is_derived_from(args, parameters[0])
 
@@ -171,7 +171,13 @@ def is_derived_or_collection_of_derived(type_:Type, param_type_:Type):
 
 
 @functools.cache
-def get_type_parameter_of_list_or_tuple(type_:Type) -> Type | Tuple[Type,...] | None:
+def get_args_of_list_or_tuple(type_:Type) -> Type | Tuple[Type,...] | None:
+    ''' return args from type.
+        if list, return Type or empty tuple
+        if tuple, return Tuple[Type].  if tuple with ellispsi, handle it as list
+
+        if type_ is not list and tuple, return None
+    '''
     generic = get_base_generic_alias_of(type_, list)
 
     if generic:

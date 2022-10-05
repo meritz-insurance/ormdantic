@@ -1,11 +1,11 @@
 from types import UnionType
-from typing import Type, Any, Dict, get_origin, Union, get_args
+from typing import Type, Any, Dict, get_origin, Union, get_args, List, Tuple
 import copy 
 
 from pydantic import parse_obj_as
 from pydantic.fields import Field 
 from .base import SchemaBaseModel, register_class_postprocessor
-from ormdantic.util.hints import get_type_parameter_of_list_or_tuple, is_derived_from
+from ormdantic.util.hints import get_args_of_list_or_tuple, is_derived_from
 from ..util import get_base_generic_alias_of, get_logger
 
 _TYPE_NAME_FIELD = 'type_name'
@@ -62,15 +62,14 @@ def _parse_obj(obj:Any, target_type:Type) -> Any:
             return parse_obj_as(target_type, obj)
 
     elif get_base_generic_alias_of(target_type, list, tuple):
-        params = get_type_parameter_of_list_or_tuple(target_type)       
+        collection = list if is_derived_from(target_type, list) else tuple
+        params = get_args_of_list_or_tuple(target_type)       
 
-        assert params
+        # type unknown. List, Tuple
+        if not params:
+            return parse_obj_as(target_type, obj)
 
         if isinstance(params, tuple):
-            if not params:
-                # type unknown. List, Tuple
-                return tuple(_parse_obj(item, None) for item in obj)
- 
             if len(obj) != len(params):
                 _logger.fatal(f'{target_type=} requires {params=} but {obj=}')
                 raise RuntimeError('mismatched size of array item.')
@@ -80,7 +79,7 @@ def _parse_obj(obj:Any, target_type:Type) -> Any:
                 in zip(obj, params)
             )
         else:
-            return [_parse_obj(item, params) for item in obj]
+            return collection(_parse_obj(item, params) for item in obj)
     else:
         # target_type can be generic alias because we will lookup outer_type_
         # for looking __fields__ we should check orginal type not generic alias.
@@ -98,6 +97,8 @@ def _parse_obj(obj:Any, target_type:Type) -> Any:
                     type = model_field.outer_type_
 
                     obj[field_name] = _parse_obj(obj[field_name], type)
+                elif is_derived_from(model_field.outer_type_, (list, tuple)):
+                    obj[field_name] = _parse_obj(obj[field_name], model_field.outer_type_)
 
         return parse_obj_as(target_type, obj)
 

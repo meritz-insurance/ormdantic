@@ -41,9 +41,10 @@ def test_get_query_and_args_for_reading():
             SimpleBaseModel, '*', tuple())
 
         cursor.execute(*query_and_args)
+        # audit 정보를 생성하지 않아서 __valid_start가 None이다.
         assert [
-            {'__row_id': 1, 'id': '0', '__json': '{"id":"0","version":"0.1.0"}'},
-            {'__row_id': 2, 'id': '1', '__json': '{"id":"1","version":"0.1.0"}'}
+            {'__row_id': 1, 'id': '0', '__json': '{"id":"0","version":"0.1.0"}', '__valid_start':None},
+            {'__row_id': 2, 'id': '1', '__json': '{"id":"1","version":"0.1.0"}', '__valid_start':None}
         ] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(
@@ -62,7 +63,7 @@ def test_get_query_and_args_for_deleting():
             SimpleBaseModel, tuple())
 
         cursor.execute(*query_and_args)
-        assert [{'__row_id':1}] == cursor.fetchall()
+        assert [{'__row_id':1, 'op':'DELETE', 'table_name':'md_SimpleBaseModel'}] == cursor.fetchall()
 
 
 def test_get_query_and_args_for_reading_for_parts():
@@ -94,13 +95,13 @@ def test_get_query_and_args_for_reading_for_parts():
         assert [{'id':'@', 'name':'sample'}] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(
-            PartModel, ('__row_id', '__json', 'name'), tuple())
+            PartModel, ('__row_id', '__json', 'name', '__valid_start'), tuple())
 
         cursor.execute(*query_and_args)
 
         assert [
-            {'__row_id':1, '__json':'{"name": "part1"}', 'name':'part1'}, 
-            {'__row_id':2, '__json':'{"name": "part2"}', 'name':'part2'}
+            {'__row_id':1, '__json':'{"name": "part1"}', 'name':'part1', '__valid_start':1}, 
+            {'__row_id':2, '__json':'{"name": "part2"}', 'name':'part2', '__valid_start':1}
         ] == cursor.fetchall()
 
 
