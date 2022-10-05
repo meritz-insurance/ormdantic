@@ -18,7 +18,7 @@ from ormdantic.database.queries import (
 )
 from ormdantic.schema.base import (
     IntegerArrayIndex, StringArrayIndex, FullTextSearchedStringIndex, 
-    FullTextSearchedStr, PartOfMixin, StringReference, TemporalMixin, 
+    FullTextSearchedStr, PartOfMixin, StringReference, VersionMixin, 
     UniqueStringIndex, StringIndex, DecimalIndex, IntIndex, DateIndex,
     DateTimeIndex, update_forward_refs, IdStr, 
     StoredFieldDefinitions
@@ -54,8 +54,8 @@ def test_get_sql_for_create_table():
     ) == next(get_sql_for_creating_table(SimpleBaseModel))
 
 
-def test_get_sql_for_create_table_for_temporal():
-    class SimpleBaseModel(PersistentModel, TemporalMixin):
+def test_get_sql_for_create_table_for_version():
+    class SimpleBaseModel(PersistentModel, VersionMixin):
         id: IdStr
 
     assert (
@@ -73,7 +73,7 @@ def test_get_sql_for_create_table_for_temporal():
     class PartModel(PersistentModel, PartOfMixin['RootModel']):
         order: StringIndex
 
-    class RootModel(PersistentModel, TemporalMixin):
+    class RootModel(PersistentModel, VersionMixin):
         id: IdStr
 
     update_forward_refs(PartModel, locals())
@@ -230,18 +230,18 @@ def test_get_sql_for_create_part_of_part_table():
     assert None is next(sqls, None)
 
 def test_get_sql_for_create_table_raises():
-    class Part(PersistentModel, PartOfMixin['Container'], TemporalMixin):
+    class Part(PersistentModel, PartOfMixin['Container'], VersionMixin):
         order: StringIndex
 
-    class Container(PersistentModel, TemporalMixin):
+    class Container(PersistentModel, VersionMixin):
         parts: List[Part] = Field(default=[])
 
     update_forward_refs(Part, locals())
 
-    with pytest.raises(RuntimeError, match='TemporalMixin is not support for PartOfMixin.'):
+    with pytest.raises(RuntimeError, match='VersionMixin is not support for PartOfMixin.'):
         list(get_sql_for_creating_table(Part))
 
-    with pytest.raises(RuntimeError, match='identifying fields needs for TemporalMixin type.'):
+    with pytest.raises(RuntimeError, match='identifying fields needs for VersionMixin type.'):
         list(get_sql_for_creating_table(Container))
 
 
@@ -496,30 +496,30 @@ def test_get_sql_for_upserting():
     ) == sql
 
 
-def test_get_sql_for_upserting_temporal():
-    class TemporalModel(PersistentModel, TemporalMixin):
+def test_get_sql_for_upserting_versioning():
+    class VersionModel(PersistentModel, VersionMixin):
         id: IdStr
         order: StringIndex
         
-    sql = _get_sql_for_upserting(cast(Any, TemporalModel))
+    sql = _get_sql_for_upserting(cast(Any, VersionModel))
 
     assert join_line(
         "SELECT MIN(`__squashed_from`)",
         "INTO @SQUASHED_FROM",
-        "FROM md_TemporalModel",
+        "FROM md_VersionModel",
         "WHERE",
         "  `id` = %(id)s",
         "  AND `__valid_start` <= @VERSION",
         "  AND @VERSION < `__valid_end`",
         ";",
-        "UPDATE md_TemporalModel",
+        "UPDATE md_VersionModel",
         "SET `__valid_end` = @VERSION",
         "WHERE",
         "  `id` = %(id)s",
         "  AND `__valid_start` <= @VERSION",
         "  AND @VERSION < `__valid_end`",
         ";",
-        "INSERT INTO md_TemporalModel",
+        "INSERT INTO md_VersionModel",
         "(",
         "  `__json`,",
         "  `__valid_start`,",
@@ -536,7 +536,7 @@ def test_get_sql_for_upserting_temporal():
         "RETURNING",
         "  `__row_id`,",
         "  'UPSERT' as op,",
-        "  'md_TemporalModel' as table_name"
+        "  'md_VersionModel' as table_name"
     ) == sql
 
 

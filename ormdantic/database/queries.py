@@ -19,7 +19,7 @@ from ..util import get_logger
 from ..schema.base import (
     ArrayIndexMixin, PersistentModelT, ReferenceMixin, FullTextSearchedMixin, 
     IdentifyingMixin, IndexMixin, SequenceIdStr, 
-    StoredFieldDefinitions, PersistentModelT, StoredMixin, PartOfMixin, TemporalMixin, TemporalMixin, 
+    StoredFieldDefinitions, PersistentModelT, StoredMixin, PartOfMixin, VersionMixin, VersionMixin, 
     UniqueIndexMixin, get_container_type, get_root_container_type,
     get_field_names_for, get_part_types, is_field_list_or_tuple_of,
     PersistentModel, is_list_or_tuple_of, get_stored_fields,
@@ -252,13 +252,13 @@ def get_sql_for_creating_table(type_:Type[PersistentModelT]):
 
         assert container_type
 
-        if _is_temporal_type(type_):
+        if _is_versioned_type(type_):
             _logger.fatal(
-                f'{type_=} is temporal type. but it was PartOfMxin. '
-                'if the root container type is Temporal Mixin, the PartOfMixin may be handled as TemporalMixin ')
-            raise RuntimeError('TemporalMixin is not support for PartOfMixin.')
+                f'{type_=} is versioned type. but it was PartOfMxin. '
+                'if the root container type is VersionMixin, the PartOfMixin may be handled as VersionMixin ')
+            raise RuntimeError('VersionMixin is not support for PartOfMixin.')
 
-        if _is_temporal_type(get_root_container_type(type_)):
+        if _is_versioned_type(get_root_container_type(type_)):
             valid_fields = (_VALID_START_FIELD, _VALID_END_FIELD)
         else:
             valid_fields = (_VALID_START_FIELD,)
@@ -288,15 +288,15 @@ def get_sql_for_creating_table(type_:Type[PersistentModelT]):
             })
         )
     else:
-        if _is_temporal_type(type_):
+        if _is_versioned_type(type_):
             if not get_identifying_fields(type_):
                 _logger.fatal(f'{type_=} does not have any id fields.')
-                raise RuntimeError('identifying fields needs for TemporalMixin type.')
+                raise RuntimeError('identifying fields needs for VersionMixin type.')
 
         yield _build_model_table_statement(
             get_table_name(type_), 
             _get_table_fields(),
-            _get_table_temporal_fields(type_),
+            _get_table_version_fields(type_),
             _get_table_stored_fields(stored, True),
             _get_table_indexes(type_, stored)
         )
@@ -405,10 +405,10 @@ def _get_table_fields() -> Iterator[str]:
     yield f'{field_exprs(_JSON_FIELD)} {_JSON_TYPE} {_JSON_CHECK.format(field_exprs(_JSON_FIELD))}'
 
 
-def _get_table_temporal_fields(type_:Type) -> Iterator[str]:
+def _get_table_version_fields(type_:Type) -> Iterator[str]:
     yield f'{field_exprs(_VALID_START_FIELD)} BIGINT'
 
-    if _is_temporal_type(type_):
+    if _is_versioned_type(type_):
         yield f'{field_exprs(_VALID_END_FIELD)} BIGINT DEFAULT {_BIG_INT_MAX}'
         yield f'{field_exprs(_SQUASHED_FROM_FIELD)} BIGINT'
 
@@ -448,7 +448,7 @@ def _get_table_indexes(type_:Type, stored_fields:StoredFieldDefinitions) -> Iter
         key_def = _generate_key_definition(field_type)
 
         if key_def: 
-            if key_def == 'UNIQUE KEY' and _is_temporal_type(type_):
+            if key_def == 'UNIQUE KEY' and _is_versioned_type(type_):
                 index_fields = (field_name, _VALID_START_FIELD)
             else:
                 index_fields = (field_name,)
@@ -593,8 +593,8 @@ def get_identifying_fields(model_type:Type[PersistentModelT]) -> Tuple[str,...]:
 
 
 def get_query_and_args_for_squashing(type_:Type[PersistentModelT], identifier:Dict[str, Any]):
-    if not _is_temporal_type(type_):
-        raise RuntimeError('to squash is not supported for non temporal type.')
+    if not _is_versioned_type(type_):
+        raise RuntimeError('to squash is not supported for non version type.')
 
     return _get_sql_for_squashing(cast(Type, type_)), identifier
     
@@ -696,7 +696,7 @@ def _get_sql_for_upserting(model_type:Type):
     table_name = get_table_name(model_type)
     id_fields = get_identifying_fields(model_type)
 
-    if _is_temporal_type(model_type):
+    if _is_versioned_type(model_type):
         assert id_fields
 
         for_id_fields = [f'{field_exprs(f)} = %({f})s' for f in id_fields]
@@ -1435,7 +1435,7 @@ def _build_query_and_fields_for_core_table(
         for f, o in field_ops if o != 'match'
     )
 
-    if _is_temporal_type(get_root_container_type(target_type) or target_type):
+    if _is_versioned_type(get_root_container_type(target_type) or target_type):
         field_op_var = field_op_var + (
             (field_exprs(_VALID_START_FIELD, '__ORG'), '<=', 'version'),
             (field_exprs(_VALID_END_FIELD, '__ORG'), '>', 'version')
@@ -1764,5 +1764,5 @@ def _normalize_database_object_name(value:str) -> str:
     return value.replace('.', '_').replace(',', '_').replace(' ', '').upper()
 
 
-def _is_temporal_type(type_:Type) -> bool:
-    return is_derived_from(type_, TemporalMixin)
+def _is_versioned_type(type_:Type) -> bool:
+    return is_derived_from(type_, VersionMixin)

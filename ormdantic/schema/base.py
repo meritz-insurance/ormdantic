@@ -235,8 +235,8 @@ class IdentifiedMixin(SchemaBaseModel):
     id: IdStr = Field(default=IdStr(''), title='identifier for retreiving')
 
 
-class TemporalMixin(SchemaBaseModel):
-    ''' Marker for temporal (valid_from, valid_to)'''
+class VersionMixin(SchemaBaseModel):
+    ''' Marker for versioning (valid_from, valid_to)'''
     pass
 
 
