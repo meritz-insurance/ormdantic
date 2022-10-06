@@ -9,7 +9,7 @@ from contextlib import contextmanager
 import itertools
 from datetime import datetime
 
-from ormdantic.schema.verinfo import VersionInfo
+from ormdantic.database.verinfo import VersionInfo
 from pymysql.cursors import DictCursor
 
 from .connections import DatabaseConnectionPool
@@ -34,7 +34,7 @@ from .queries import (
     get_query_and_args_for_auditing,
     get_query_and_args_for_getting_version,
     get_query_and_args_for_getting_version_info,
-    get_query_and_args_for_getting_model_change_of_version,
+    get_query_and_args_for_getting_model_changes_of_version,
     get_query_and_args_for_inserting_audit,
     get_query_and_args_for_squashing,
     get_query_for_next_seq,
@@ -258,9 +258,9 @@ def get_version_info(pool:DatabaseConnectionPool, version_or_datetime:datetime |
         return VersionInfo.from_dict(record)
 
 
-def get_model_change_of_version(pool:DatabaseConnectionPool, version:int) -> Iterator[Dict[str, Any]]:
+def get_model_changes_of_version(pool:DatabaseConnectionPool, version:int) -> Iterator[Dict[str, Any]]:
     with pool.open_cursor(True) as cursor:
-        cursor.execute(*get_query_and_args_for_getting_model_change_of_version(version))
+        cursor.execute(*get_query_and_args_for_getting_model_changes_of_version(version))
 
         yield from iter(cursor.fetchall())
 

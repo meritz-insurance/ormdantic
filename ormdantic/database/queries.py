@@ -10,7 +10,7 @@ import itertools
 import functools
 
 from pydantic import ConstrainedStr, ConstrainedDecimal
-from ormdantic.schema.verinfo import VersionInfo
+from ormdantic.database.verinfo import VersionInfo
 
 from ormdantic.util import is_derived_from, convert_tuple
 from ormdantic.util.hints import get_base_generic_alias_of
@@ -18,7 +18,7 @@ from ormdantic.util.hints import get_base_generic_alias_of
 from ..util import get_logger
 from ..schema.base import (
     ArrayIndexMixin, PersistentModelT, ReferenceMixin, FullTextSearchedMixin, 
-    IdentifyingMixin, IndexMixin, SequenceIdStr, 
+    IdentifyingMixin, IndexMixin, SequenceStrId, 
     StoredFieldDefinitions, PersistentModelT, StoredMixin, PartOfMixin, VersionMixin, VersionMixin, 
     UniqueIndexMixin, get_container_type, get_root_container_type,
     get_field_names_for, get_part_types, is_field_list_or_tuple_of,
@@ -50,7 +50,7 @@ _AUDIT_WHEN_FIELD = 'when'
 _AUDIT_TAG_FIELD = 'tag'
 
 _VERSION_INFO_TABLE = '_version_info'
-_VERSION_CHANGE_TABLE = '_model_change'
+_VERSION_CHANGE_TABLE = '_model_changes'
 
 _AUDIT_OP_FIELD = 'op'
 _AUDIT_TABLE_NAME_FIELD = 'table_name'
@@ -342,7 +342,7 @@ def _build_code_seq_statement(type_:Type[PersistentModel]) -> Iterator[str]:
     for name, modle_field in type_.__fields__.items():
         field_element_type = modle_field.type_
 
-        if is_derived_from(field_element_type, SequenceIdStr):
+        if is_derived_from(field_element_type, SequenceStrId):
             prefix = field_element_type.prefix
 
             yield join_line(
@@ -444,16 +444,25 @@ def _get_view_fields(fields:Dict[str, Tuple[str, ...]]) -> Iterator[str]:
 
 
 def _get_table_indexes(type_:Type, stored_fields:StoredFieldDefinitions) -> Iterator[str]:
+    identified_fields = [field_name 
+                        for field_name, (_, field_type) in stored_fields.items()
+                        if is_derived_from(field_type, IdentifyingMixin)]
+
+    if _is_versioned_type(type_):
+        identified_fields.append(_VALID_START_FIELD)
+
+    if identified_fields:
+        yield f"""UNIQUE KEY `identifying_index` ({join_line(field_exprs(identified_fields), new_line=False, use_comma=True)})"""
+    
+
     for field_name, (_, field_type) in stored_fields.items():
+        if is_derived_from(field_type, IdentifyingMixin):
+            continue
+
         key_def = _generate_key_definition(field_type)
 
         if key_def: 
-            if key_def == 'UNIQUE KEY' and _is_versioned_type(type_):
-                index_fields = (field_name, _VALID_START_FIELD)
-            else:
-                index_fields = (field_name,)
-
-            yield f"""{key_def} `{field_name}_index` ({join_line(field_exprs(index_fields), new_line=False, use_comma=True)})"""
+            yield f"""{key_def} `{field_name}_index` ({join_line(field_exprs(field_name), new_line=False, use_comma=True)})"""
 
     full_text_searched_fields = set(
         field_name for field_name, (_, field_type) in stored_fields.items()
@@ -571,7 +580,7 @@ def get_query_and_args_for_getting_version_info(audit_version:int):
     return f'SELECT * FROM {field_exprs(_VERSION_INFO_TABLE)} where version = %(version)s', {'version':audit_version}
 
 
-def get_query_and_args_for_getting_model_change_of_version(audit_version:int):
+def get_query_and_args_for_getting_model_changes_of_version(audit_version:int):
     return f'SELECT * FROM {field_exprs(_VERSION_CHANGE_TABLE)} where version = %(version)s', {'version':audit_version}
 
 
@@ -594,6 +603,7 @@ def get_identifying_fields(model_type:Type[PersistentModelT]) -> Tuple[str,...]:
 
 def get_query_and_args_for_squashing(type_:Type[PersistentModelT], identifier:Dict[str, Any]):
     if not _is_versioned_type(type_):
+        _logger.fatal(f'{type_=} is not derived from VersinoMixin. it suppport to squash VersionMixin objects only.')
         raise RuntimeError('to squash is not supported for non version type.')
 
     return _get_sql_for_squashing(cast(Type, type_)), identifier
@@ -657,6 +667,7 @@ def _get_sql_for_squashing(model_type:Type):
                 )
             )
         ),
+        # returning for update model_change
         f'RETURNING',
         tab_each_line(
             field_exprs(_ROW_ID_FIELD),

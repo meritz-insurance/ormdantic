@@ -12,7 +12,7 @@ from ormdantic.database.storage import (
 
 from ormdantic.schema import (
     PersistentModel, FullTextSearchedStringIndex, PartOfMixin, StringArrayIndex, 
-    update_forward_refs, IdentifiedModel, IdStr, StoredFieldDefinitions,
+    update_forward_refs, IdentifiedModel, StrId, StoredFieldDefinitions,
 )
 from ormdantic.schema.base import (
     StringIndex,
@@ -82,7 +82,7 @@ class ReferenceWithPartsModel(IdentifiedModel):
 
 models = [
     SimpleContentModel(
-        id=IdStr('first'),
+        id=StrId('first'),
         contents=[
             NameSharedReferenceModel(content=
                 SharedNameModel(name=FullTextSearchedStringIndex('name_1'), 
@@ -95,7 +95,7 @@ models = [
         ]
     ),
     SimpleContentModel(
-        id=IdStr('second'),
+        id=StrId('second'),
         contents=[
             NameSharedReferenceModel(content=
                 SharedNameModel(name=FullTextSearchedStringIndex('name_1'), 
@@ -108,7 +108,7 @@ models = [
         ]
     ),
     NestedContentModel(
-        id=IdStr('nested'),
+        id=StrId('nested'),
         nested = NestedSharedReferenceModel(
             content=NestedSharedModel(
                 description_model= DescriptionSharedReferenceModel(
@@ -120,7 +120,7 @@ models = [
         )
     ),
     DescriptionWithExternalModel(
-        id=IdStr('external'),
+        id=StrId('external'),
         ref_model = CodedDescriptionReferenceModel(
             content = CodedDescriptionModel(
                 description='coded reference description',
@@ -129,10 +129,10 @@ models = [
         )
     ),
     ReferenceWithPartsModel(
-        id=IdStr('part'),
+        id=StrId('part'),
         ref_model= ContentReferenceModel(
             content= ContainerModel(
-                id=IdStr('container'),
+                id=StrId('container'),
                 parts=[
                     PartModel(name=StringIndex('part_1')),
                     PartModel(name=StringIndex('part_2')),
@@ -177,7 +177,7 @@ def test_upsert_objects_with_nested_shared(pool):
     assert not isinstance(nested_model.nested.content.description_model.content, str)
 
     created = NestedContentModel(
-        id=IdStr('created'),
+        id=StrId('created'),
         nested = NestedSharedReferenceModel(
             content=nested_model.nested.content.id
         )

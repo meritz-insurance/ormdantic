@@ -7,13 +7,13 @@ from pydantic import ConstrainedStr, parse_raw_as
 from ormdantic.schema.base import (
     IdentifiedModel, IdentifyingMixin, PersistentModel, PartOfMixin, 
     assign_identifying_fields_if_empty, get_container_type, 
-    get_field_name_and_type, get_identifer_of, get_field_names_for, IdStr, 
+    get_field_name_and_type, get_identifer_of, get_field_names_for, StrId, DateId,
     update_forward_refs, is_field_list_or_tuple_of, get_field_type,
     get_root_container_type
 )
 
 def test_identified_model():
-    model = IdentifiedModel(id=IdStr(uuid.UUID(int=0).hex), version='0.0.0')
+    model = IdentifiedModel(id=StrId(uuid.UUID(int=0).hex), version='0.0.0')
 
     data = model.json()
 
@@ -98,6 +98,10 @@ def test_get_field_name_and_type():
     with pytest.raises(RuntimeError):
         list(get_field_name_and_type(cast(Any, WrongType)))
 
+def test_new_if_empty():
+    date = DateId(2020, 1, 1)
+
+    assert date == date.new_if_empty() 
 
 def test_new_if_empty_raise_exception():
     class NotImplementedStr(ConstrainedStr, IdentifyingMixin):
@@ -109,7 +113,7 @@ def test_new_if_empty_raise_exception():
 
 def test_get_identifier_of():
     class SimpleModel(PersistentModel):
-        id: IdStr = IdStr(uuid.UUID(int=0).hex)
+        id: StrId = StrId(uuid.UUID(int=0).hex)
 
     model = SimpleModel()
 
@@ -130,7 +134,7 @@ def test_assign_identified_if_empty():
     class SimpleModel(IdentifiedModel):
         pass
 
-    model = SimpleModel(id=IdStr(''), version='')
+    model = SimpleModel(id=StrId(''), version='')
 
     replaced = assign_identifying_fields_if_empty(model)
 
@@ -147,13 +151,13 @@ def test_assign_identified_if_empty():
 
 def test_assign_identified_if_empty_for_vector():
     class SimpleModel(PersistentModel):
-        list_ids : List[IdStr] 
-        tuple_ids : Tuple[IdStr,...]
-        empty_ids : List[IdStr]
+        list_ids : List[StrId] 
+        tuple_ids : Tuple[StrId,...]
+        empty_ids : List[StrId]
 
     model = SimpleModel(
-        list_ids=[IdStr('')], 
-        tuple_ids=(IdStr(''), ),
+        list_ids=[StrId('')], 
+        tuple_ids=(StrId(''), ),
         empty_ids=[]
     )
 
@@ -175,13 +179,13 @@ def test_assign_identified_if_empty_for_parts():
     update_forward_refs(ContainerModel, locals())
 
     model = ContainerModel(
-        id = IdStr('Container'),
+        id = StrId('Container'),
         version = '0.0.0',
         parts = [
-            SimpleModel(id=IdStr('1'), version=''),
-            SimpleModel(id=IdStr('1'), version='')
+            SimpleModel(id=StrId('1'), version=''),
+            SimpleModel(id=StrId('1'), version='')
         ],
-        part = SimpleModel(id=IdStr('1'), version='')
+        part = SimpleModel(id=StrId('1'), version='')
     )
 
     replaced = assign_identifying_fields_if_empty(model)
@@ -189,13 +193,13 @@ def test_assign_identified_if_empty_for_parts():
     assert replaced is model
     
     model = ContainerModel(
-        id = IdStr('Container'),
+        id = StrId('Container'),
         version = '0.0.0',
         parts = [
-            SimpleModel(id=IdStr('1'), version=''),
-            SimpleModel(id=IdStr('1'), version='')
+            SimpleModel(id=StrId('1'), version=''),
+            SimpleModel(id=StrId('1'), version='')
         ],
-        part = SimpleModel(id=IdStr(''), version='')
+        part = SimpleModel(id=StrId(''), version='')
     )
 
     replaced = assign_identifying_fields_if_empty(model)
@@ -205,13 +209,13 @@ def test_assign_identified_if_empty_for_parts():
     assert replaced.part != model.part
     
     model = ContainerModel(
-        id = IdStr('Container'),
+        id = StrId('Container'),
         version = '0.0.0',
         parts = [
-            SimpleModel(id=IdStr('1'), version=''),
-            SimpleModel(id=IdStr(''), version='')
+            SimpleModel(id=StrId('1'), version=''),
+            SimpleModel(id=StrId(''), version='')
         ],
-        part = SimpleModel(id=IdStr('1'), version='')
+        part = SimpleModel(id=StrId('1'), version='')
     )
 
     replaced = assign_identifying_fields_if_empty(model)

@@ -6,15 +6,15 @@ from typing import  List, Tuple, cast, Type
 import pytest
 
 from ormdantic.database.storage import (
-    delete_objects, get_model_change_of_version, get_version_info, query_records, squash_objects, upsert_objects, find_object, 
+    delete_objects, get_model_changes_of_version, get_version_info, query_records, squash_objects, upsert_objects, find_object, 
     find_objects, build_where, load_object
 )
 
 from ormdantic.schema import PersistentModel
-from ormdantic.schema.verinfo import VersionInfo
+from ormdantic.database.verinfo import VersionInfo
 from ormdantic.schema.base import (
     FullTextSearchedStringIndex, PartOfMixin, SchemaBaseModel, StringArrayIndex, VersionMixin, 
-    get_identifer_of, update_forward_refs, IdentifiedModel, IdStr,
+    get_identifer_of, update_forward_refs, IdentifiedModel, StrId,
     StoredFieldDefinitions
 )
 
@@ -49,7 +49,7 @@ update_forward_refs(ContainerModel, locals())
 update_forward_refs(PartModel, locals())
 
 
-model = ContainerModel(id=IdStr('@'), 
+model = ContainerModel(id=StrId('@'), 
                         version='0.1.0',
                         name=FullTextSearchedStringIndex('sample'),
                         parts=[
@@ -210,11 +210,11 @@ def test_query_records(pool_and_model):
 
 def test_upsert_objects_makes_entry_in_audit_models():
     class VersionModel(PersistentModel, VersionMixin):
-        id:IdStr
+        id:StrId
         message:str
 
     with use_temp_database_pool_with_model(VersionModel) as pool:
-        first = VersionModel(id=IdStr('test'), message='first')
+        first = VersionModel(id=StrId('test'), message='first')
         audit_info = VersionInfo.create('who', 'why', 'where', 'tag')
 
         upsert_objects(pool, first, audit_info)
@@ -227,7 +227,7 @@ def test_upsert_objects_makes_entry_in_audit_models():
         assert 'where' == version_info.where
         assert 'tag' == version_info.tag
 
-        model_changes = get_model_change_of_version(pool, 1)
+        model_changes = get_model_changes_of_version(pool, 1)
 
         assert [
             {'version':1, 'op':'UPSERT', 'table_name':'md_VersionModel', '__row_id':1}
@@ -236,13 +236,13 @@ def test_upsert_objects_makes_entry_in_audit_models():
 
 def test_upsert_objects_for_versioning():
     class VersionModel(PersistentModel, VersionMixin):
-        id:IdStr
+        id:StrId
         message:str
 
     with use_temp_database_pool_with_model(VersionModel) as pool:
-        first = VersionModel(id=IdStr('test'), message='first')
-        second = VersionModel(id=IdStr('test'), message='second')
-        third = VersionModel(id=IdStr('test'), message='third')
+        first = VersionModel(id=StrId('test'), message='first')
+        second = VersionModel(id=StrId('test'), message='second')
+        third = VersionModel(id=StrId('test'), message='third')
 
         upsert_objects(pool, first)
         upsert_objects(pool, second)
@@ -255,13 +255,13 @@ def test_upsert_objects_for_versioning():
 
 def test_get_version():
     class SimpleModel(PersistentModel):
-        id:IdStr
+        id:StrId
         message:str
 
     with use_temp_database_pool_with_model(SimpleModel) as pool:
-        first = SimpleModel(id=IdStr('test'), message='first')
-        second = SimpleModel(id=IdStr('test'), message='second')
-        third = SimpleModel(id=IdStr('test'), message='third')
+        first = SimpleModel(id=StrId('test'), message='first')
+        second = SimpleModel(id=StrId('test'), message='second')
+        third = SimpleModel(id=StrId('test'), message='third')
 
         upsert_objects(pool, first)
 
@@ -281,14 +281,14 @@ def test_get_version():
 
 def test_squash_objects():
     class VersionModel(PersistentModel, VersionMixin):
-        id:IdStr
+        id:StrId
         message:str
 
     with use_temp_database_pool_with_model(VersionModel) as pool:
-        first = VersionModel(id=IdStr('test'), message='first')
-        second = VersionModel(id=IdStr('test'), message='second')
-        third = VersionModel(id=IdStr('test'), message='third')
-        fourth = VersionModel(id=IdStr('test'), message='fourth')
+        first = VersionModel(id=StrId('test'), message='first')
+        second = VersionModel(id=StrId('test'), message='second')
+        third = VersionModel(id=StrId('test'), message='third')
+        fourth = VersionModel(id=StrId('test'), message='fourth')
 
         upsert_objects(pool, first)
         upsert_objects(pool, second)
@@ -301,11 +301,11 @@ def test_squash_objects():
         assert third == load_object(pool, VersionModel, (('id', '=', 'test'),), version=3)
         assert third == load_object(pool, VersionModel, (('id', '=', 'test'),), version=4)
 
-        assert [{'__row_id': 1, 'op': 'UPSERT', 'table_name': 'md_VersionModel', 'version': 1}] == list(get_model_change_of_version(pool, 1))
+        assert [{'__row_id': 1, 'op': 'UPSERT', 'table_name': 'md_VersionModel', 'version': 1}] == list(get_model_changes_of_version(pool, 1))
         assert [
             {'__row_id': 1, 'op': 'DELETE:SQUASHED', 'table_name': 'md_VersionModel', 'version': 4},
             {'__row_id': 2, 'op': 'DELETE:SQUASHED', 'table_name': 'md_VersionModel', 'version': 4},
-        ] == list(get_model_change_of_version(pool, 4))
+        ] == list(get_model_changes_of_version(pool, 4))
 
         upsert_objects(pool, fourth)
 
@@ -320,12 +320,12 @@ def test_squash_objects():
 
 def test_squash_objects_raises():
     class NonVersionModel(PersistentModel):
-        id:IdStr
+        id:StrId
         message:str
 
     with pytest.raises(RuntimeError, match='to squash is not supported for non version type.'):
         with use_temp_database_pool_with_model(NonVersionModel) as pool:
-            first = NonVersionModel(id=IdStr('test'), message='first')
+            first = NonVersionModel(id=StrId('test'), message='first')
             upsert_objects(pool, first)
 
             squash_objects(pool, NonVersionModel, (('id', '=', 'test'),))

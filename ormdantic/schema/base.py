@@ -113,7 +113,9 @@ class ReferenceMixin(Generic[ModelT], StoredMixin):
 class IdentifyingMixin(StoredMixin):
     ''' the json value will be used for identifing the object. 
     The value of this type will be update through the sql param 
-    so, this field of database will not use stored feature. '''
+    so, this field of database will not use stored feature.
+    If multiple fields was declared as IdentifyingMixin in a class, 
+    the all fields will be an unique key. '''
     
     def new_if_empty(self:T, **kwds) -> T:
         raise NotImplementedError('fill if exist should be implemented.')
@@ -177,6 +179,12 @@ class DateIndex(datetime.date, IndexMixin):
     ''' date index '''
     pass
 
+class DateId(datetime.date, IdentifyingMixin):
+    ''' identified date index '''
+
+    def new_if_empty(self, **kwds) -> 'DateId':
+        return self
+
 
 class DateTimeIndex(datetime.datetime, IndexMixin):
     ''' date time index '''
@@ -188,25 +196,25 @@ class UniqueStringIndex(ConstrainedStr, UniqueIndexMixin):
     pass
 
 
-class IdStr(ConstrainedStr, IdentifyingMixin):
+class StrId(ConstrainedStr, IdentifyingMixin):
     max_length = 64 # sha256 return 64 char
-    ''' id string sha256 or uuid'''
+    ''' identified id string sha256 or uuid'''
 
-    def new_if_empty(self, **kwds) -> 'IdStr':
+    def new_if_empty(self, **kwds) -> 'StrId':
         if self == '':
-            return IdStr(uuid4().hex)
+            return StrId(uuid4().hex)
 
         return self
 
 
-class SequenceIdStr(IdStr):
+class SequenceStrId(StrId):
     max_length = 16 
     prefix = 'C'
 
-    def new_if_empty(self, **kwds) -> 'IdStr':
+    def new_if_empty(self, **kwds) -> 'StrId':
         if self == '':
             next_seq = kwds['next_seq']
-            return SequenceIdStr(next_seq())
+            return SequenceStrId(next_seq())
 
         return self
 
@@ -232,11 +240,17 @@ class IntegerArrayIndex(ArrayIndexMixin[int]):
 
 
 class IdentifiedMixin(SchemaBaseModel):
-    id: IdStr = Field(default=IdStr(''), title='identifier for retreiving')
+    id: StrId = Field(default=StrId(''), title='identifier for retreiving')
 
 
 class VersionMixin(SchemaBaseModel):
     ''' Marker for versioning (valid_from, valid_to)'''
+    pass
+
+
+class DatedMixin(SchemaBaseModel):
+    ''' has applied at field '''
+    applied_at: DateId = Field(title='applied at')
     pass
 
 

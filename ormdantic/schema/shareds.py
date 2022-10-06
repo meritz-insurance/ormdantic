@@ -15,7 +15,7 @@ from ..util import (
     unique,
 )
 
-from .base import (IdentifiedMixin, IdStr, PersistentModel,  SchemaBaseModel, 
+from .base import (IdentifiedMixin, StrId, PersistentModel,  SchemaBaseModel, 
                    get_field_type, register_class_preprocessor)
 from .paths import (extract_as, get_path_and_type, get_paths_for_type)
 
@@ -35,9 +35,9 @@ class SharedContentMixin(IdentifiedMixin):
         self.normalize()
 
         if self._id_attr:
-            id = IdStr(getattr(self, self._id_attr))
+            id = StrId(getattr(self, self._id_attr))
         else:
-            id = IdStr(_get_content_id(self.dict()))
+            id = StrId(_get_content_id(self.dict()))
 
         self.id = id
         return id

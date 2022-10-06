@@ -17,10 +17,10 @@ from ormdantic.database.queries import (
     _ENGINE, _RELEVANCE_FIELD
 )
 from ormdantic.schema.base import (
-    IntegerArrayIndex, StringArrayIndex, FullTextSearchedStringIndex, 
+    DatedMixin, IntegerArrayIndex, StringArrayIndex, FullTextSearchedStringIndex, 
     FullTextSearchedStr, PartOfMixin, StringReference, VersionMixin, 
     UniqueStringIndex, StringIndex, DecimalIndex, IntIndex, DateIndex,
-    DateTimeIndex, update_forward_refs, IdStr, 
+    DateTimeIndex, update_forward_refs, StrId, 
     StoredFieldDefinitions
 )
 
@@ -56,7 +56,7 @@ def test_get_sql_for_create_table():
 
 def test_get_sql_for_create_table_for_version():
     class SimpleBaseModel(PersistentModel, VersionMixin):
-        id: IdStr
+        id: StrId
 
     assert (
         'CREATE TABLE IF NOT EXISTS `md_SimpleBaseModel` (\n'
@@ -66,7 +66,7 @@ def test_get_sql_for_create_table_for_version():
         '  `__valid_end` BIGINT DEFAULT 9223372036854775807,\n'
         '  `__squashed_from` BIGINT,\n'
         '  `id` VARCHAR(64),\n'
-        '  UNIQUE KEY `id_index` (`id`,`__valid_start`)\n'
+        '  UNIQUE KEY `identifying_index` (`id`,`__valid_start`)\n'
         f'){_ENGINE}'
     ) == next(get_sql_for_creating_table(SimpleBaseModel))
 
@@ -74,7 +74,7 @@ def test_get_sql_for_create_table_for_version():
         order: StringIndex
 
     class RootModel(PersistentModel, VersionMixin):
-        id: IdStr
+        id: StrId
 
     update_forward_refs(PartModel, locals())
 
@@ -103,6 +103,23 @@ def test_get_sql_for_create_table_for_version():
     ] == list(get_sql_for_creating_table(PartModel))
 
 
+def test_get_sql_for_create_table_for_version_date():
+    class VersionDateModel(PersistentModel, DatedMixin, VersionMixin):
+        id: StrId
+
+    assert (
+        'CREATE TABLE IF NOT EXISTS `md_VersionDateModel` (\n'
+        '  `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,\n'
+        '  `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`)),\n'
+        '  `__valid_start` BIGINT,\n'
+        '  `__valid_end` BIGINT DEFAULT 9223372036854775807,\n'
+        '  `__squashed_from` BIGINT,\n'
+        '  `applied_at` DATE,\n'
+        '  `id` VARCHAR(64),\n'
+        '  UNIQUE KEY `identifying_index` (`applied_at`,`id`,`__valid_start`)\n'
+        f'){_ENGINE}'
+    ) == next(get_sql_for_creating_table(VersionDateModel))
+
 
 def test_get_sql_for_create_table_with_index():
     class SampleModel(PersistentModel):
@@ -115,7 +132,7 @@ def test_get_sql_for_create_table_with_index():
         i7: IntIndex
         i8: DateIndex
         i9: DateTimeIndex
-        i10: IdStr
+        i10: StrId
 
     assert (
 f"""CREATE TABLE IF NOT EXISTS `md_SampleModel` (
@@ -132,6 +149,7 @@ f"""CREATE TABLE IF NOT EXISTS `md_SampleModel` (
   `i8` DATE AS (JSON_VALUE(`__json`, '$.i8')) STORED,
   `i9` DATETIME(6) AS (JSON_VALUE(`__json`, '$.i9')) STORED,
   `i10` VARCHAR(64),
+  UNIQUE KEY `identifying_index` (`i10`),
   KEY `i2_index` (`i2`),
   UNIQUE KEY `i3_index` (`i3`),
   KEY `i4_index` (`i4`),
@@ -140,7 +158,6 @@ f"""CREATE TABLE IF NOT EXISTS `md_SampleModel` (
   KEY `i7_index` (`i7`),
   KEY `i8_index` (`i8`),
   KEY `i9_index` (`i9`),
-  UNIQUE KEY `i10_index` (`i10`),
   FULLTEXT INDEX `ft_index` (`i1`,`i2`) COMMENT 'parser "TokenBigramIgnoreBlankSplitSymbolAlphaDigit"'
 ){_ENGINE}"""
 ) == next(get_sql_for_creating_table(SampleModel))
@@ -296,7 +313,7 @@ def test_get_sql_for_creating_audit_version_table():
             ')'
         ),
         join_line(
-            'CREATE TABLE IF NOT EXISTS `_model_change` (',
+            'CREATE TABLE IF NOT EXISTS `_model_changes` (',
             '  `version` BIGINT,',
             '  `op` VARCHAR(32),',
             '  `table_name` VARCHAR(80),',
@@ -498,7 +515,7 @@ def test_get_sql_for_upserting():
 
 def test_get_sql_for_upserting_versioning():
     class VersionModel(PersistentModel, VersionMixin):
-        id: IdStr
+        id: StrId
         order: StringIndex
         
     sql = _get_sql_for_upserting(cast(Any, VersionModel))
@@ -538,6 +555,86 @@ def test_get_sql_for_upserting_versioning():
         "  'UPSERT' as op,",
         "  'md_VersionModel' as table_name"
     ) == sql
+
+
+def test_get_sql_for_upserting_dated():
+    class DatedModel(PersistentModel, DatedMixin):
+        id: StrId
+        
+    sql = _get_sql_for_upserting(cast(Any, DatedModel))
+
+    assert join_line(
+        "INSERT INTO md_DatedModel",
+        "(",
+        "  `__json`,",
+        "  `__valid_start`,",
+        "  `applied_at`,",
+        "  `id`",
+        ")",
+        "VALUES",
+        "(",
+        "  %(__json)s,",
+        "  @VERSION,",
+        "  %(applied_at)s,",
+        "  %(id)s",
+        ")",
+        "ON DUPLICATE KEY UPDATE",
+        "  `__json` = %(__json)s,",
+        "  `__valid_start` = @VERSION",
+        "RETURNING",
+        "  `__row_id`,",
+        "  'UPSERT' as op,",
+        "  'md_DatedModel' as table_name"
+    ) == sql
+
+
+def test_get_sql_for_upserting_versioned_dated():
+    class VersionDateModel(PersistentModel, VersionMixin, DatedMixin):
+        id: StrId
+        
+    sql = _get_sql_for_upserting(cast(Any, VersionDateModel))
+
+    assert join_line(
+        "SELECT MIN(`__squashed_from`)",
+        "INTO @SQUASHED_FROM",
+        "FROM md_VersionDateModel",
+        "WHERE",
+        "  `applied_at` = %(applied_at)s",
+        "  AND `id` = %(id)s",
+        "  AND `__valid_start` <= @VERSION",
+        "  AND @VERSION < `__valid_end`",
+        ";",
+        "UPDATE md_VersionDateModel",
+        "SET `__valid_end` = @VERSION",
+        "WHERE",
+        "  `applied_at` = %(applied_at)s",
+        "  AND `id` = %(id)s",
+        "  AND `__valid_start` <= @VERSION",
+        "  AND @VERSION < `__valid_end`",
+        ";",
+        "INSERT INTO md_VersionDateModel",
+        "(",
+        "  `__json`,",
+        "  `__valid_start`,",
+        "  `__squashed_from`,",
+        "  `applied_at`,",
+        "  `id`",
+        ")",
+        "VALUES",
+        "(",
+        "  %(__json)s,",
+        "  @VERSION,",
+        "  IFNULL(@SQUASHED_FROM, @VERSION),",
+        "  %(applied_at)s,",
+        "  %(id)s",
+        ")",
+        "RETURNING",
+        "  `__row_id`,",
+        "  'UPSERT' as op,",
+        "  'md_VersionDateModel' as table_name"
+
+   ) == sql
+
 
 
 def test_get_stored_fields_of_single_part():
