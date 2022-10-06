@@ -1,4 +1,3 @@
-from calendar import day_abbr
 import re
 from typing import (
     Optional, Iterable, Type, Iterator, Dict, Any, Tuple, 
@@ -7,7 +6,7 @@ from typing import (
 from collections import deque
 from contextlib import contextmanager
 import itertools
-from datetime import datetime
+from datetime import date, datetime
 
 from ormdantic.database.verinfo import VersionInfo
 from pymysql.cursors import DictCursor
@@ -269,10 +268,11 @@ def load_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where
                 *, 
                 concat_shared_models: bool = False,
                 unwind:Tuple[str,...] | str = tuple(),
-                version:int = 0) -> PersistentModelT:
+                version:int = 0,
+                ref_date:date | None = None) -> PersistentModelT:
     found = find_object(pool, type_, where, 
                         concat_shared_models=concat_shared_models, 
-                        unwind=unwind, version=version)
+                        unwind=unwind, version=version, ref_date=ref_date)
 
     if not found:
         _logger.fatal(f'cannot found {type_=} object for {where=} in {pool=}')
@@ -285,8 +285,9 @@ def find_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where
                 *, 
                 concat_shared_models: bool = False, 
                 unwind:Tuple[str,...] | str = tuple(),
-                version:int = 0) -> Optional[PersistentModelT]:
-    objs = list(query_records(pool, type_, where, 2, unwind=unwind, version=version))
+                version:int = 0,
+                ref_date:date | None = None) -> Optional[PersistentModelT]:
+    objs = list(query_records(pool, type_, where, 2, unwind=unwind, version=version, ref_date=ref_date))
 
     if len(objs) >= 2:
         _logger.fatal(f'More than one object found. {type_=} {where=} in {pool=}. {[obj[_ROW_ID_FIELD] for obj in objs]}')
@@ -303,12 +304,13 @@ def find_objects(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], wher
                 *, fetch_size: Optional[int] = None,
                 concat_shared_models: bool = False,
                 unwind:Tuple[str, ...] | str = tuple(),
-                version:int = 0) -> Iterator[PersistentModelT]:
+                version:int = 0,
+                ref_date:date | None = None) -> Iterator[PersistentModelT]:
 
     with _context_for_shared_model(pool, concat_shared_models) as convert_model:
         for record in query_records(pool, type_, where, fetch_size, 
                                     fields=(_JSON_FIELD, _ROW_ID_FIELD),
-                                    unwind=unwind, version=version):
+                                    unwind=unwind, version=version, ref_date=ref_date):
             model = convert_model(type_, record)
 
             yield model
@@ -397,7 +399,8 @@ def query_records(pool: DatabaseConnectionPool,
                   offset: int | None = None,
                   unwind: Tuple[str,...] | str = tuple(),
                   joined: Dict[str, Type[PersistentModelT]] | None = None,
-                  version: int = 0
+                  version: int = 0,
+                  ref_date: date | None = None
                   ) -> Iterator[Dict[str, Any]]:
 
     query_and_param = get_query_and_args_for_reading(
@@ -405,7 +408,8 @@ def query_records(pool: DatabaseConnectionPool,
         order_by=order_by, limit=limit, offset=offset, 
         unwind=unwind,
         ns_types=joined,
-        version=version or get_current_version(pool))
+        version=version or get_current_version(pool),
+        current=ref_date)
 
     with pool.open_cursor() as cursor:
         cursor.execute(*query_and_param)

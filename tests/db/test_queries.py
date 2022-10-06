@@ -1,3 +1,4 @@
+from sqlite3 import Date
 from typing import Type, List, ClassVar, cast, Any
 import pytest
 from decimal import Decimal
@@ -253,14 +254,20 @@ def test_get_sql_for_create_table_raises():
     class Container(PersistentModel, VersionMixin):
         parts: List[Part] = Field(default=[])
 
+    class DatedModelWithoutIds(PersistentModel, DatedMixin):
+        parts: List[Part] = Field(default=[])
+
+
     update_forward_refs(Part, locals())
 
     with pytest.raises(RuntimeError, match='VersionMixin is not support for PartOfMixin.'):
         list(get_sql_for_creating_table(Part))
 
-    with pytest.raises(RuntimeError, match='identifying fields needs for VersionMixin type.'):
+    with pytest.raises(RuntimeError, match='identifying fields need for VersionMixin type.'):
         list(get_sql_for_creating_table(Container))
 
+    with pytest.raises(RuntimeError, match='identifying fields need for DatedMixin type.'):
+        list(get_sql_for_creating_table(DatedModelWithoutIds))
 
 def test_get_sql_for_creating_external_index_table():
     class Target(PersistentModel):
@@ -904,14 +911,14 @@ def test_get_query_and_args_for_reading_for_matching():
         "          FROM",
         "            md_MyModel AS __ORG",
         "        )",
-        "        AS __BASE",
+        "        AS _BASE_CORE",
         "    )",
         "    AS FOR_ORDERING",
         "    WHERE",
         "      `__relevance`",
         "    ORDER BY",
         "      `__relevance` DESC",
-        "    LIMIT 100000000000",
+        "    LIMIT 9223372036854775807",
         "  )",
         "  AS _BASE",
         "  JOIN md_MyModel AS _MAIN ON `_BASE`.`__row_id` = `_MAIN`.`__row_id`"
@@ -919,7 +926,8 @@ def test_get_query_and_args_for_reading_for_matching():
 
     assert {
         "ORDER_NAME": "+FAST",
-        "VERSION": 0
+        "VERSION": 0,
+        "CURRENT_DATE": None,
     } == args
 
 
@@ -956,13 +964,62 @@ def test_get_query_and_args_for_reading_for_order_by():
         "          FROM",
         "            md_MyModel AS __ORG",
         "        )",
-        "        AS __BASE",
+        "        AS _BASE_CORE",
         "    )",
         "    AS FOR_ORDERING",
         "    ORDER BY",
         "      `order` desc,",
         "      `name`",
-        "    LIMIT 100000000000",
+        "    LIMIT 9223372036854775807",
+        "  )",
+        "  AS _BASE"
+    ) == sql
+
+
+def test_get_query_and_args_for_reading_for_dated():
+    class MyModel(PersistentModel, DatedMixin):
+        id: StrId
+        order: FullTextSearchedStr
+        name: FullTextSearchedStr
+
+    sql, _ = get_query_and_args_for_reading(MyModel, ('name',), (('name', '=', 'ab'),), current=date.today())
+
+    print(sql)
+
+    assert join_line(
+        "SELECT",
+        "  `_BASE`.`name`",
+        "FROM",
+        "  (",
+        "    SELECT",
+        "      `__row_id`,",
+        "      `name`",
+        "    FROM",
+        "      (",
+        "        SELECT",
+        "          `__ORG`.`__row_id`,",
+        "          `__ORG`.`name`",
+        "        FROM",
+        "          md_MyModel AS __ORG",
+        "           JOIN ",
+        "            (",
+        "              SELECT",
+        "                `id`,",
+        "                MAX(`applied_at`) as MAX_applied_at",
+        "              FROM",
+        "                md_MyModel AS __ORG",
+        "              WHERE",
+        "                `__ORG`.`name` = %(NAME)s",
+        "                AND `applied_at` <= %(CURRENT_DATE)s",
+        "              GROUP BY",
+        "                `id`",
+        "            )",
+        "            AS __ORG_DATED",
+        "           ON ",
+        "            `__ORG`.`id` = `__ORG_DATED`.`id`",
+        "             AND `__ORG`.`applied_at` = `__ORG_DATED`.`MAX_applied_at`",
+        "      )",
+        "      AS _BASE_CORE",
         "  )",
         "  AS _BASE"
     ) == sql
@@ -977,7 +1034,7 @@ def test_build_query_for_core_table():
     query, fields = _build_query_and_fields_for_core_table('', Model, 
         ['description'], 
         (('codes', '='), ('name', '!=')),
-        tuple()
+        tuple(), False
     )
 
     assert join_line(
@@ -1004,7 +1061,7 @@ def test_build_query_for_core_table_for_unwind():
     query, fields = _build_query_and_fields_for_core_table('ns', Model, 
         ['description'],
         (('codes', '='), ('name', '!=')),
-        ('codes',)
+        ('codes',), False
     )
 
     assert join_line(
@@ -1033,7 +1090,7 @@ def test_build_query_for_core_table_for_match():
     query, fields = _build_query_and_fields_for_core_table('ns', Model, 
         [],
         (('codes', '='), ('name,description', 'match')),
-        ('codes',)
+        ('codes',), False
     )
 
     assert join_line(
@@ -1060,7 +1117,7 @@ def test_build_query_for_core_table_for_multiple_match():
     query, fields = _build_query_and_fields_for_core_table('', Model, 
         [],
         (('name', 'match'), ('description', 'match',)),
-        tuple()
+        tuple(), False
     )
 
     assert join_line(

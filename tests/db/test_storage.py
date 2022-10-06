@@ -2,6 +2,7 @@
 # mariadb -h localhost -P 33069 -p -u root -N -B -e 'select CONCAT("drop database `", schema_name, "`;") as name from information_schema.schemata where schema_name like "TEST_%";'
 #
 from dataclasses import asdict
+from datetime import date
 from typing import  List, Tuple, cast, Type
 import pytest
 
@@ -13,8 +14,8 @@ from ormdantic.database.storage import (
 from ormdantic.schema import PersistentModel
 from ormdantic.database.verinfo import VersionInfo
 from ormdantic.schema.base import (
-    FullTextSearchedStringIndex, PartOfMixin, SchemaBaseModel, StringArrayIndex, VersionMixin, 
-    get_identifer_of, update_forward_refs, IdentifiedModel, StrId,
+    DatedMixin, FullTextSearchedStringIndex, PartOfMixin, SchemaBaseModel, StringArrayIndex, VersionMixin, 
+    get_identifer_of, update_forward_refs, IdentifiedModel, StrId, DateId,
     StoredFieldDefinitions
 )
 
@@ -253,6 +254,36 @@ def test_upsert_objects_for_versioning():
         assert third == load_object(pool, VersionModel, (('id', '=', 'test'),), version=3)
 
 
+def test_upsert_objects_for_dated():
+    class DatedModel(PersistentModel, DatedMixin, VersionMixin):
+        id:StrId
+        message:str
+
+    with use_temp_database_pool_with_model(DatedModel) as pool:
+        first = DatedModel(id=StrId('test'), applied_at=DateId(2011, 12, 1), message='first')
+        second = DatedModel(id=StrId('test'), applied_at=DateId(2012, 12, 1), message='second')
+        third = DatedModel(id=StrId('test'), applied_at=DateId(2013, 12, 1), message='third')
+
+        upsert_objects(pool, first)
+        upsert_objects(pool, second)
+        upsert_objects(pool, third)
+
+        assert third == load_object(pool, DatedModel, (('id', '=', 'test'),), 
+                                    version=3, 
+                                    ref_date=date.today())
+
+        assert second == load_object(pool, DatedModel, (('id', '=', 'test'),), 
+                                    version=3, 
+                                    ref_date=date(2012, 12, 2))
+
+        assert first == load_object(pool, DatedModel, (('id', '=', 'test'),), 
+                                    version=1, 
+                                    ref_date=date.today())
+
+        # if ref_date is None, we get the all item.
+        assert [1,2,3] == list(record['__row_id'] for record in query_records(pool, DatedModel, tuple()))
+
+
 def test_get_version():
     class SimpleModel(PersistentModel):
         id:StrId
@@ -276,7 +307,6 @@ def test_get_version():
         upsert_objects(pool, third)
 
         assert 3 == get_version_info(pool).version
-
 
 
 def test_squash_objects():

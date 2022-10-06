@@ -4,8 +4,6 @@ from typing import (
 )
 import orjson
 from pydantic import Field
-from pydantic.fields import FieldInfo
-from pydantic.main import ModelMetaclass, __dataclass_transform__
 from collections import defaultdict
 
 from ormdantic.util.hints import get_union_type_arguments
