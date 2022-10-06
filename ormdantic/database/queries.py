@@ -10,16 +10,17 @@ import itertools
 import functools
 
 from pydantic import ConstrainedStr, ConstrainedDecimal
-from ormdantic.schema.verinfo import VersionInfo
+from ormdantic.database.verinfo import VersionInfo
 
 from ormdantic.util import is_derived_from, convert_tuple
 from ormdantic.util.hints import get_base_generic_alias_of
 
 from ..util import get_logger
 from ..schema.base import (
-    ArrayIndexMixin, PersistentModelT, ReferenceMixin, FullTextSearchedMixin, 
-    IdentifyingMixin, IndexMixin, SequenceIdStr, 
-    StoredFieldDefinitions, PersistentModelT, StoredMixin, PartOfMixin, TemporalMixin, TemporalMixin, 
+    ArrayIndexMixin, DatedMixin, PersistentModelT, ReferenceMixin, FullTextSearchedMixin, 
+    IdentifyingMixin, IndexMixin, SequenceStrId, 
+    StoredFieldDefinitions, PersistentModelT, StoredMixin, PartOfMixin, 
+    VersionMixin, VersionMixin, 
     UniqueIndexMixin, get_container_type, get_root_container_type,
     get_field_names_for, get_part_types, is_field_list_or_tuple_of,
     PersistentModel, is_list_or_tuple_of, get_stored_fields,
@@ -41,6 +42,9 @@ _VALID_START_FIELD = '__valid_start'
 _VALID_END_FIELD = '__valid_end'
 _SQUASHED_FROM_FIELD = '__squashed_from'
 
+# json필드 임으로 _를 사용하지 않는다.
+_APPLIED_AT_FIELD = 'applied_at'
+
 _AUDIT_VERSION_FIELD = 'version'
 
 _AUDIT_WHO_FIELD = 'who'
@@ -50,7 +54,7 @@ _AUDIT_WHEN_FIELD = 'when'
 _AUDIT_TAG_FIELD = 'tag'
 
 _VERSION_INFO_TABLE = '_version_info'
-_VERSION_CHANGE_TABLE = '_model_change'
+_VERSION_CHANGE_TABLE = '_model_changes'
 
 _AUDIT_OP_FIELD = 'op'
 _AUDIT_TABLE_NAME_FIELD = 'table_name'
@@ -252,13 +256,13 @@ def get_sql_for_creating_table(type_:Type[PersistentModelT]):
 
         assert container_type
 
-        if _is_temporal_type(type_):
+        if _is_version_type(type_):
             _logger.fatal(
-                f'{type_=} is temporal type. but it was PartOfMxin. '
-                'if the root container type is Temporal Mixin, the PartOfMixin may be handled as TemporalMixin ')
-            raise RuntimeError('TemporalMixin is not support for PartOfMixin.')
+                f'{type_=} is versioned type. but it was PartOfMxin. '
+                'if the root container type is VersionMixin, the PartOfMixin may be handled as VersionMixin ')
+            raise RuntimeError('VersionMixin is not support for PartOfMixin.')
 
-        if _is_temporal_type(get_root_container_type(type_)):
+        if _is_version_type(get_root_container_type(type_)):
             valid_fields = (_VALID_START_FIELD, _VALID_END_FIELD)
         else:
             valid_fields = (_VALID_START_FIELD,)
@@ -288,15 +292,22 @@ def get_sql_for_creating_table(type_:Type[PersistentModelT]):
             })
         )
     else:
-        if _is_temporal_type(type_):
+        if _is_version_type(type_):
             if not get_identifying_fields(type_):
-                _logger.fatal(f'{type_=} does not have any id fields.')
-                raise RuntimeError('identifying fields needs for TemporalMixin type.')
+                _logger.fatal(f'{type_=} does not have any id field.')
+                raise RuntimeError('identifying fields need for VersionMixin type.')
+
+        if _is_dated_type(type_): 
+            id_fields = [f for f in get_identifying_fields(type_) if f != _APPLIED_AT_FIELD]
+
+            if not id_fields:
+                _logger.fatal(f'{type_=} does not have any id field for finding MAX applied_date')
+                raise RuntimeError('identifying fields need for DatedMixin type.')
 
         yield _build_model_table_statement(
             get_table_name(type_), 
             _get_table_fields(),
-            _get_table_temporal_fields(type_),
+            _get_table_version_fields(type_),
             _get_table_stored_fields(stored, True),
             _get_table_indexes(type_, stored)
         )
@@ -342,7 +353,7 @@ def _build_code_seq_statement(type_:Type[PersistentModel]) -> Iterator[str]:
     for name, modle_field in type_.__fields__.items():
         field_element_type = modle_field.type_
 
-        if is_derived_from(field_element_type, SequenceIdStr):
+        if is_derived_from(field_element_type, SequenceStrId):
             prefix = field_element_type.prefix
 
             yield join_line(
@@ -405,10 +416,10 @@ def _get_table_fields() -> Iterator[str]:
     yield f'{field_exprs(_JSON_FIELD)} {_JSON_TYPE} {_JSON_CHECK.format(field_exprs(_JSON_FIELD))}'
 
 
-def _get_table_temporal_fields(type_:Type) -> Iterator[str]:
+def _get_table_version_fields(type_:Type) -> Iterator[str]:
     yield f'{field_exprs(_VALID_START_FIELD)} BIGINT'
 
-    if _is_temporal_type(type_):
+    if _is_version_type(type_):
         yield f'{field_exprs(_VALID_END_FIELD)} BIGINT DEFAULT {_BIG_INT_MAX}'
         yield f'{field_exprs(_SQUASHED_FROM_FIELD)} BIGINT'
 
@@ -444,16 +455,27 @@ def _get_view_fields(fields:Dict[str, Tuple[str, ...]]) -> Iterator[str]:
 
 
 def _get_table_indexes(type_:Type, stored_fields:StoredFieldDefinitions) -> Iterator[str]:
+    identified_fields = [field_name 
+                        for field_name, (_, field_type) in stored_fields.items()
+                        if is_derived_from(field_type, IdentifyingMixin)]
+
+    if _is_version_type(type_):
+        identified_fields.append(_VALID_START_FIELD)
+
+    if identified_fields:
+        yield f"""UNIQUE KEY `identifying_index` ({join_line(
+            field_exprs(identified_fields), new_line=False, use_comma=True)})"""
+    
+
     for field_name, (_, field_type) in stored_fields.items():
+        if is_derived_from(field_type, IdentifyingMixin):
+            continue
+
         key_def = _generate_key_definition(field_type)
 
         if key_def: 
-            if key_def == 'UNIQUE KEY' and _is_temporal_type(type_):
-                index_fields = (field_name, _VALID_START_FIELD)
-            else:
-                index_fields = (field_name,)
-
-            yield f"""{key_def} `{field_name}_index` ({join_line(field_exprs(index_fields), new_line=False, use_comma=True)})"""
+            yield f"""{key_def} `{field_name}_index` ({join_line(
+                field_exprs(field_name), new_line=False, use_comma=True)})"""
 
     full_text_searched_fields = set(
         field_name for field_name, (_, field_type) in stored_fields.items()
@@ -560,18 +582,22 @@ def get_query_and_args_for_auditing(item:Dict[str, Any]):
     return _get_sql_for_auditing_model(), item
 
 
-def get_query_and_args_for_getting_version(ref_date:datetime | None):
-    if ref_date is None:
+def get_query_and_args_for_getting_version(when:datetime | None):
+    if when is None:
         return f'SELECT MAX(version) as version FROM {field_exprs(_VERSION_INFO_TABLE)}', {}
     else:
-        return f'SELECT MAX(version) as version FROM {field_exprs(_VERSION_INFO_TABLE)} WHERE `when` <= %(ref_date)s', {'ref_date': ref_date}
+        return (
+            f'SELECT MAX(version) as version FROM {field_exprs(_VERSION_INFO_TABLE)} '
+            f'WHERE `when` <= %(ref_date)s', 
+            {'ref_date': when}
+        )
 
 
 def get_query_and_args_for_getting_version_info(audit_version:int):
     return f'SELECT * FROM {field_exprs(_VERSION_INFO_TABLE)} where version = %(version)s', {'version':audit_version}
 
 
-def get_query_and_args_for_getting_model_change_of_version(audit_version:int):
+def get_query_and_args_for_getting_model_changes_of_version(audit_version:int):
     return f'SELECT * FROM {field_exprs(_VERSION_CHANGE_TABLE)} where version = %(version)s', {'version':audit_version}
 
 
@@ -593,8 +619,9 @@ def get_identifying_fields(model_type:Type[PersistentModelT]) -> Tuple[str,...]:
 
 
 def get_query_and_args_for_squashing(type_:Type[PersistentModelT], identifier:Dict[str, Any]):
-    if not _is_temporal_type(type_):
-        raise RuntimeError('to squash is not supported for non temporal type.')
+    if not _is_version_type(type_):
+        _logger.fatal(f'{type_=} is not derived from VersinoMixin. it suppport to squash VersionMixin objects only.')
+        raise RuntimeError('to squash is not supported for non version type.')
 
     return _get_sql_for_squashing(cast(Type, type_)), identifier
     
@@ -657,6 +684,7 @@ def _get_sql_for_squashing(model_type:Type):
                 )
             )
         ),
+        # returning for update model_change
         f'RETURNING',
         tab_each_line(
             field_exprs(_ROW_ID_FIELD),
@@ -696,7 +724,7 @@ def _get_sql_for_upserting(model_type:Type):
     table_name = get_table_name(model_type)
     id_fields = get_identifying_fields(model_type)
 
-    if _is_temporal_type(model_type):
+    if _is_version_type(model_type):
         assert id_fields
 
         for_id_fields = [f'{field_exprs(f)} = %({f})s' for f in id_fields]
@@ -889,7 +917,8 @@ def get_sql_for_upserting_parts(model_type:Type) -> Dict[Type, Tuple[str, ...]]:
                             f'{root_field} as {field_exprs(_ROOT_ROW_ID_FIELD)}',
                             f'CONTAINER.{field_exprs(_ROW_ID_FIELD)} as {field_exprs(_CONTAINER_ROW_ID_FIELD)}',
                             (
-                                f"CONCAT('{json_path}[', {field_exprs(_PART_ORDER_FIELD)} - 1, ']') as {field_exprs(_JSON_PATH_FIELD)}"
+                                f"CONCAT('{json_path}[', {field_exprs(_PART_ORDER_FIELD)} - 1, ']') "
+                                f"as {field_exprs(_JSON_PATH_FIELD)}"
                                 if is_collection else 
                                 f"'{json_path}' as {field_exprs(_JSON_PATH_FIELD)}"
                             )
@@ -1120,7 +1149,8 @@ def get_query_and_args_for_reading(type_:Type[PersistentModelT], fields:Tuple[st
                                    ns_types:Dict[str, Type[PersistentModelT]] | None = None,
                                    base_type:Optional[Type[PersistentModelT]] = None,
                                    for_count:bool = False,
-                                   version:int = 0
+                                   version:int = 0, 
+                                   current:date | None = None,
                                    ):
     '''
         Get 'field' values of record which is all satified the where conditions.
@@ -1153,8 +1183,8 @@ def get_query_and_args_for_reading(type_:Type[PersistentModelT], fields:Tuple[st
             tuple((f, o) for f, o, _ in where), 
             order_by, offset, limit, 
             unwind, 
-            cast(Type, base_type), for_count), 
-        _build_database_args(where) | {'VERSION':version}
+            cast(Type, base_type), for_count, bool(current)), 
+        _build_database_args(where) | {'VERSION':version, 'CURRENT_DATE':current}
     )
 
     # first, we make a group for each table.
@@ -1188,7 +1218,8 @@ def _get_sql_for_reading(ns_types:Tuple[Tuple[str, Type]],
                          limit: int | None,
                          unwind: Tuple[str, ...],
                          base_type: Type[PersistentModelT] | None,
-                         for_count: bool) -> str:
+                         for_count: bool,
+                         has_current_date) -> str:
 
     # we will build the core table which has _row_id and fields which
     # is referenced from where clause or unwind.
@@ -1223,7 +1254,7 @@ def _get_sql_for_reading(ns_types:Tuple[Tuple[str, Type]],
 
         core_query_and_fields[ns] = _build_query_and_fields_for_core_table(
             ns, ns_type, core_fields,
-            field_ops, _extract_fields(unwind, ns))
+            field_ops, _extract_fields(unwind, ns), has_current_date)
 
     field_ops = tuple(field_ops_list)
 
@@ -1330,7 +1361,8 @@ def get_query_and_args_for_deleting(type_:Type, where:Where):
 @functools.lru_cache
 def _get_sql_for_deleting(type_:Type, field_and_value:FieldOp):
     table_name = get_table_name(type_)
-    return f"DELETE FROM {table_name} {_build_where(field_and_value)} RETURNING {_ROW_ID_FIELD}, 'DELETE' as op, '{table_name}' as table_name"
+    return (f"DELETE FROM {table_name} {_build_where(field_and_value)} "
+            f"RETURNING {_ROW_ID_FIELD}, 'DELETE' as op, '{table_name}' as table_name")
 
 
 def _build_database_args(where:Where) -> Dict[str, Any]:
@@ -1396,7 +1428,8 @@ def _build_match(fields:str, variable:str, table_name:str = ''):
     variable = _get_parameter_variable_for_multiple_fields(variable)
     field_items = field_exprs([f for f in fields.split(',')], table_name)
 
-    return f'MATCH ({join_line(field_items, new_line=False, use_comma=True)}) AGAINST (%({variable})s IN BOOLEAN MODE)'
+    return (f'MATCH ({join_line(field_items, new_line=False, use_comma=True)}) '
+            f'AGAINST (%({variable})s IN BOOLEAN MODE)')
 
 
 def _get_parameter_variable_for_multiple_fields(fields:str):
@@ -1409,7 +1442,8 @@ def _build_query_and_fields_for_core_table(
         target_type: Type[PersistentModelT],
         fields: List[str],
         field_ops: Tuple[Tuple[str, str], ...],
-        unwind: Tuple[str, ...]) -> Tuple[str, Tuple[str, ...]]:
+        unwind: Tuple[str, ...],
+        has_current_date: bool) -> Tuple[str, Tuple[str, ...]]:
     # in core table, following item will be handled.
     # 1. unwind
     # 2. where
@@ -1435,11 +1469,64 @@ def _build_query_and_fields_for_core_table(
         for f, o in field_ops if o != 'match'
     )
 
-    if _is_temporal_type(get_root_container_type(target_type) or target_type):
+    if _is_version_type(get_root_container_type(target_type) or target_type):
         field_op_var = field_op_var + (
             (field_exprs(_VALID_START_FIELD, '__ORG'), '<=', 'version'),
             (field_exprs(_VALID_END_FIELD, '__ORG'), '>', 'version')
         )
+
+    org_table = _alias_table(get_table_name(target_type), '__ORG')
+
+    if _is_dated_type(target_type) and has_current_date:
+        field_op_var = field_op_var + (
+            (field_exprs(_APPLIED_AT_FIELD), "<=", 'CURRENT_DATE'),
+        )
+
+        id_fields = [
+            f for f in get_identifying_fields(target_type) 
+            if f != _APPLIED_AT_FIELD
+        ]
+
+        # join with max(applied_at) where applied_at <= current_date
+        org_table = join_line(
+            org_table,
+            ' JOIN ',
+            tab_each_line(
+                _alias_table(
+                    join_line(
+                        "SELECT",
+                        tab_each_line(
+                            field_exprs(id_fields),
+                            f'MAX({field_exprs(_APPLIED_AT_FIELD)}) as MAX_{_APPLIED_AT_FIELD}',
+                            use_comma=True
+                        ),
+                        "FROM",
+                        tab_each_line(
+                            _alias_table(get_table_name(target_type), '__ORG')
+                        ),
+                        _build_where(field_op_var, ns),
+                        "GROUP BY",
+                        tab_each_line(
+                            field_exprs(id_fields),
+                            use_comma=True
+                        )
+                    ),
+                    '__ORG_DATED'
+                )
+            ),
+            ' ON ',
+            tab_each_line(
+                '\n AND '.join(
+                    itertools.chain(
+                        [f'{field_exprs(field, "__ORG")} = {field_exprs(field, "__ORG_DATED")}' 
+                        for field in id_fields],
+                        [f'{field_exprs(_APPLIED_AT_FIELD, "__ORG")} = {field_exprs(f"MAX_{_APPLIED_AT_FIELD}", "__ORG_DATED")}']
+                    )
+                )
+            )
+        )
+
+        field_op_var = tuple()
 
     field_list = [] 
 
@@ -1454,7 +1541,7 @@ def _build_query_and_fields_for_core_table(
 
     source = '\nLEFT JOIN '.join(
         itertools.chain(
-            [_alias_table(get_table_name(target_type), '__ORG')],
+            [ org_table ],
             [
                 _alias_table(get_table_name(target_type, f), _get_alias_for_unwind(f, unwind)) 
                 + f' ON {field_exprs(_ROW_ID_FIELD, "__ORG")} = '
@@ -1525,7 +1612,7 @@ def _build_query_for_base_table(ns_types: Tuple[Tuple[str, PersistentModelT],...
             ),
             _build_where(tuple(itertools.chain(field_ops, nested_where))),
             _build_order_by(order_by),
-            _build_limit_and_offset(limit or 100_000_000_000, offset)
+            _build_limit_and_offset(limit or _BIG_INT_MAX, offset)
         ), fields
 
     return join_line(
@@ -1597,7 +1684,7 @@ def _build_join_for_ns(ns_types: Tuple[Tuple[str, PersistentModelT],...],
             joined_queries.append(f'{join_scope}JOIN {_alias_table(query, f"__{current_ns.upper()}")}'
                 f' ON {field_exprs(left_key)} = {field_exprs(right_key)}')
         else:
-            joined_queries.append(_alias_table(query, '__BASE'))
+            joined_queries.append(_alias_table(query, '_BASE_CORE'))
 
         prev_ns = current_ns
 
@@ -1638,7 +1725,8 @@ def _add_namespace(field:str, ns:str) -> str:
     return field
 
 
-def _build_namespace_types(base_type:Type, join:Dict[str, Type], namespaces:Set[str]) -> Iterator[Tuple[str, Type]]:
+def _build_namespace_types(base_type:Type, join:Dict[str, Type], 
+                           namespaces: Set[str]) -> Iterator[Tuple[str, Type]]:
     yield ('', base_type)
 
     yield from _build_join_from_refs(base_type, '', namespaces)
@@ -1649,7 +1737,8 @@ def _build_namespace_types(base_type:Type, join:Dict[str, Type], namespaces:Set[
             yield from _build_join_from_refs(field_type, field_name + '.', namespaces)
 
 
-def _build_join_from_refs(current_type:Type, current_ns:str, namespaces:Set[str]) -> Iterator[Tuple[str, Type]]:
+def _build_join_from_refs(current_type:Type, current_ns:str, 
+                          namespaces: Set[str]) -> Iterator[Tuple[str, Type]]:
     refs = get_stored_fields_for(current_type, ReferenceMixin)
 
     for field_name, (_, field_type) in refs.items():
@@ -1663,7 +1752,8 @@ def _build_join_from_refs(current_type:Type, current_ns:str, namespaces:Set[str]
             yield from _build_join_from_refs(ref_type, current_ns + field_name + '.', namespaces)
 
 
-def _find_join_keys(join:Tuple[Tuple[str, Type],...]) -> Dict[Tuple[Type, Type], Tuple[str, str]]:
+def _find_join_keys(join:Tuple[Tuple[str, Type],...]
+                    ) -> Dict[Tuple[Type, Type], Tuple[str, str]]:
     keys : Dict[Tuple[Type, Type], Tuple[str, str]] = {}
 
     targets = dict(join)
@@ -1764,5 +1854,8 @@ def _normalize_database_object_name(value:str) -> str:
     return value.replace('.', '_').replace(',', '_').replace(' ', '').upper()
 
 
-def _is_temporal_type(type_:Type) -> bool:
-    return is_derived_from(type_, TemporalMixin)
+def _is_version_type(type_:Type) -> bool:
+    return is_derived_from(type_, VersionMixin)
+
+def _is_dated_type(type_:Type) -> bool:
+    return is_derived_from(type_, DatedMixin)

@@ -1,3 +1,4 @@
+from sqlite3 import Date
 from typing import Type, List, ClassVar, cast, Any
 import pytest
 from decimal import Decimal
@@ -17,10 +18,10 @@ from ormdantic.database.queries import (
     _ENGINE, _RELEVANCE_FIELD
 )
 from ormdantic.schema.base import (
-    IntegerArrayIndex, StringArrayIndex, FullTextSearchedStringIndex, 
-    FullTextSearchedStr, PartOfMixin, StringReference, TemporalMixin, 
+    DatedMixin, IntegerArrayIndex, StringArrayIndex, FullTextSearchedStringIndex, 
+    FullTextSearchedStr, PartOfMixin, StringReference, VersionMixin, 
     UniqueStringIndex, StringIndex, DecimalIndex, IntIndex, DateIndex,
-    DateTimeIndex, update_forward_refs, IdStr, 
+    DateTimeIndex, update_forward_refs, StrId, 
     StoredFieldDefinitions
 )
 
@@ -54,9 +55,9 @@ def test_get_sql_for_create_table():
     ) == next(get_sql_for_creating_table(SimpleBaseModel))
 
 
-def test_get_sql_for_create_table_for_temporal():
-    class SimpleBaseModel(PersistentModel, TemporalMixin):
-        id: IdStr
+def test_get_sql_for_create_table_for_version():
+    class SimpleBaseModel(PersistentModel, VersionMixin):
+        id: StrId
 
     assert (
         'CREATE TABLE IF NOT EXISTS `md_SimpleBaseModel` (\n'
@@ -66,32 +67,15 @@ def test_get_sql_for_create_table_for_temporal():
         '  `__valid_end` BIGINT DEFAULT 9223372036854775807,\n'
         '  `__squashed_from` BIGINT,\n'
         '  `id` VARCHAR(64),\n'
-        '  UNIQUE KEY `id_index` (`id`,`__valid_start`)\n'
-        f'){_ENGINE}'
-    ) == next(get_sql_for_creating_table(SimpleBaseModel))
-
-
-def test_get_sql_for_create_table_for_temporal():
-    class SimpleBaseModel(PersistentModel, TemporalMixin):
-        id: IdStr
-
-    assert (
-        'CREATE TABLE IF NOT EXISTS `md_SimpleBaseModel` (\n'
-        '  `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,\n'
-        '  `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`)),\n'
-        '  `__valid_start` BIGINT,\n'
-        '  `__valid_end` BIGINT DEFAULT 9223372036854775807,\n'
-        '  `__squashed_from` BIGINT,\n'
-        '  `id` VARCHAR(64),\n'
-        '  UNIQUE KEY `id_index` (`id`,`__valid_start`)\n'
+        '  UNIQUE KEY `identifying_index` (`id`,`__valid_start`)\n'
         f'){_ENGINE}'
     ) == next(get_sql_for_creating_table(SimpleBaseModel))
 
     class PartModel(PersistentModel, PartOfMixin['RootModel']):
         order: StringIndex
 
-    class RootModel(PersistentModel, TemporalMixin):
-        id: IdStr
+    class RootModel(PersistentModel, VersionMixin):
+        id: StrId
 
     update_forward_refs(PartModel, locals())
 
@@ -120,6 +104,23 @@ def test_get_sql_for_create_table_for_temporal():
     ] == list(get_sql_for_creating_table(PartModel))
 
 
+def test_get_sql_for_create_table_for_version_date():
+    class VersionDateModel(PersistentModel, DatedMixin, VersionMixin):
+        id: StrId
+
+    assert (
+        'CREATE TABLE IF NOT EXISTS `md_VersionDateModel` (\n'
+        '  `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,\n'
+        '  `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`)),\n'
+        '  `__valid_start` BIGINT,\n'
+        '  `__valid_end` BIGINT DEFAULT 9223372036854775807,\n'
+        '  `__squashed_from` BIGINT,\n'
+        '  `applied_at` DATE,\n'
+        '  `id` VARCHAR(64),\n'
+        '  UNIQUE KEY `identifying_index` (`applied_at`,`id`,`__valid_start`)\n'
+        f'){_ENGINE}'
+    ) == next(get_sql_for_creating_table(VersionDateModel))
+
 
 def test_get_sql_for_create_table_with_index():
     class SampleModel(PersistentModel):
@@ -132,7 +133,7 @@ def test_get_sql_for_create_table_with_index():
         i7: IntIndex
         i8: DateIndex
         i9: DateTimeIndex
-        i10: IdStr
+        i10: StrId
 
     assert (
 f"""CREATE TABLE IF NOT EXISTS `md_SampleModel` (
@@ -149,6 +150,7 @@ f"""CREATE TABLE IF NOT EXISTS `md_SampleModel` (
   `i8` DATE AS (JSON_VALUE(`__json`, '$.i8')) STORED,
   `i9` DATETIME(6) AS (JSON_VALUE(`__json`, '$.i9')) STORED,
   `i10` VARCHAR(64),
+  UNIQUE KEY `identifying_index` (`i10`),
   KEY `i2_index` (`i2`),
   UNIQUE KEY `i3_index` (`i3`),
   KEY `i4_index` (`i4`),
@@ -157,7 +159,6 @@ f"""CREATE TABLE IF NOT EXISTS `md_SampleModel` (
   KEY `i7_index` (`i7`),
   KEY `i8_index` (`i8`),
   KEY `i9_index` (`i9`),
-  UNIQUE KEY `i10_index` (`i10`),
   FULLTEXT INDEX `ft_index` (`i1`,`i2`) COMMENT 'parser "TokenBigramIgnoreBlankSplitSymbolAlphaDigit"'
 ){_ENGINE}"""
 ) == next(get_sql_for_creating_table(SampleModel))
@@ -247,20 +248,26 @@ def test_get_sql_for_create_part_of_part_table():
     assert None is next(sqls, None)
 
 def test_get_sql_for_create_table_raises():
-    class Part(PersistentModel, PartOfMixin['Container'], TemporalMixin):
+    class Part(PersistentModel, PartOfMixin['Container'], VersionMixin):
         order: StringIndex
 
-    class Container(PersistentModel, TemporalMixin):
+    class Container(PersistentModel, VersionMixin):
         parts: List[Part] = Field(default=[])
+
+    class DatedModelWithoutIds(PersistentModel, DatedMixin):
+        parts: List[Part] = Field(default=[])
+
 
     update_forward_refs(Part, locals())
 
-    with pytest.raises(RuntimeError, match='TemporalMixin is not support for PartOfMixin.'):
+    with pytest.raises(RuntimeError, match='VersionMixin is not support for PartOfMixin.'):
         list(get_sql_for_creating_table(Part))
 
-    with pytest.raises(RuntimeError, match='identifying fields needs for TemporalMixin type.'):
+    with pytest.raises(RuntimeError, match='identifying fields need for VersionMixin type.'):
         list(get_sql_for_creating_table(Container))
 
+    with pytest.raises(RuntimeError, match='identifying fields need for DatedMixin type.'):
+        list(get_sql_for_creating_table(DatedModelWithoutIds))
 
 def test_get_sql_for_creating_external_index_table():
     class Target(PersistentModel):
@@ -313,7 +320,7 @@ def test_get_sql_for_creating_audit_version_table():
             ')'
         ),
         join_line(
-            'CREATE TABLE IF NOT EXISTS `_model_change` (',
+            'CREATE TABLE IF NOT EXISTS `_model_changes` (',
             '  `version` BIGINT,',
             '  `op` VARCHAR(32),',
             '  `table_name` VARCHAR(80),',
@@ -513,30 +520,30 @@ def test_get_sql_for_upserting():
     ) == sql
 
 
-def test_get_sql_for_upserting_temporal():
-    class TemporalModel(PersistentModel, TemporalMixin):
-        id: IdStr
+def test_get_sql_for_upserting_versioning():
+    class VersionModel(PersistentModel, VersionMixin):
+        id: StrId
         order: StringIndex
         
-    sql = _get_sql_for_upserting(cast(Any, TemporalModel))
+    sql = _get_sql_for_upserting(cast(Any, VersionModel))
 
     assert join_line(
         "SELECT MIN(`__squashed_from`)",
         "INTO @SQUASHED_FROM",
-        "FROM md_TemporalModel",
+        "FROM md_VersionModel",
         "WHERE",
         "  `id` = %(id)s",
         "  AND `__valid_start` <= @VERSION",
         "  AND @VERSION < `__valid_end`",
         ";",
-        "UPDATE md_TemporalModel",
+        "UPDATE md_VersionModel",
         "SET `__valid_end` = @VERSION",
         "WHERE",
         "  `id` = %(id)s",
         "  AND `__valid_start` <= @VERSION",
         "  AND @VERSION < `__valid_end`",
         ";",
-        "INSERT INTO md_TemporalModel",
+        "INSERT INTO md_VersionModel",
         "(",
         "  `__json`,",
         "  `__valid_start`,",
@@ -553,8 +560,88 @@ def test_get_sql_for_upserting_temporal():
         "RETURNING",
         "  `__row_id`,",
         "  'UPSERT' as op,",
-        "  'md_TemporalModel' as table_name"
+        "  'md_VersionModel' as table_name"
     ) == sql
+
+
+def test_get_sql_for_upserting_dated():
+    class DatedModel(PersistentModel, DatedMixin):
+        id: StrId
+        
+    sql = _get_sql_for_upserting(cast(Any, DatedModel))
+
+    assert join_line(
+        "INSERT INTO md_DatedModel",
+        "(",
+        "  `__json`,",
+        "  `__valid_start`,",
+        "  `applied_at`,",
+        "  `id`",
+        ")",
+        "VALUES",
+        "(",
+        "  %(__json)s,",
+        "  @VERSION,",
+        "  %(applied_at)s,",
+        "  %(id)s",
+        ")",
+        "ON DUPLICATE KEY UPDATE",
+        "  `__json` = %(__json)s,",
+        "  `__valid_start` = @VERSION",
+        "RETURNING",
+        "  `__row_id`,",
+        "  'UPSERT' as op,",
+        "  'md_DatedModel' as table_name"
+    ) == sql
+
+
+def test_get_sql_for_upserting_versioned_dated():
+    class VersionDateModel(PersistentModel, VersionMixin, DatedMixin):
+        id: StrId
+        
+    sql = _get_sql_for_upserting(cast(Any, VersionDateModel))
+
+    assert join_line(
+        "SELECT MIN(`__squashed_from`)",
+        "INTO @SQUASHED_FROM",
+        "FROM md_VersionDateModel",
+        "WHERE",
+        "  `applied_at` = %(applied_at)s",
+        "  AND `id` = %(id)s",
+        "  AND `__valid_start` <= @VERSION",
+        "  AND @VERSION < `__valid_end`",
+        ";",
+        "UPDATE md_VersionDateModel",
+        "SET `__valid_end` = @VERSION",
+        "WHERE",
+        "  `applied_at` = %(applied_at)s",
+        "  AND `id` = %(id)s",
+        "  AND `__valid_start` <= @VERSION",
+        "  AND @VERSION < `__valid_end`",
+        ";",
+        "INSERT INTO md_VersionDateModel",
+        "(",
+        "  `__json`,",
+        "  `__valid_start`,",
+        "  `__squashed_from`,",
+        "  `applied_at`,",
+        "  `id`",
+        ")",
+        "VALUES",
+        "(",
+        "  %(__json)s,",
+        "  @VERSION,",
+        "  IFNULL(@SQUASHED_FROM, @VERSION),",
+        "  %(applied_at)s,",
+        "  %(id)s",
+        ")",
+        "RETURNING",
+        "  `__row_id`,",
+        "  'UPSERT' as op,",
+        "  'md_VersionDateModel' as table_name"
+
+   ) == sql
+
 
 
 def test_get_stored_fields_of_single_part():
@@ -824,14 +911,14 @@ def test_get_query_and_args_for_reading_for_matching():
         "          FROM",
         "            md_MyModel AS __ORG",
         "        )",
-        "        AS __BASE",
+        "        AS _BASE_CORE",
         "    )",
         "    AS FOR_ORDERING",
         "    WHERE",
         "      `__relevance`",
         "    ORDER BY",
         "      `__relevance` DESC",
-        "    LIMIT 100000000000",
+        "    LIMIT 9223372036854775807",
         "  )",
         "  AS _BASE",
         "  JOIN md_MyModel AS _MAIN ON `_BASE`.`__row_id` = `_MAIN`.`__row_id`"
@@ -839,7 +926,8 @@ def test_get_query_and_args_for_reading_for_matching():
 
     assert {
         "ORDER_NAME": "+FAST",
-        "VERSION": 0
+        "VERSION": 0,
+        "CURRENT_DATE": None,
     } == args
 
 
@@ -876,13 +964,62 @@ def test_get_query_and_args_for_reading_for_order_by():
         "          FROM",
         "            md_MyModel AS __ORG",
         "        )",
-        "        AS __BASE",
+        "        AS _BASE_CORE",
         "    )",
         "    AS FOR_ORDERING",
         "    ORDER BY",
         "      `order` desc,",
         "      `name`",
-        "    LIMIT 100000000000",
+        "    LIMIT 9223372036854775807",
+        "  )",
+        "  AS _BASE"
+    ) == sql
+
+
+def test_get_query_and_args_for_reading_for_dated():
+    class MyModel(PersistentModel, DatedMixin):
+        id: StrId
+        order: FullTextSearchedStr
+        name: FullTextSearchedStr
+
+    sql, _ = get_query_and_args_for_reading(MyModel, ('name',), (('name', '=', 'ab'),), current=date.today())
+
+    print(sql)
+
+    assert join_line(
+        "SELECT",
+        "  `_BASE`.`name`",
+        "FROM",
+        "  (",
+        "    SELECT",
+        "      `__row_id`,",
+        "      `name`",
+        "    FROM",
+        "      (",
+        "        SELECT",
+        "          `__ORG`.`__row_id`,",
+        "          `__ORG`.`name`",
+        "        FROM",
+        "          md_MyModel AS __ORG",
+        "           JOIN ",
+        "            (",
+        "              SELECT",
+        "                `id`,",
+        "                MAX(`applied_at`) as MAX_applied_at",
+        "              FROM",
+        "                md_MyModel AS __ORG",
+        "              WHERE",
+        "                `__ORG`.`name` = %(NAME)s",
+        "                AND `applied_at` <= %(CURRENT_DATE)s",
+        "              GROUP BY",
+        "                `id`",
+        "            )",
+        "            AS __ORG_DATED",
+        "           ON ",
+        "            `__ORG`.`id` = `__ORG_DATED`.`id`",
+        "             AND `__ORG`.`applied_at` = `__ORG_DATED`.`MAX_applied_at`",
+        "      )",
+        "      AS _BASE_CORE",
         "  )",
         "  AS _BASE"
     ) == sql
@@ -897,7 +1034,7 @@ def test_build_query_for_core_table():
     query, fields = _build_query_and_fields_for_core_table('', Model, 
         ['description'], 
         (('codes', '='), ('name', '!=')),
-        tuple()
+        tuple(), False
     )
 
     assert join_line(
@@ -924,7 +1061,7 @@ def test_build_query_for_core_table_for_unwind():
     query, fields = _build_query_and_fields_for_core_table('ns', Model, 
         ['description'],
         (('codes', '='), ('name', '!=')),
-        ('codes',)
+        ('codes',), False
     )
 
     assert join_line(
@@ -953,7 +1090,7 @@ def test_build_query_for_core_table_for_match():
     query, fields = _build_query_and_fields_for_core_table('ns', Model, 
         [],
         (('codes', '='), ('name,description', 'match')),
-        ('codes',)
+        ('codes',), False
     )
 
     assert join_line(
@@ -980,7 +1117,7 @@ def test_build_query_for_core_table_for_multiple_match():
     query, fields = _build_query_and_fields_for_core_table('', Model, 
         [],
         (('name', 'match'), ('description', 'match',)),
-        tuple()
+        tuple(), False
     )
 
     assert join_line(

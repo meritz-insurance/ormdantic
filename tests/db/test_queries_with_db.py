@@ -9,10 +9,10 @@ from ormdantic.database.queries import (
     get_query_and_args_for_deleting, 
 )
 from ormdantic.schema.base import (
-    SchemaBaseModel, SequenceIdStr, StringArrayIndex, FullTextSearchedStringIndex, 
+    SchemaBaseModel, SequenceStrId, StringArrayIndex, FullTextSearchedStringIndex, 
     PartOfMixin, StringReference, 
     StringIndex, 
-    update_forward_refs, IdentifiedModel, IdStr, 
+    update_forward_refs, IdentifiedModel, StrId, 
     StoredFieldDefinitions
 )
 
@@ -24,15 +24,15 @@ class SimpleBaseModel(IdentifiedModel):
     pass
 
 def test_get_query_and_args_for_reading():
-    model = SimpleBaseModel(id=IdStr('@'))
+    model = SimpleBaseModel(id=StrId('@'))
 
     with use_temp_database_cursor_with_model(model, model_created=False) as cursor:
-        model.id = IdStr("0")
+        model.id = StrId("0")
         query_and_args = get_query_and_args_for_upserting(model)
 
         cursor.execute(*query_and_args)
 
-        model.id = IdStr("1")
+        model.id = StrId("1")
         query_and_args = get_query_and_args_for_upserting(model)
 
         cursor.execute(*query_and_args)
@@ -56,7 +56,7 @@ def test_get_query_and_args_for_reading():
 
 
 def test_get_query_and_args_for_deleting():
-    model = SimpleBaseModel(id=IdStr('@'), version='0.1.0')
+    model = SimpleBaseModel(id=StrId('@'), version='0.1.0')
 
     with use_temp_database_cursor_with_model(model) as cursor:
         query_and_args = get_query_and_args_for_deleting(
@@ -76,7 +76,7 @@ def test_get_query_and_args_for_reading_for_parts():
 
     update_forward_refs(ContainerModel, locals())
 
-    model = ContainerModel(id=IdStr('@'), 
+    model = ContainerModel(id=StrId('@'), 
                            version='0.1.0',
                            name=FullTextSearchedStringIndex('sample'),
                            parts=[
@@ -86,7 +86,7 @@ def test_get_query_and_args_for_reading_for_parts():
 
     with use_temp_database_cursor_with_model(model, 
                                              keep_database_when_except=False) as cursor:
-        model.id = IdStr("@")
+        model.id = StrId("@")
         query_and_args = get_query_and_args_for_reading(
             ContainerModel, ('id', 'name'), (('name', 'match', 'sample'),))
 
@@ -117,7 +117,7 @@ def test_get_query_and_args_for_reading_for_multiple_parts():
 
     update_forward_refs(ContainerModel, locals())
 
-    model = ContainerModel(id=IdStr('@'), 
+    model = ContainerModel(id=StrId('@'), 
                            version='0.1.0',
                            name=FullTextSearchedStringIndex('sample'),
                            parts=[
@@ -160,7 +160,7 @@ def test_get_query_and_args_for_reading_for_nested_parts():
     update_forward_refs(ContainerModel, locals())
     update_forward_refs(PartModel, locals())
 
-    model = ContainerModel(id=IdStr('@'), 
+    model = ContainerModel(id=StrId('@'), 
                            version='0.1.0',
                            name=FullTextSearchedStringIndex('sample'),
                            part=PartModel(
@@ -173,7 +173,7 @@ def test_get_query_and_args_for_reading_for_nested_parts():
 
     with use_temp_database_cursor_with_model(model, 
                                              keep_database_when_except=False) as cursor:
-        model.id = IdStr("@")
+        model.id = StrId("@")
         query_and_args = get_query_and_args_for_reading(
             ContainerModel, ('id', 'name'), (('name', '=', 'sample'),))
 
@@ -600,7 +600,7 @@ def test_get_query_and_args_for_counting():
 
     update_forward_refs(ContainerModel, locals())
 
-    model = ContainerModel(id=IdStr('@'), 
+    model = ContainerModel(id=StrId('@'), 
                            version='0.1.0',
                            name=FullTextSearchedStringIndex('sample'),
                            parts=[
@@ -660,11 +660,11 @@ def test_get_query_and_args_for_reading_with_limit():
         
 
 def test_seq_id():
-    class RiskIdStr(SequenceIdStr):
+    class RiskIdStr(SequenceStrId):
         prefix = 'Q'
 
     class Model(PersistentModel):
-        seq_1: SequenceIdStr = Field(default=SequenceIdStr(''))
+        seq_1: SequenceStrId = Field(default=SequenceStrId(''))
         seq_2: RiskIdStr = Field(default=RiskIdStr(''))
         name: StringIndex
 
