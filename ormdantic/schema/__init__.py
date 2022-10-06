@@ -4,7 +4,7 @@ from .base import (
     StoredMixin, StringIndex, StringArrayIndex, UniqueStringIndex,
     PartOfMixin, StringReference, DecimalIndex, IntIndex, IntReference,
     DateIndex, DateTimeIndex, FullTextSearchedStr, FullTextSearchedStringIndex,
-    IdStr, IntegerArrayIndex, update_forward_refs,
+    StrId, IntegerArrayIndex, update_forward_refs,
     StoredFieldDefinitions, SchemaBaseModel, 
 )
 
@@ -36,7 +36,7 @@ __all__ = [
     "DateTimeIndex",
     "FullTextSearchedStr",
     "FullTextSearchedStringIndex",
-    "IdStr",
+    "StrId",
     "IntegerArrayIndex",
     "update_forward_refs",
     "StoredFieldDefinitions",

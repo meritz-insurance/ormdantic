@@ -1,5 +1,5 @@
 from types import UnionType
-from typing import Type, Any, Dict, get_origin, Union, get_args, List, Tuple
+from typing import Type, Any, Dict, get_origin, Union, get_args, Tuple
 import copy 
 
 from pydantic import parse_obj_as

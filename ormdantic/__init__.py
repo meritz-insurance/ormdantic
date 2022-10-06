@@ -3,7 +3,7 @@ from .schema import (
     StoredMixin, StringIndex, StringArrayIndex, UniqueStringIndex,
     PartOfMixin, StringReference, DecimalIndex, IntIndex, IntReference,
     DateIndex, DateTimeIndex, FullTextSearchedStr, FullTextSearchedStringIndex,
-    IdStr, IntegerArrayIndex, update_forward_refs, StoredFieldDefinitions,
+    StrId, IntegerArrayIndex, update_forward_refs, StoredFieldDefinitions,
     TypeNamedModel, SchemaBaseModel, SharedContentModel, ContentReferenceModel,
     PersistentSharedContentModel, get_type_named_model_type, parse_object_for_model
 )
@@ -46,7 +46,7 @@ __all__ = [
     "FullTextSearchedStr",
     "FullTextSearchedStringIndex",
     "IntegerArrayIndex",
-    "IdStr",
+    "StrId",
     "StoredFieldDefinitions",
     "TypeNamedModel", 
     "SharedContentModel",
