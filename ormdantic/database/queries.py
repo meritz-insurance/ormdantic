@@ -44,6 +44,8 @@ _SQUASHED_FROM_FIELD = '__squashed_from'
 
 # json필드 임으로 _를 사용하지 않는다.
 _APPLIED_AT_FIELD = 'applied_at'
+_APPLIED_START_FIELD = '__applied_start'
+_APPLIED_END_FIELD = '__applied_end'
 
 _AUDIT_VERSION_FIELD = 'version'
 
@@ -133,23 +135,22 @@ def join_line(*lines:str | Iterable[str],
     )
 
 
-def _alias_table(old_table:str, table_name:str) -> str:
-    old_table = old_table.strip()
+def _alias_table_or_query(table_or_query:str, table_name:str) -> str:
+    table_or_query = table_or_query.strip()
 
-    #if old_table.startswith('(') and old_table.endswith(')'):
-    #    old_table = old_table[1:-1]
+    normalized_name = _normalize_database_object_name(table_name)
 
-    if ' ' in old_table:
+    if ' ' in table_or_query:
         return join_line(
             f"(",
             tab_each_line(
-                old_table
+                table_or_query
             ),
             f")",
-            f"AS {_normalize_database_object_name(table_name)}"
+            f"AS {normalized_name}"
         )
 
-    return f"{old_table} AS {_normalize_database_object_name(table_name)}"
+    return f"{table_or_query} AS {normalized_name}"
 
 
 
@@ -298,6 +299,7 @@ def get_sql_for_creating_table(type_:Type[PersistentModelT]):
                 raise RuntimeError('identifying fields need for VersionMixin type.')
 
         if _is_dated_type(type_): 
+            # check dated type has id fields except applied_at
             id_fields = [f for f in get_identifying_fields(type_) if f != _APPLIED_AT_FIELD]
 
             if not id_fields:
@@ -1469,17 +1471,12 @@ def _build_query_and_fields_for_core_table(
         for f, o in field_ops if o != 'match'
     )
 
-    if _is_version_type(get_root_container_type(target_type) or target_type):
-        field_op_var = field_op_var + (
-            (field_exprs(_VALID_START_FIELD, '__ORG'), '<=', 'version'),
-            (field_exprs(_VALID_END_FIELD, '__ORG'), '>', 'version')
-        )
-
-    org_table = _alias_table(get_table_name(target_type), '__ORG')
+    origin = _alias_table_or_query(get_table_name(target_type), '__ORG')
 
     if _is_dated_type(target_type) and has_current_date:
         field_op_var = field_op_var + (
-            (field_exprs(_APPLIED_AT_FIELD), "<=", 'CURRENT_DATE'),
+            (field_exprs(_APPLIED_START_FIELD, '__ORG'), '<=', 'CURRENT_DATE'),
+            (field_exprs(_APPLIED_END_FIELD, '__ORG'), '>', 'CURRENT_DATE')
         )
 
         id_fields = [
@@ -1487,46 +1484,41 @@ def _build_query_and_fields_for_core_table(
             if f != _APPLIED_AT_FIELD
         ]
 
-        # join with max(applied_at) where applied_at <= current_date
-        org_table = join_line(
-            org_table,
-            ' JOIN ',
-            tab_each_line(
-                _alias_table(
-                    join_line(
-                        "SELECT",
-                        tab_each_line(
-                            field_exprs(id_fields),
-                            f'MAX({field_exprs(_APPLIED_AT_FIELD)}) as MAX_{_APPLIED_AT_FIELD}',
-                            use_comma=True
-                        ),
-                        "FROM",
-                        tab_each_line(
-                            _alias_table(get_table_name(target_type), '__ORG')
-                        ),
-                        _build_where(field_op_var, ns),
-                        "GROUP BY",
-                        tab_each_line(
-                            field_exprs(id_fields),
-                            use_comma=True
-                        )
-                    ),
-                    '__ORG_DATED'
-                )
-            ),
-            ' ON ',
-            tab_each_line(
-                '\n AND '.join(
-                    itertools.chain(
-                        [f'{field_exprs(field, "__ORG")} = {field_exprs(field, "__ORG_DATED")}' 
-                        for field in id_fields],
-                        [f'{field_exprs(_APPLIED_AT_FIELD, "__ORG")} = {field_exprs(f"MAX_{_APPLIED_AT_FIELD}", "__ORG_DATED")}']
-                    )
-                )
+        if _is_version_type(get_root_container_type(target_type) or target_type):
+            org_field_op_var: Tuple[Tuple[str, str, str],...] = (
+                (field_exprs(_VALID_START_FIELD), '<=', 'version'),
+                (field_exprs(_VALID_END_FIELD), '>', 'version'),
             )
+        else:
+            org_field_op_var: Tuple[Tuple[str, str, str],...]= tuple()
+ 
+        origin = _alias_table_or_query(join_line(
+            "SELECT",
+            tab_each_line(
+                field_exprs(
+                    ['*'],
+                ),
+                [
+                    f"{field_exprs(_APPLIED_AT_FIELD)} as {field_exprs(_APPLIED_START_FIELD)}"
+                ],
+                [
+                    f"IFNULL(LEAD({field_exprs(_APPLIED_AT_FIELD)}) over "
+                    f"(PARTITION BY {join_line(field_exprs(id_fields), new_line=False)} "
+                    f"ORDER BY {field_exprs(_APPLIED_AT_FIELD)}), '9999-12-31')"
+                    f" as {field_exprs(_APPLIED_END_FIELD)}"
+                ],
+                use_comma=True
+            ),
+            "FROM",
+            get_table_name(target_type),
+            _build_where(org_field_op_var, ns)
+        ), '__ORG')
+    elif _is_version_type(get_root_container_type(target_type) or target_type):
+        field_op_var = field_op_var + (
+            (field_exprs(_VALID_START_FIELD, '__ORG'), '<=', 'version'),
+            (field_exprs(_VALID_END_FIELD, '__ORG'), '>', 'version')
         )
 
-        field_op_var = tuple()
 
     field_list = [] 
 
@@ -1541,9 +1533,9 @@ def _build_query_and_fields_for_core_table(
 
     source = '\nLEFT JOIN '.join(
         itertools.chain(
-            [ org_table ],
+            [ origin ],
             [
-                _alias_table(get_table_name(target_type, f), _get_alias_for_unwind(f, unwind)) 
+                _alias_table_or_query(get_table_name(target_type, f), _get_alias_for_unwind(f, unwind)) 
                 + f' ON {field_exprs(_ROW_ID_FIELD, "__ORG")} = '
                 + f'{field_exprs(_ORG_ROW_ID_FIELD, _get_alias_for_unwind(f, unwind))}'
                 for f in unwind
@@ -1597,7 +1589,7 @@ def _build_query_for_base_table(ns_types: Tuple[Tuple[str, PersistentModelT],...
                 use_comma=True
             ),
             'FROM',
-            _alias_table(
+            _alias_table_or_query(
                 join_line(
                     'SELECT',
                     tab_each_line(
@@ -1681,10 +1673,10 @@ def _build_join_for_ns(ns_types: Tuple[Tuple[str, PersistentModelT],...],
 
             left_key = _add_namespace(keys[0], base_ns)
             right_key = _add_namespace(keys[1], current_ns)
-            joined_queries.append(f'{join_scope}JOIN {_alias_table(query, f"__{current_ns.upper()}")}'
+            joined_queries.append(f'{join_scope}JOIN {_alias_table_or_query(query, f"__{current_ns.upper()}")}'
                 f' ON {field_exprs(left_key)} = {field_exprs(right_key)}')
         else:
-            joined_queries.append(_alias_table(query, '_BASE_CORE'))
+            joined_queries.append(_alias_table_or_query(query, '_BASE_CORE'))
 
         prev_ns = current_ns
 
@@ -1696,7 +1688,7 @@ def _count_row_query(query:str) -> str:
         'SELECT',
         '  COUNT(*) AS COUNT',
         'FROM',
-        _alias_table(query, 'FOR_COUNT')
+        _alias_table_or_query(query, 'FOR_COUNT')
     )
     
 
@@ -1811,7 +1803,7 @@ def _get_populated_table_query_from_base(query_for_base:str,
                                          ns_types: Tuple[Tuple[str, Type[PersistentModelT]]]):
 
     joined_tables = [
-        _alias_table(query_for_base, _BASE_TABLE_NAME)
+        _alias_table_or_query(query_for_base, _BASE_TABLE_NAME)
     ]
 
     scope_fields = {}
@@ -1829,7 +1821,7 @@ def _get_populated_table_query_from_base(query_for_base:str,
         if ns_fields:
             scope_fields[ns] = ns_fields
             joined_tables.append(
-                f'JOIN {_alias_table(get_table_name(ns_type), ns_table_name)} ON '
+                f'JOIN {_alias_table_or_query(get_table_name(ns_type), ns_table_name)} ON '
                 f'{field_exprs(_add_namespace(_ROW_ID_FIELD, ns), _BASE_TABLE_NAME)} = '
                 f'{field_exprs(_ROW_ID_FIELD, ns_table_name)}')
 

@@ -1,4 +1,5 @@
 {
+    "git.mergeEditor": true,
     "files.exclude": {
         "**/.git": true,
         "**/.pytest_cache": true,
