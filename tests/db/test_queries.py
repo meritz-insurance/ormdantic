@@ -1,4 +1,3 @@
-from sqlite3 import Date
 from typing import Type, List, ClassVar, cast, Any
 import pytest
 from decimal import Decimal

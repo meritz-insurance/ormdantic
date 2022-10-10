@@ -1519,7 +1519,6 @@ def _build_query_and_fields_for_core_table(
             (field_exprs(_VALID_END_FIELD, '__ORG'), '>', 'version')
         )
 
-
     field_list = [] 
 
     for prefix, sub_fields in prefix_fields.items():
