@@ -10,8 +10,8 @@ from ormdantic.schema.base import (
 from ormdantic.schema.paths import (
     extract,
     extract_as,
-    get_path_and_type,
-    get_paths_for_type
+    get_path_and_types_for,
+    get_paths_for
 )
 
 class StartModel(SchemaBaseModel):
@@ -91,12 +91,12 @@ def test_get_path_and_type():
         ('$.parts.sub_parts.name', StringIndex), 
         ('$.part.name', StringIndex), 
         ('$.part.sub_parts.name', StringIndex), 
-    ] == list(get_path_and_type(StartModel, StringIndex))
+    ] == list(get_path_and_types_for(StartModel, StringIndex))
 
 
 def test_get_path_and_type_throw_exception():
     with pytest.raises(RuntimeError, match='invalid type .*'):
-        list(get_path_and_type(cast(Type, dict), StringIndex))
+        list(get_path_and_types_for(cast(Type, dict), StringIndex))
 
 
 def test_get_paths_for_type():
@@ -106,4 +106,4 @@ def test_get_paths_for_type():
         '$.parts.sub_parts.name',
         '$.part.name',
         '$.part.sub_parts.name',
-    ) == get_paths_for_type(StartModel, StringIndex)
+    ) == get_paths_for(StartModel, StringIndex)

@@ -1,7 +1,10 @@
+from pydoc import describe
 from telnetlib import SE
 from typing import List, ClassVar
 
 from pydantic import Field
+
+import pytest
 
 from ormdantic.schema import PersistentModel
 from ormdantic.database.queries import (
@@ -11,7 +14,7 @@ from ormdantic.database.queries import (
 from ormdantic.schema.base import (
     SchemaBaseModel, SequenceStrId, StringArrayIndex, FullTextSearchedStringIndex, 
     PartOfMixin, StringReference, 
-    StringIndex, 
+    StringIndex, UseBaseClassTableMixin, 
     update_forward_refs, IdentifiedModel, StrId, 
     StoredFieldDefinitions
 )
@@ -689,3 +692,31 @@ def test_seq_id():
             {'name': 'third', 'seq_1': 'C3', 'seq_2': 'Q2'},
         ] == cursor.fetchall()
         
+
+def test_use_base_class_table_mixin():
+    class BaseModel(PersistentModel):
+        name: StringIndex
+
+    class DerivedModel(BaseModel, UseBaseClassTableMixin):
+        description: StringIndex
+
+    models = [
+        DerivedModel(description=StringIndex('hello'), name=StringIndex('first')),
+        BaseModel(name=StringIndex('second'))
+    ]
+
+    with use_temp_database_cursor_with_model(*models,
+                                             keep_database_when_except=False) as cursor:
+        # simple one
+        query_and_args = get_query_and_args_for_reading(
+            BaseModel, ('name','__json'), tuple())
+
+        cursor.execute(*query_and_args)
+
+        assert [
+            {'name': 'first', '__json':'{"name":"first","description":"hello"}'},
+            {'name': 'second', '__json':'{"name":"second"}'}
+        ] == cursor.fetchall()
+
+        with pytest.raises(RuntimeError, match='cannot make query for UseBaseClassTableMixin'):
+            get_query_and_args_for_reading(DerivedModel, ('*',), tuple())

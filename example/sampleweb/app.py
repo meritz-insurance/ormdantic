@@ -37,9 +37,9 @@ async def query_models(model_name:str, fields:str, where:Tuple[Tuple[str, str, A
 
 
 @app.get('/models/{model_name}/{id}')
-def load_model(model_name:str, id:str, concat_shared_model:bool = True):
+def load_model(model_name:str, id:str, populate_shared_model:bool = True):
     obj = find_object(pool, get_type_named_model_type(model_name), (('id', '=', id),), 
-                      concat_shared_models=concat_shared_model)
+                      populated_shared_models=populate_shared_model)
 
     if obj is None:
         raise RuntimeError('no such object')

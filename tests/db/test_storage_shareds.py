@@ -77,8 +77,11 @@ class ContainerModel(PersistentSharedContentModel):
 
 update_forward_refs(PartModel, locals())
 
+class ContainerContentReferenceModel(ContentReferenceModel[ContainerModel]):
+    pass
+
 class ReferenceWithPartsModel(IdentifiedModel):
-    ref_model : ContentReferenceModel[ContainerModel]
+    ref_model : ContainerContentReferenceModel
 
 models = [
     SimpleContentModel(
@@ -159,7 +162,7 @@ def test_upsert_objects_with_shared(pool):
     assert isinstance(simple_model.contents[1].content, str)
 
     simple_model = load_object(pool, SimpleContentModel, (('id', '=', 'first'),), 
-                              concat_shared_models=True)
+                              populate_shared_models=True)
 
     assert not isinstance(simple_model.contents[0].content, str)
     assert not isinstance(simple_model.contents[1].content, str)
@@ -171,7 +174,7 @@ def test_upsert_objects_with_nested_shared(pool):
     assert isinstance(nested_model.nested.content, str)
 
     nested_model = load_object(pool, NestedContentModel, (('id', '=', 'nested'),), 
-                               concat_shared_models=True)
+                               populate_shared_models=True)
 
     assert not isinstance(nested_model.nested.content, str)
     assert not isinstance(nested_model.nested.content.description_model.content, str)
@@ -203,7 +206,7 @@ def test_upsert_objects_with_shared_and_externals(pool):
     assert isinstance(description_model, CodedDescriptionModel)
 
     description = load_object(pool, DescriptionWithExternalModel, (('id', '=', 'external'),),
-        concat_shared_models=True)
+        populate_shared_models=True)
 
     assert description.ref_model.get_content().description == description_model.description
     
@@ -221,7 +224,7 @@ def test_upsert_objects_with_shared_and_parts(pool):
 
     ref_with_parts = load_object(
         pool, ReferenceWithPartsModel, (('id', '=', 'part'),),
-        concat_shared_models= True
+        populate_shared_models= True
     )
 
     assert ref_with_parts.ref_model.content == container
@@ -233,7 +236,7 @@ def test_delete_objects_with_shared(pool):
 
 
 def test_find_objects_with_shared(pool):
-    objects = find_objects(pool, SimpleContentModel, tuple(), concat_shared_models=True)
+    objects = find_objects(pool, SimpleContentModel, tuple(), populate_shared_models=True)
 
     first = next(objects)
     second = next(objects)

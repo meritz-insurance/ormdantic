@@ -5,9 +5,9 @@ import pytest
 from pydantic import ConstrainedStr, parse_raw_as
 
 from ormdantic.schema.base import (
-    IdentifiedModel, IdentifyingMixin, PersistentModel, PartOfMixin, 
+    IdentifiedModel, IdentifyingMixin, PersistentModel, PartOfMixin, UseBaseClassTableMixin, 
     assign_identifying_fields_if_empty, get_container_type, 
-    get_field_name_and_type, get_identifer_of, get_field_names_for, StrId, DateId,
+    get_field_name_and_type, get_identifer_of, get_field_names_for, StrId, DateId, get_type_for_table,
     update_forward_refs, is_field_list_or_tuple_of, get_field_type,
     get_root_container_type
 )
@@ -233,3 +233,20 @@ def test_assign_identified_if_empty_for_parts():
     replaced = assign_identifying_fields_if_empty(model)
 
     assert replaced is model
+
+
+def test_get_type_for_table():
+    class TableModel(PersistentModel):
+        pass
+
+    class DerivedModel(TableModel, UseBaseClassTableMixin):
+        pass
+
+    class WrongModel(UseBaseClassTableMixin):
+        pass
+
+    assert TableModel == get_type_for_table(TableModel)
+    assert TableModel == get_type_for_table(DerivedModel)
+
+    with pytest.raises(RuntimeError):
+        get_type_for_table(WrongModel)

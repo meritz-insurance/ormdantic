@@ -21,6 +21,15 @@ def get_base_generic_alias_of(type_:Type, *generic_types:Type) -> Type | None:
 
     return None
 
+def get_args_of_base_generic_alias(type_:Type, *generic_types:Type) -> Tuple[Any,...]:
+    generic = get_base_generic_alias_of(type_, *generic_types)
+
+    if generic:
+        return get_args(generic)
+
+    raise RuntimeError('no generic. check type.')
+
+
 _T = TypeVar('_T')
 
 

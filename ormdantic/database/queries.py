@@ -1,7 +1,8 @@
 from dataclasses import asdict
+from inspect import getmro
 from typing import (
     Type, Iterator, overload, Iterable, List, Tuple, cast, Dict, 
-    Any, DefaultDict, Optional, get_args, Set
+    Any, DefaultDict, Optional, Set
 )
 from datetime import datetime, date
 from decimal import Decimal
@@ -13,18 +14,18 @@ from pydantic import ConstrainedStr, ConstrainedDecimal
 from ormdantic.database.verinfo import VersionInfo
 
 from ormdantic.util import is_derived_from, convert_tuple
-from ormdantic.util.hints import get_base_generic_alias_of
+from ormdantic.util.hints import get_args_of_base_generic_alias
 
 from ..util import get_logger
 from ..schema.base import (
     ArrayIndexMixin, DatedMixin, PersistentModelT, ReferenceMixin, FullTextSearchedMixin, 
     IdentifyingMixin, IndexMixin, SequenceStrId, 
-    StoredFieldDefinitions, PersistentModelT, StoredMixin, PartOfMixin, 
-    VersionMixin, VersionMixin, 
+    StoredFieldDefinitions, PersistentModelT, StoredMixin, PartOfMixin, UseBaseClassTableMixin, 
+    VersionMixin, 
     UniqueIndexMixin, get_container_type, get_root_container_type,
     get_field_names_for, get_part_types, is_field_list_or_tuple_of,
     PersistentModel, is_list_or_tuple_of, get_stored_fields,
-    get_stored_fields_for
+    get_stored_fields_for, get_type_for_table
 )
 
 _MAX_VAR_CHAR_LENGTH = 200
@@ -42,7 +43,7 @@ _VALID_START_FIELD = '__valid_start'
 _VALID_END_FIELD = '__valid_end'
 _SQUASHED_FROM_FIELD = '__squashed_from'
 
-# json필드 임으로 _를 사용하지 않는다.
+# 'applied_at' is field which come from VersionMixin. so we don't use __ as prefix
 _APPLIED_AT_FIELD = 'applied_at'
 _APPLIED_START_FIELD = '__applied_start'
 _APPLIED_END_FIELD = '__applied_end'
@@ -85,15 +86,19 @@ FieldOp = Tuple[Tuple[str, str]]
 _logger = get_logger(__name__)
 
 def get_table_name(type_:Type[PersistentModelT], postfix:str = ''):
-    return f'{_MODEL_TABLE_PREFIX}_{type_.__name__}{"_" + postfix if postfix else ""}' 
+    return f'{_MODEL_TABLE_PREFIX}_{_get_name_from_type(type_)}{"_" + postfix if postfix else ""}' 
 
 
 def get_seq_name(type_:Type[PersistentModelT], postfix:str):
-    return f'{_SEQ_PREFIX}_{type_.__name__}{"_" + postfix if postfix else ""}' 
+    return f'{_SEQ_PREFIX}_{_get_name_from_type(type_)}{"_" + postfix if postfix else ""}' 
 
 
 def get_seq_func_name(type_:Type[PersistentModelT], postfix:str):
-    return f'{_FUNC_PREFIX}_{type_.__name__}{"_" + postfix if postfix else ""}' 
+    return f'{_FUNC_PREFIX}_{_get_name_from_type(type_)}{"_" + postfix if postfix else ""}' 
+
+
+def _get_name_from_type(type_:Type[PersistentModelT]) -> str:
+    return get_type_for_table(type_).__name__
 
 
 @overload
@@ -236,6 +241,10 @@ def _get_sql_for_allocating_version():
 
 def get_sql_for_creating_table(type_:Type[PersistentModelT]):
     stored = get_stored_fields(type_)
+
+    if issubclass(type_, UseBaseClassTableMixin):
+        # skip create table for UseBaseClassTableMixin.
+        return
 
     if issubclass(type_, PartOfMixin):
         # The container field will be saved in container's table.
@@ -428,9 +437,7 @@ def _get_table_version_fields(type_:Type) -> Iterator[str]:
 
 def _get_external_index_table_fields(field_name:str, field_type:Type) -> Iterator[str]:
     # we don't need primary key, because there is no field which is for full text searching.
-    type = get_base_generic_alias_of(field_type, ArrayIndexMixin)
-
-    param_type = get_args(type)[0]
+    param_type = get_args_of_base_generic_alias(field_type, ArrayIndexMixin)[0]
 
     yield f'{field_exprs(_ORG_ROW_ID_FIELD)} BIGINT'
     yield f'{field_exprs(_ROOT_ROW_ID_FIELD)} BIGINT'
@@ -1162,6 +1169,11 @@ def get_query_and_args_for_reading(type_:Type[PersistentModelT], fields:Tuple[st
 
         *join : will indicate the some model joined.
     '''
+
+    if is_derived_from(type_, UseBaseClassTableMixin):
+        _logger.fatal(f'cannot make query for UseBaseClassTableMixin {type_=}. use base class which is not UseBaseClassTableMixin')
+        raise RuntimeError('cannot make query for UseBaseClassTableMixin.')
+
     fields = convert_tuple(fields)
 
     unwind = convert_tuple(unwind)
@@ -1446,9 +1458,12 @@ def _build_query_and_fields_for_core_table(
         field_ops: Tuple[Tuple[str, str], ...],
         unwind: Tuple[str, ...],
         has_current_date: bool) -> Tuple[str, Tuple[str, ...]]:
+
     # in core table, following item will be handled.
     # 1. unwind
-    # 2. where
+    # 2. where : 
+    #  2-1) VersionMixin, first we should apply version for getting correct applied_end
+    #  2-2) DatedMixin 
     # 3. match op
     # 4. fields which is looked up from base table by field_ops.
 
@@ -1473,17 +1488,20 @@ def _build_query_and_fields_for_core_table(
 
     origin = _alias_table_or_query(get_table_name(target_type), '__ORG')
 
-    if _is_dated_type(target_type) and has_current_date:
-        field_op_var = field_op_var + (
-            (field_exprs(_APPLIED_START_FIELD, '__ORG'), '<=', 'CURRENT_DATE'),
-            (field_exprs(_APPLIED_END_FIELD, '__ORG'), '>', 'CURRENT_DATE')
-        )
+    # if version
+    if _is_dated_type(target_type):
+        if has_current_date:
+            field_op_var = field_op_var + (
+                (field_exprs(_APPLIED_START_FIELD, '__ORG'), '<=', 'CURRENT_DATE'),
+                (field_exprs(_APPLIED_END_FIELD, '__ORG'), '>', 'CURRENT_DATE')
+            )
 
         id_fields = [
             f for f in get_identifying_fields(target_type) 
             if f != _APPLIED_AT_FIELD
         ]
 
+        # we should apply the version at first. then generate applied_end.
         if _is_version_type(get_root_container_type(target_type) or target_type):
             org_field_op_var: Tuple[Tuple[str, str, str],...] = (
                 (field_exprs(_VALID_START_FIELD), '<=', 'version'),
@@ -1495,17 +1513,15 @@ def _build_query_and_fields_for_core_table(
         origin = _alias_table_or_query(join_line(
             "SELECT",
             tab_each_line(
-                field_exprs(
-                    ['*'],
-                ),
                 [
-                    f"{field_exprs(_APPLIED_AT_FIELD)} as {field_exprs(_APPLIED_START_FIELD)}"
-                ],
-                [
-                    f"IFNULL(LEAD({field_exprs(_APPLIED_AT_FIELD)}) over "
-                    f"(PARTITION BY {join_line(field_exprs(id_fields), new_line=False)} "
-                    f"ORDER BY {field_exprs(_APPLIED_AT_FIELD)}), '9999-12-31')"
-                    f" as {field_exprs(_APPLIED_END_FIELD)}"
+                    '*',
+                    f"{field_exprs(_APPLIED_AT_FIELD)} as {field_exprs(_APPLIED_START_FIELD)}",
+                    (
+                        f"IFNULL(LEAD({field_exprs(_APPLIED_AT_FIELD)}) over "
+                        f"(PARTITION BY {join_line(field_exprs(id_fields), new_line=False)} "
+                        f"ORDER BY {field_exprs(_APPLIED_AT_FIELD)}), '9999-12-31')"
+                        f" as {field_exprs(_APPLIED_END_FIELD)}"
+                    )
                 ],
                 use_comma=True
             ),
@@ -1530,6 +1546,7 @@ def _build_query_and_fields_for_core_table(
         )
         prefix_fields['__ORG'][_RELEVANCE_FIELD] = None
 
+    # handle unwind record.
     source = '\nLEFT JOIN '.join(
         itertools.chain(
             [ origin ],
@@ -1734,9 +1751,7 @@ def _build_join_from_refs(current_type:Type, current_ns:str,
 
     for field_name, (_, field_type) in refs.items():
         if any(field_name in ns for ns in namespaces):
-            generic_type = get_base_generic_alias_of(field_type, ReferenceMixin)
-
-            ref_type = get_args(generic_type)[0]
+            ref_type = get_args_of_base_generic_alias(field_type, ReferenceMixin)[0]
 
             yield current_ns + field_name, ref_type
 
@@ -1773,9 +1788,9 @@ def _find_join_key(base_type:Type, target_type:Type, reversed:bool = False) -> T
     refs = get_stored_fields_for(base_type, ReferenceMixin)
 
     for field_name, (_, field_type) in refs.items():
-        generic_type = get_base_generic_alias_of(field_type, ReferenceMixin)
+        args = get_args_of_base_generic_alias(field_type, ReferenceMixin)
 
-        if get_args(generic_type)[0] == target_type:
+        if args[0] == target_type:
             target_field = field_type._target_field
 
             if reversed:
@@ -1847,6 +1862,7 @@ def _normalize_database_object_name(value:str) -> str:
 
 def _is_version_type(type_:Type) -> bool:
     return is_derived_from(type_, VersionMixin)
+
 
 def _is_dated_type(type_:Type) -> bool:
     return is_derived_from(type_, DatedMixin)

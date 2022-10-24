@@ -8,7 +8,7 @@ from ormdantic.util import (
     is_list_or_tuple_of
 )
 from ormdantic.schema.base import PartOfMixin, PersistentModel, StringIndex
-from ormdantic.util.hints import get_args_of_list_or_tuple, get_union_type_arguments, is_derived_or_collection_of_derived, resolve_forward_ref_in_args
+from ormdantic.util.hints import get_args_of_base_generic_alias, get_args_of_list_or_tuple, get_union_type_arguments, is_derived_or_collection_of_derived, resolve_forward_ref_in_args
 
 T = TypeVar('T')
 
@@ -35,6 +35,18 @@ def test_get_base_generic_type_of():
     base_generic = get_base_generic_alias_of(MultipleInheritanceTest, list)
 
     assert List[str] == base_generic
+
+def test_get_args_of_base_generic_alias():
+    class GenericTest(PartOfMixin[PersistentModel]):
+        pass
+
+    class MultipleInheritanceTest(List[str], GenericTest):
+        pass
+
+    assert (str,) == get_args_of_base_generic_alias(MultipleInheritanceTest, list)
+
+    with pytest.raises(RuntimeError):
+        get_args_of_base_generic_alias(dict, List)
 
 
 def test_get_mro_with_generic():

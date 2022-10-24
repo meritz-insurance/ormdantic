@@ -7,9 +7,10 @@ from ormdantic.schema.base import (
 )
 from ormdantic.schema.shareds import (
     SharedContentMixin, ContentReferenceModel, 
-    collect_shared_model_type_and_ids, concat_shared_models, 
+    collect_shared_model_field_type_and_ids, populate_shared_models, 
     extract_shared_models, extract_shared_models_for, get_shared_content_types
 )
+from ormdantic.schema.modelcache import ModelCache
 from ormdantic.util.tools import digest
 
 class MyContent(SharedContentMixin):
@@ -88,6 +89,7 @@ def test_get_content():
     model = MySharedModel(content=content, code='1')
 
     assert content == model.get_content()
+    assert MyContent == model.get_content_type()
 
     extract_shared_models(model, True)
 
@@ -132,8 +134,8 @@ def test_extract_shared_models():
     ])
 
     assert {
-        content1.id:{MyContent:content1},
-        content2.id:{MyContent:content2}
+        content1.id:{MySharedModel:content1},
+        content2.id:{MySharedModel:content2}
     } == extract_shared_models(container)
 
     assert container.items[0].content == content1
@@ -219,7 +221,7 @@ def test_extract_shared_models_for_with_multiple_item_with_same_id():
     extract_shared_models_for(container, MyDerivedContent)
      
 
-def test_concat_shared_models():
+def test_populate_shared_models():
     content1 = MyContent(name='name1')
     content2 = MyContent(name='name2')
 
@@ -243,21 +245,24 @@ def test_concat_shared_models():
     assert {
     } == extract_shared_models(container)
 
+    with pytest.raises(RuntimeError, match='cannot populate shared model.'):
+        populate_shared_models(container, ModelCache())
+
     contents : Dict[str, Any] = {
-        content1.id:{MyContent:content1},
-        content2.id:{MyContent:content2}
+        content1.id:{MySharedModel:content1},
+        content2.id:{MySharedModel:content2}
     } 
 
-    concat_shared_models(container, contents)
+    populate_shared_models(container, ModelCache(entries=contents))
 
     assert contents == extract_shared_models(container)
 
     extract_shared_models(container, True)
 
-    concat_shared_models(container, {
-        content1.id:content1,
-        content2.id:content2
-    })
+    populate_shared_models(container, ModelCache(entries={
+        content1.id:{MySharedModel:content1},
+        content2.id:{MySharedModel:content2}
+    }))
 
     assert contents == extract_shared_models(container)
 
@@ -299,9 +304,21 @@ def test_collect_shared_model_ids():
     assert {
         MyContent: {content1.id, content2.id},
         MyAnotherContent: {other_content1.id}
-    } == collect_shared_model_type_and_ids(container)
+    } == collect_shared_model_field_type_and_ids(container)
 
 
 def test_get_shared_content_types():
     assert (MyContent, MyAnotherContent) == get_shared_content_types(ComplexContainer)
- 
+
+def test_set_loader():
+    content1 = MyContent(name='name1')
+
+    shared_model = MySharedModel.parse_obj({
+                'version': '0',
+                'code': 'code1',
+                'content': content1.id
+    })
+
+    shared_model.set_loader(lambda x: content1)
+
+    assert content1 == shared_model.get_content()

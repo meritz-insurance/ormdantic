@@ -20,17 +20,17 @@ T = TypeVar('T')
 _logger = get_logger(__name__)
 
 
-def get_paths_for_type(type_:Type, types:Type | Tuple[Type, ...]) -> Tuple[str, ...]:
+def get_paths_for(type_:Type, types:Type | Tuple[Type, ...]) -> Tuple[str, ...]:
     types = convert_tuple(types)
 
-    return tuple(path for path, t in get_path_and_type(type_, 
+    return tuple(path for path, _ in get_path_and_types_for(type_, 
         lambda t: any(
             is_derived_or_collection_of_derived(t, target_type) for target_type in types
         )
     ))
 
 
-def get_path_and_type(type_:Type[ModelT], 
+def get_path_and_types_for(type_:Type[ModelT], 
                       predicate: Type | Callable[[Type], bool] | None = None,
                       ) -> Iterator[Tuple[str, Type]]:
     

@@ -150,6 +150,11 @@ class PartOfMixin(Generic[ModelT]):
     pass
 
 
+class UseBaseClassTableMixin():
+    '''use table of base class.'''
+    pass
+
+
 class StringIndex(ConstrainedStr, IndexMixin):
     ''' string index '''
     pass
@@ -375,6 +380,19 @@ def assign_identifying_fields_if_empty(model:ModelT, inplace:bool=False,
             setattr(to_be_updated, field_name, updated_value)
 
     return to_be_updated or model
+
+
+def get_type_for_table(type_:Type[PersistentModelT]) -> Type:
+    if is_derived_from(type_, UseBaseClassTableMixin):
+        for base in inspect.getmro(type_):
+            if (is_derived_from(base, PersistentModel) 
+                    and not is_derived_from(base, UseBaseClassTableMixin)):
+                return base
+
+        raise RuntimeError('cannot get base class for database table.')
+
+    return type_
+
 
 
 def _replace_scalar_value_if_empty_value(field_name:str, obj:Any, inplace:bool, 
