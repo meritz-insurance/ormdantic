@@ -1,10 +1,10 @@
 from types import UnionType
-from typing import Type, Any, Dict, get_origin, Union, get_args, Tuple
+from typing import Type, Any, Dict, get_origin, Union, get_args
 import copy 
 
 from pydantic import parse_obj_as
 from pydantic.fields import Field 
-from .base import SchemaBaseModel, register_class_postprocessor
+from .base import PersistentModel, register_class_postprocessor
 from ormdantic.util.hints import get_args_of_list_or_tuple, is_derived_from
 from ..util import get_base_generic_alias_of, get_logger
 
@@ -15,7 +15,7 @@ _logger = get_logger(__name__)
 _all_type_named_models : Dict[str, Type] = {}
 
 
-class TypeNamedModel(SchemaBaseModel):
+class TypeNamedModel(PersistentModel):
     # this field will be update by Metaclass. so, 
     type_name: str = Field(default='TypeNamedModel')
 
@@ -52,7 +52,7 @@ def _parse_obj(obj:Any, target_type:Type) -> Any:
 
         for arg in generic_args:
             try:
-                if is_derived_from(arg, SchemaBaseModel) and isinstance(obj, dict):
+                if is_derived_from(arg, PersistentModel) and isinstance(obj, dict):
                     return _parse_obj(obj, arg)
                 if is_derived_from(arg, (list, tuple)) and isinstance(obj, (list, tuple)):
                     return _parse_obj(obj, arg)
@@ -86,14 +86,14 @@ def _parse_obj(obj:Any, target_type:Type) -> Any:
         type_ = get_origin(target_type) or target_type
 
 
-        if is_derived_from(target_type, SchemaBaseModel):
+        if is_derived_from(target_type, PersistentModel):
             obj = dict(obj)
 
             if _TYPE_NAME_FIELD in obj:
                 type_ = get_type_named_model_type(obj[_TYPE_NAME_FIELD])
 
             for field_name, model_field in type_.__fields__.items():
-                if is_derived_from(model_field.type_, (SchemaBaseModel, Union, UnionType)):
+                if is_derived_from(model_field.type_, (PersistentModel, Union, UnionType)):
                     type = model_field.outer_type_
 
                     obj[field_name] = _parse_obj(obj[field_name], type)

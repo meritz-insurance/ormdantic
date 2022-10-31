@@ -1,4 +1,3 @@
-from pydoc import describe
 from typing import  List, Tuple
 from weakref import ref
 from pyparsing import oneOf
@@ -6,19 +5,16 @@ import pytest
 from pydantic import Field
 
 from ormdantic.database.storage import (
-    delete_objects, upsert_objects, load_object, 
-    find_objects, build_where, find_object
+    purge_objects, upsert_objects, load_object, 
+    find_objects, find_object
 )
 
 from ormdantic.schema import (
     PersistentModel, FullTextSearchedStringIndex, PartOfMixin, StringArrayIndex, 
     update_forward_refs, IdentifiedModel, StrId, StoredFieldDefinitions,
 )
-from ormdantic.schema.base import (
-    StringIndex,
-    get_identifer_of
-)
-from ormdantic.schema.shareds import ContentReferenceModel, PersistentSharedContentModel, SharedContentMixin
+from ormdantic.schema.base import ( StringIndex,)
+from ormdantic.schema.shareds import ContentReferenceModel, PersistentSharedContentModel
 
 from .tools import (
     use_temp_database_pool_with_model, 
@@ -133,7 +129,7 @@ models = [
     ),
     ReferenceWithPartsModel(
         id=StrId('part'),
-        ref_model= ContentReferenceModel(
+        ref_model= ContainerContentReferenceModel(
             content= ContainerModel(
                 id=StrId('container'),
                 parts=[
@@ -156,25 +152,24 @@ def pool():
 
 
 def test_upsert_objects_with_shared(pool):
-    simple_model = load_object(pool, SimpleContentModel, (('id', '=', 'first'),))
+    simple_model = load_object(pool, SimpleContentModel, (('id', '=', 'first'),), 0)
 
     assert isinstance(simple_model.contents[0].content, str)
     assert isinstance(simple_model.contents[1].content, str)
 
-    simple_model = load_object(pool, SimpleContentModel, (('id', '=', 'first'),), 
-                              populate_shared_models=True)
+    simple_model = load_object(pool, SimpleContentModel, (('id', '=', 'first'),), 0)
 
     assert not isinstance(simple_model.contents[0].content, str)
     assert not isinstance(simple_model.contents[1].content, str)
 
 
 def test_upsert_objects_with_nested_shared(pool):
-    nested_model = load_object(pool, NestedContentModel, (('id', '=', 'nested'),))
+    nested_model = load_object(pool, NestedContentModel, (('id', '=', 'nested'),), 0)
 
     assert isinstance(nested_model.nested.content, str)
 
-    nested_model = load_object(pool, NestedContentModel, (('id', '=', 'nested'),), 
-                               populate_shared_models=True)
+    nested_model = load_object(pool, NestedContentModel, (('id', '=', 'nested'),), 0,
+                               populated=True)
 
     assert not isinstance(nested_model.nested.content, str)
     assert not isinstance(nested_model.nested.content.description_model.content, str)
@@ -206,7 +201,7 @@ def test_upsert_objects_with_shared_and_externals(pool):
     assert isinstance(description_model, CodedDescriptionModel)
 
     description = load_object(pool, DescriptionWithExternalModel, (('id', '=', 'external'),),
-        populate_shared_models=True)
+        populated=True)
 
     assert description.ref_model.get_content().description == description_model.description
     
@@ -224,7 +219,7 @@ def test_upsert_objects_with_shared_and_parts(pool):
 
     ref_with_parts = load_object(
         pool, ReferenceWithPartsModel, (('id', '=', 'part'),),
-        populate_shared_models= True
+        populated= True
     )
 
     assert ref_with_parts.ref_model.content == container
@@ -232,11 +227,11 @@ def test_upsert_objects_with_shared_and_parts(pool):
 
 def test_delete_objects_with_shared(pool):
     with pytest.raises(RuntimeError, match='PersistentSharedContentModel could not be deleted. you tried to deleted ContainerModel'):
-        delete_objects(pool, ContainerModel, (('id', '=', 'f0c9920d60433b61c6aa3536e0c91697fb6d6af5'),))
+        purge_objects(pool, ContainerModel, (('id', '=', 'f0c9920d60433b61c6aa3536e0c91697fb6d6af5'),))
 
 
 def test_find_objects_with_shared(pool):
-    objects = find_objects(pool, SimpleContentModel, tuple(), populate_shared_models=True)
+    objects = find_objects(pool, SimpleContentModel, tuple(), populated=True)
 
     first = next(objects)
     second = next(objects)

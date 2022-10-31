@@ -3,7 +3,7 @@ from typing import cast, List, cast, Type
 import pytest
 
 from ormdantic.schema.base import (
-    SchemaBaseModel, StringIndex, 
+    PersistentModel, StringIndex, 
     update_forward_refs, 
 )
 
@@ -14,20 +14,20 @@ from ormdantic.schema.paths import (
     get_paths_for
 )
 
-class StartModel(SchemaBaseModel):
+class StartModel(PersistentModel):
     name:StringIndex
     description:str
 
     parts: List['PartModel']
     part : 'PartModel'
 
-class PartModel(SchemaBaseModel):
+class PartModel(PersistentModel):
     name:StringIndex
     description:str
 
     sub_parts: List['SubPartModel']
 
-class SubPartModel(SchemaBaseModel):
+class SubPartModel(PersistentModel):
     name:StringIndex
     description:str
 

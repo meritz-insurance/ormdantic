@@ -7,7 +7,7 @@ from pydantic import condecimal, constr, Field
 
 from ormdantic.schema import PersistentModel
 from ormdantic.database.queries import (
-    _get_sql_for_upserting, get_sql_for_creating_version_info_table, get_sql_for_upserting_external_index, get_stored_fields, get_table_name, 
+    _get_sql_for_upserting, get_query_and_args_for_deleting, get_query_and_args_for_purging, get_sql_for_creating_version_info_table, get_sql_for_upserting_external_index, get_stored_fields, get_table_name, 
     get_sql_for_creating_table, _get_field_db_type, _generate_json_table_for_part_of,
     _build_query_and_fields_for_core_table, field_exprs,
     get_query_and_args_for_reading,
@@ -48,8 +48,10 @@ def test_get_sql_for_create_table():
     assert (
         'CREATE TABLE IF NOT EXISTS `md_SimpleBaseModel` (\n'
         '  `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,\n'
+        '  `__set_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,\n'
         '  `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`)),\n'
-        '  `__valid_start` BIGINT\n'
+        '  `__valid_start` BIGINT,\n'
+        '  `__valid_end` BIGINT DEFAULT 9223372036854775807\n'
         f'){_ENGINE}'
     ) == next(get_sql_for_creating_table(SimpleBaseModel))
 
@@ -61,6 +63,7 @@ def test_get_sql_for_create_table_for_version():
     assert (
         'CREATE TABLE IF NOT EXISTS `md_SimpleBaseModel` (\n'
         '  `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,\n'
+        '  `__set_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,\n'
         '  `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`)),\n'
         '  `__valid_start` BIGINT,\n'
         '  `__valid_end` BIGINT DEFAULT 9223372036854775807,\n'
@@ -95,6 +98,7 @@ def test_get_sql_for_create_table_for_version():
         '    `md_PartModel_pbase`.`__root_row_id`,\n'
         '    `md_PartModel_pbase`.`__container_row_id`,\n'
         '    `md_PartModel_pbase`.`order`,\n'
+        '    `md_RootModel`.`__set_id`,\n'
         '    `md_RootModel`.`__valid_start`,\n'
         '    `md_RootModel`.`__valid_end`\n'
         '  FROM `md_PartModel_pbase`\n'
@@ -110,6 +114,7 @@ def test_get_sql_for_create_table_for_version_date():
     assert (
         'CREATE TABLE IF NOT EXISTS `md_VersionDateModel` (\n'
         '  `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,\n'
+        '  `__set_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,\n'
         '  `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`)),\n'
         '  `__valid_start` BIGINT,\n'
         '  `__valid_end` BIGINT DEFAULT 9223372036854775807,\n'
@@ -137,8 +142,10 @@ def test_get_sql_for_create_table_with_index():
     assert (
 f"""CREATE TABLE IF NOT EXISTS `md_SampleModel` (
   `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `__set_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
   `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`)),
   `__valid_start` BIGINT,
+  `__valid_end` BIGINT DEFAULT 9223372036854775807,
   `i1` VARCHAR(200) AS (JSON_VALUE(`__json`, '$.i1')) STORED,
   `i2` VARCHAR(200) AS (JSON_VALUE(`__json`, '$.i2')) STORED,
   `i3` VARCHAR(200) AS (JSON_VALUE(`__json`, '$.i3')) STORED,
@@ -193,7 +200,9 @@ def test_get_sql_for_create_part_of_table():
         '    `md_Part_pbase`.`__root_row_id`,\n'
         '    `md_Part_pbase`.`__container_row_id`,\n'
         '    `md_Part_pbase`.`order`,\n'
-        '    `md_Container`.`__valid_start`\n'
+        '    `md_Container`.`__set_id`,\n'
+        '    `md_Container`.`__valid_start`,\n'
+        '    `md_Container`.`__valid_end`\n'
         '  FROM `md_Part_pbase`\n'
         '  JOIN `md_Container` ON `md_Container`.`__row_id` = `md_Part_pbase`.`__container_row_id`\n'
         ')'
@@ -238,7 +247,9 @@ def test_get_sql_for_create_part_of_part_table():
         '    `md_PartOfPart_pbase`.`__root_row_id`,\n'
         '    `md_PartOfPart_pbase`.`__container_row_id`,\n'
         '    `md_PartOfPart_pbase`.`order`,\n'
-        '    `md_Part`.`__valid_start`\n'
+        '    `md_Part`.`__set_id`,\n'
+        '    `md_Part`.`__valid_start`,\n'
+        '    `md_Part`.`__valid_end`\n'
         '  FROM `md_PartOfPart_pbase`\n'
         '  JOIN `md_Part` ON `md_Part`.`__row_id` = `md_PartOfPart_pbase`.`__container_row_id`\n'
         ')'
@@ -277,8 +288,10 @@ def test_get_sql_for_creating_external_index_table():
         join_line(
             "CREATE TABLE IF NOT EXISTS `md_Target` (",
             "  `__row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,",
+            "  `__set_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,",
             "  `__json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin CHECK (JSON_VALID(`__json`)),",
             "  `__valid_start` BIGINT,",
+            "  `__valid_end` BIGINT DEFAULT 9223372036854775807,",
             "  `codes` TEXT AS (JSON_EXTRACT(`__json`, '$.codes[*]')) STORED,",
             "  `ids` TEXT AS (JSON_EXTRACT(`__json`, '$.ids[*]')) STORED,",
             "  KEY `codes_index` (`codes`),",
@@ -323,7 +336,9 @@ def test_get_sql_for_creating_audit_version_table():
             '  `version` BIGINT,',
             '  `op` VARCHAR(32),',
             '  `table_name` VARCHAR(80),',
+            '  `__set_id` BIGINT,',
             '  `__row_id` BIGINT,',
+            '  `model_id` VARCHAR(256),',
             '  KEY `__row_id_index` (`__row_id`),',
             '  KEY `__version_index` (`version`)',
             ')'
@@ -502,20 +517,24 @@ def test_get_sql_for_upserting():
         "INSERT INTO md_SimpleModel",
         "(",
         "  `__json`,",
+        "  `__set_id`,",
         "  `__valid_start`",
         ")",
         "VALUES",
         "(",
         "  %(__json)s,",
+        "  %(__set_id)s,",
         "  @VERSION",
         ")",
         "ON DUPLICATE KEY UPDATE",  
         "  `__json` = %(__json)s,",
         "  `__valid_start` = @VERSION",
         "RETURNING",
+        "  `__set_id`,",
         "  `__row_id`,",
-        "  'UPSERT' as op,",
-        "  'md_SimpleModel' as table_name",
+        "  'UPSERTED' as op,",
+        "  'md_SimpleModel' as table_name,",
+        "  CONCAT_WS(',', '') as model_id"
     ) == sql
 
 
@@ -531,14 +550,16 @@ def test_get_sql_for_upserting_versioning():
         "INTO @SQUASHED_FROM",
         "FROM md_VersionModel",
         "WHERE",
-        "  `id` = %(id)s",
+        "  `__set_id` = %(__set_id)s",
+        "  AND `id` = %(id)s",
         "  AND `__valid_start` <= @VERSION",
         "  AND @VERSION < `__valid_end`",
         ";",
         "UPDATE md_VersionModel",
         "SET `__valid_end` = @VERSION",
         "WHERE",
-        "  `id` = %(id)s",
+        "  `__set_id` = %(__set_id)s",
+        "  AND `id` = %(id)s",
         "  AND `__valid_start` <= @VERSION",
         "  AND @VERSION < `__valid_end`",
         ";",
@@ -547,6 +568,7 @@ def test_get_sql_for_upserting_versioning():
         "  `__json`,",
         "  `__valid_start`,",
         "  `__squashed_from`,",
+        "  `__set_id`,",
         "  `id`",
         ")",
         "VALUES",
@@ -554,11 +576,14 @@ def test_get_sql_for_upserting_versioning():
         "  %(__json)s,",
         "  @VERSION,",
         "  IFNULL(@SQUASHED_FROM, @VERSION),",
+        "  %(__set_id)s,",
         "  %(id)s",
         ")",
         "RETURNING",
+        "  `__set_id`,",
         "  `__row_id`,",
-        "  'UPSERT' as op,",
+        "  CONCAT_WS(',', `id`,`__valid_start`) as model_id,",
+        "  'UPSERTED' as op,",
         "  'md_VersionModel' as table_name"
     ) == sql
 
@@ -573,24 +598,28 @@ def test_get_sql_for_upserting_dated():
         "INSERT INTO md_DatedModel",
         "(",
         "  `__json`,",
-        "  `__valid_start`,",
+        "  `__set_id`,",
         "  `applied_at`,",
-        "  `id`",
+        "  `id`,",
+        "  `__valid_start`",
         ")",
         "VALUES",
         "(",
         "  %(__json)s,",
-        "  @VERSION,",
+        "  %(__set_id)s,",
         "  %(applied_at)s,",
-        "  %(id)s",
+        "  %(id)s,",
+        "  @VERSION",
         ")",
         "ON DUPLICATE KEY UPDATE",
         "  `__json` = %(__json)s,",
         "  `__valid_start` = @VERSION",
         "RETURNING",
+        "  `__set_id`,",
         "  `__row_id`,",
-        "  'UPSERT' as op,",
-        "  'md_DatedModel' as table_name"
+        "  'UPSERTED' as op,",
+        "  'md_DatedModel' as table_name,",
+        "  CONCAT_WS(',', `applied_at`,`id`) as model_id"
     ) == sql
 
 
@@ -605,7 +634,8 @@ def test_get_sql_for_upserting_versioned_dated():
         "INTO @SQUASHED_FROM",
         "FROM md_VersionDateModel",
         "WHERE",
-        "  `applied_at` = %(applied_at)s",
+        "  `__set_id` = %(__set_id)s",
+        "  AND `applied_at` = %(applied_at)s",
         "  AND `id` = %(id)s",
         "  AND `__valid_start` <= @VERSION",
         "  AND @VERSION < `__valid_end`",
@@ -613,7 +643,8 @@ def test_get_sql_for_upserting_versioned_dated():
         "UPDATE md_VersionDateModel",
         "SET `__valid_end` = @VERSION",
         "WHERE",
-        "  `applied_at` = %(applied_at)s",
+        "  `__set_id` = %(__set_id)s",
+        "  AND `applied_at` = %(applied_at)s",
         "  AND `id` = %(id)s",
         "  AND `__valid_start` <= @VERSION",
         "  AND @VERSION < `__valid_end`",
@@ -623,6 +654,7 @@ def test_get_sql_for_upserting_versioned_dated():
         "  `__json`,",
         "  `__valid_start`,",
         "  `__squashed_from`,",
+        "  `__set_id`,",
         "  `applied_at`,",
         "  `id`",
         ")",
@@ -631,12 +663,15 @@ def test_get_sql_for_upserting_versioned_dated():
         "  %(__json)s,",
         "  @VERSION,",
         "  IFNULL(@SQUASHED_FROM, @VERSION),",
+        "  %(__set_id)s,",
         "  %(applied_at)s,",
         "  %(id)s",
         ")",
         "RETURNING",
+        "  `__set_id`,",
         "  `__row_id`,",
-        "  'UPSERT' as op,",
+        "  CONCAT_WS(',', `applied_at`,`id`,`__valid_start`) as model_id,",
+        "  'UPSERTED' as op,",
         "  'md_VersionDateModel' as table_name"
 
    ) == sql
@@ -885,9 +920,7 @@ def test_get_query_and_args_for_reading_for_matching():
         order: FullTextSearchedStr
         name: FullTextSearchedStr
 
-    sql, args = get_query_and_args_for_reading(MyModel, ('order',), (('', 'match', '+FAST'),))
-
-    print(sql)
+    sql, args = get_query_and_args_for_reading(MyModel, ('order',), (('', 'match', '+FAST'),), set_id=1)
 
     assert join_line (
         "SELECT",
@@ -906,9 +939,13 @@ def test_get_query_and_args_for_reading_for_matching():
         "        (",
         "          SELECT",
         "            `__ORG`.`__row_id`,",
-        "            MATCH (`__ORG`.`order`,`__ORG`.`name`) AGAINST (%(ORDER_NAME)s IN BOOLEAN MODE) as `__relevance`",
+        "            MATCH (`__ORG`.`order`,`__ORG`.`name`) AGAINST (%(order_name)s IN BOOLEAN MODE) as `__relevance`",
         "          FROM",
         "            md_MyModel AS __ORG",
+        "          WHERE",
+        "            `__ORG`.`__set_id` = %(__set_id)s",
+        "            AND `__ORG`.`__valid_start` <= %(version)s",
+        "            AND `__ORG`.`__valid_end` > %(version)s",
         "        )",
         "        AS _BASE_CORE",
         "    )",
@@ -924,9 +961,10 @@ def test_get_query_and_args_for_reading_for_matching():
     ) == sql
 
     assert {
-        "ORDER_NAME": "+FAST",
-        "VERSION": 0,
-        "CURRENT_DATE": None,
+        "order_name": "+FAST",
+        "version": 0,
+        "current_date": None,
+        "__set_id": 1
     } == args
 
 
@@ -935,7 +973,7 @@ def test_get_query_and_args_for_reading_for_order_by():
         order: FullTextSearchedStr
         name: FullTextSearchedStr
 
-    sql, _ = get_query_and_args_for_reading(MyModel, ('order',), tuple(), order_by=('order desc', 'name'))
+    sql, _ = get_query_and_args_for_reading(MyModel, ('order',), tuple(), 0, order_by=('order desc', 'name'))
 
     print(sql)
 
@@ -962,6 +1000,10 @@ def test_get_query_and_args_for_reading_for_order_by():
         "            `__ORG`.`name`",
         "          FROM",
         "            md_MyModel AS __ORG",
+        "          WHERE",
+        "            `__ORG`.`__set_id` = %(__set_id)s",
+        "            AND `__ORG`.`__valid_start` <= %(version)s",
+        "            AND `__ORG`.`__valid_end` > %(version)s",
         "        )",
         "        AS _BASE_CORE",
         "    )",
@@ -981,7 +1023,8 @@ def test_get_query_and_args_for_reading_for_dated():
         order: FullTextSearchedStr
         name: FullTextSearchedStr
 
-    sql, _ = get_query_and_args_for_reading(MyModel, ('name',), (('name', '=', 'ab'),), current=date.today())
+    sql, _ = get_query_and_args_for_reading(
+        MyModel, ('name',), (('name', '=', 'ab'),), 0, current=date.today())
 
     print(sql)
 
@@ -1007,12 +1050,14 @@ def test_get_query_and_args_for_reading_for_dated():
         "'9999-12-31') as `__applied_end`",
         "            FROM",
         "            md_MyModel",
+        "            WHERE",
+        "              `__set_id` = %(__set_id)s",
         "          )",
         "          AS __ORG",
         "        WHERE",
-        "          `__ORG`.`name` = %(NAME)s",
-        "          AND `__ORG`.`__applied_start` <= %(CURRENT_DATE)s",
-        "          AND `__ORG`.`__applied_end` > %(CURRENT_DATE)s",
+        "          `__ORG`.`name` = %(name)s",
+        "          AND `__ORG`.`__applied_start` <= %(current_date)s",
+        "          AND `__ORG`.`__applied_end` > %(current_date)s",
         "      )",
         "      AS _BASE_CORE",
         "  )",
@@ -1041,8 +1086,11 @@ def test_build_query_for_core_table():
         'FROM',
         '  md_Model AS __ORG',
         'WHERE',
-        '  `__ORG`.`codes` = %(CODES)s',
-        '  AND `__ORG`.`name` != %(NAME)s'
+        '  `__ORG`.`codes` = %(codes)s',
+        '  AND `__ORG`.`name` != %(name)s',
+        '  AND `__ORG`.`__set_id` = %(__set_id)s',
+        '  AND `__ORG`.`__valid_start` <= %(version)s',
+        '  AND `__ORG`.`__valid_end` > %(version)s',
     ) == query
     assert ('__row_id', 'description', 'codes', 'name') == fields
 
@@ -1064,13 +1112,16 @@ def test_build_query_for_core_table_for_unwind():
         '  `__ORG`.`__row_id` AS `ns.__row_id`,',
         '  `__ORG`.`description` AS `ns.description`,',
         '  `__ORG`.`name` AS `ns.name`,',
-        '  `__UNWIND_CODES`.`codes` AS `ns.codes`',
+        '  `__UNWIND_codes`.`codes` AS `ns.codes`',
         'FROM',
         '  md_Model AS __ORG',
-        '  LEFT JOIN md_Model_codes AS __UNWIND_CODES ON `__ORG`.`__row_id` = `__UNWIND_CODES`.`__org_row_id`',
+        '  LEFT JOIN md_Model_codes AS __UNWIND_codes ON `__ORG`.`__row_id` = `__UNWIND_codes`.`__org_row_id`',
         'WHERE',
-        '  `__UNWIND_CODES`.`codes` = %(NS_CODES)s',
-        '  AND `__ORG`.`name` != %(NS_NAME)s'
+        '  `__UNWIND_codes`.`codes` = %(ns_codes)s',
+        '  AND `__ORG`.`name` != %(ns_name)s',
+        '  AND `__ORG`.`__set_id` = %(__set_id)s',
+        '  AND `__ORG`.`__valid_start` <= %(version)s',
+        '  AND `__ORG`.`__valid_end` > %(version)s',
     ) == query
 
     assert ('ns.__row_id', 'ns.description', 'ns.name', 'ns.codes') == fields
@@ -1091,13 +1142,16 @@ def test_build_query_for_core_table_for_match():
     assert join_line(
         'SELECT',
         '  `__ORG`.`__row_id` AS `ns.__row_id`,',
-        '  `__UNWIND_CODES`.`codes` AS `ns.codes`,',
-        '  MATCH (`__ORG`.`name`,`__ORG`.`description`) AGAINST (%(NAME_DESCRIPTION)s IN BOOLEAN MODE) as `ns.__relevance`',
+        '  `__UNWIND_codes`.`codes` AS `ns.codes`,',
+        '  MATCH (`__ORG`.`name`,`__ORG`.`description`) AGAINST (%(name_description)s IN BOOLEAN MODE) as `ns.__relevance`',
         'FROM',
         '  md_Model AS __ORG',
-        '  LEFT JOIN md_Model_codes AS __UNWIND_CODES ON `__ORG`.`__row_id` = `__UNWIND_CODES`.`__org_row_id`',
+        '  LEFT JOIN md_Model_codes AS __UNWIND_codes ON `__ORG`.`__row_id` = `__UNWIND_codes`.`__org_row_id`',
         'WHERE',
-        '  `__UNWIND_CODES`.`codes` = %(NS_CODES)s',
+        '  `__UNWIND_codes`.`codes` = %(ns_codes)s',
+        '  AND `__ORG`.`__set_id` = %(__set_id)s',
+        '  AND `__ORG`.`__valid_start` <= %(version)s',
+        '  AND `__ORG`.`__valid_end` > %(version)s',
     ) == query
 
     assert ('ns.__row_id', 'ns.' + _RELEVANCE_FIELD, 'ns.codes') == fields
@@ -1118,9 +1172,13 @@ def test_build_query_for_core_table_for_multiple_match():
     assert join_line(
         'SELECT',
         '  `__ORG`.`__row_id`,',
-        '  MATCH (`__ORG`.`name`) AGAINST (%(NAME)s IN BOOLEAN MODE) + MATCH (`__ORG`.`description`) AGAINST (%(DESCRIPTION)s IN BOOLEAN MODE) as `__relevance`',
+        '  MATCH (`__ORG`.`name`) AGAINST (%(name)s IN BOOLEAN MODE) + MATCH (`__ORG`.`description`) AGAINST (%(description)s IN BOOLEAN MODE) as `__relevance`',
         'FROM',
         '  md_Model AS __ORG',
+        'WHERE',
+        '  `__ORG`.`__set_id` = %(__set_id)s',
+        '  AND `__ORG`.`__valid_start` <= %(version)s',
+        '  AND `__ORG`.`__valid_end` > %(version)s'
     ) == query
 
     assert ('__row_id', _RELEVANCE_FIELD) == fields
@@ -1224,4 +1282,56 @@ def test_find_join_keys():
 
     with pytest.raises(RuntimeError):
         _find_join_keys((('',StartModel),('name', ReferencedByName)))
+
+
+def test_get_query_and_args_for_purging():    
+    class SimpleBaseModel(PersistentModel):
+        id: StrId
+
+    sqls = get_query_and_args_for_purging(
+        SimpleBaseModel, (('id','=', '@'),), 0)
+
+    assert join_line(
+        "DELETE FROM md_SimpleBaseModel",
+        "WHERE",
+        "  `id` = %(id)s",
+        "  AND `__set_id` = %(__set_id)s",
+        "RETURNING",
+        "  __row_id,",
+        "  __set_id,",
+        "  'PURGED' as op,",
+        "  'md_SimpleBaseModel' as table_name,",
+        "  CONCAT_WS(',', `id`) as model_id"
+    ) == sqls[0]
+
+    assert {'id': '@', '__set_id':0} == sqls[1]
+
+
+def test_get_query_and_args_for_deleting():    
+    class SimpleBaseModel(PersistentModel):
+        id: StrId
+
+    sqls = get_query_and_args_for_deleting(
+        SimpleBaseModel, (('id','=', '@'),), 0)
+
+    assert join_line(
+        "UPDATE md_SimpleBaseModel",
+        "SET",
+        "  `__valid_end` = @VERSION",
+        "WHERE",
+        "  `id` = %(id)s",
+        "  AND `__set_id` = %(__set_id)s",
+        ";",
+        "SELECT",
+        "  __row_id,",
+        "  __set_id,",
+        "  'DELETED' as op,", 
+        "  'md_SimpleBaseModel' as table_name,",
+        "  CONCAT_WS(',', `id`) as model_id",
+        "FROM md_SimpleBaseModel",
+        "WHERE",
+        "  `id` = %(id)s",
+        "  AND `__set_id` = %(__set_id)s",
+    ) == sqls[0]
+    assert {'id': '@', '__set_id':0} == sqls[1]
 

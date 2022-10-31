@@ -1,9 +1,10 @@
+from operator import ne
 from typing import List, ClassVar, Dict, Any
 import pytest
 from pydantic import Field
 
 from ormdantic.schema.base import (
-    PersistentModel, SchemaBaseModel
+    PersistentModel, PersistentModel
 )
 from ormdantic.schema.shareds import (
     SharedContentMixin, ContentReferenceModel, 
@@ -13,37 +14,60 @@ from ormdantic.schema.shareds import (
 from ormdantic.schema.modelcache import ModelCache
 from ormdantic.util.tools import digest
 
-class MyContent(SharedContentMixin):
+class MyContent(SharedContentMixin, PersistentModel):
     name:str
+
 
 class MyDerivedContent(MyContent):
     pass
 
+
 class MyAnotherContent(SharedContentMixin):
     name:str
+
 
 class MySharedModel(ContentReferenceModel[MyContent]):
     code:str = Field(default='')
 
+
 class MyDerivedSharedModel(MySharedModel):
     name:str
+
 
 class MySharedAnotherModel(ContentReferenceModel[MyAnotherContent]):
     code:str
 
-class Container(SchemaBaseModel):
+
+class Container(PersistentModel):
     items: List[MySharedModel]
 
-class ComplexContainer(SchemaBaseModel):
+
+class ComplexContainer(PersistentModel):
     items: List[MySharedModel]
     other_items: List[MySharedAnotherModel]
+
 
 class MyPersistentModel(PersistentModel):
     items: List[MySharedModel]
 
 
+class MyNestedModel(SharedContentMixin, PersistentModel):
+    shared_model: MySharedModel
+
+
+class MyNestedReferenceModel(ContentReferenceModel[MyNestedModel]):
+    pass
+
+
+class MyNestedNestedModel(SharedContentMixin, PersistentModel):
+    nested_ref_model: MyNestedReferenceModel
+
+
 class MyCode(SharedContentMixin):
     _id_attr: ClassVar[str] = 'code'
+    code: str
+
+class MyProduct(PersistentModel):
     code: str
 
 
@@ -248,23 +272,55 @@ def test_populate_shared_models():
     with pytest.raises(RuntimeError, match='cannot populate shared model.'):
         populate_shared_models(container, ModelCache())
 
-    contents : Dict[str, Any] = {
-        content1.id:{MySharedModel:content1},
-        content2.id:{MySharedModel:content2}
-    } 
+    contents = {
+        content1.id: {MySharedModel:content1},
+        content2.id: {MySharedModel:content2},
+    }
 
-    populate_shared_models(container, ModelCache(entries=contents))
+    populated = populate_shared_models(container, ModelCache(entries={
+        (content1.id,):{MySharedModel:content1},
+        (content2.id,):{MySharedModel:content2}
+    }))
 
-    assert contents == extract_shared_models(container)
+    assert {} == extract_shared_models(container)
+    assert contents == extract_shared_models(populated)
 
     extract_shared_models(container, True)
 
-    populate_shared_models(container, ModelCache(entries={
-        content1.id:{MySharedModel:content1},
-        content2.id:{MySharedModel:content2}
+    populated = populate_shared_models(container, ModelCache(entries={
+        (content1.id,):{MySharedModel:content1},
+        (content2.id,):{MySharedModel:content2}
     }))
 
-    assert contents == extract_shared_models(container)
+    assert contents == extract_shared_models(populated)
+
+
+def test_populate_shared_model_return_self_if_no_reference():
+    content = MyContent(name='test')
+    nested_content = MyNestedModel(shared_model=MySharedModel(content=content.id))
+
+    model_cache = ModelCache(entries={
+        (content.id,):{MyContent: content},
+        (nested_content.id,): {MyNestedModel: nested_content}
+    })
+
+    assert content is populate_shared_models(content, model_cache)
+
+    assert nested_content is not populate_shared_models(nested_content, model_cache)
+    assert content is populate_shared_models(nested_content, model_cache).shared_model.content
+
+    nested_nested_content = MyNestedNestedModel(
+        nested_ref_model=MyNestedReferenceModel(content=nested_content.id))
+
+    assert nested_nested_content is not populate_shared_models(nested_nested_content, model_cache)
+    nested_content_populated = populate_shared_models(nested_nested_content, model_cache).nested_ref_model.content
+
+    assert nested_content is not nested_content_populated
+    assert isinstance(nested_content_populated, MyNestedModel)
+    shared_model_populated = nested_content_populated.shared_model.content
+
+    assert isinstance(shared_model_populated, MyContent)
+    assert content is shared_model_populated
 
 
 def test_collect_shared_model_ids():

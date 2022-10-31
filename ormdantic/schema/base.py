@@ -1,5 +1,5 @@
 from typing import (
-    Any, ForwardRef, Tuple, Dict, Type, Generic, TypeVar, Iterator, Callable, Optional,
+    Any, ForwardRef, Tuple, Dict, Type, Generic, TypeVar, Iterator, Callable, 
     List, ClassVar, cast 
 )
 import datetime
@@ -9,7 +9,8 @@ from uuid import uuid4
 import orjson
 
 from pydantic import (
-    BaseModel, ConstrainedDecimal, ConstrainedInt, Field, ConstrainedStr, PrivateAttr,
+    BaseModel, ConstrainedDecimal, ConstrainedInt, Field, ConstrainedStr, 
+    PrivateAttr,
 )
 from pydantic.fields import FieldInfo
 from pydantic.main import ModelMetaclass, __dataclass_transform__
@@ -68,6 +69,7 @@ class SchemaBaseMetaclass(ModelMetaclass):
 
         return new_one
  
+
 class SchemaBaseModel(BaseModel, metaclass=SchemaBaseMetaclass):
     class Config:
         title = 'model which can generate json schema.'
@@ -79,6 +81,7 @@ class SchemaBaseModel(BaseModel, metaclass=SchemaBaseMetaclass):
 class PersistentModel(SchemaBaseModel):
     _stored_fields: ClassVar[StoredFieldDefinitions] = {
     }
+    _scope_id : int = PrivateAttr(0)
     _row_id : int = PrivateAttr(0)
 
     def _after_load(self):
@@ -485,6 +488,16 @@ def get_stored_fields(type_:Type):
     return stored_fields | adjusted
         
 
+def get_identifying_fields(model_type:Type[PersistentModelT]) -> Tuple[str,...]:
+    stored_fields = get_stored_fields_for(model_type, IdentifyingMixin)
+
+    return tuple(field_name for field_name, _ in stored_fields.items())
+
+
+def get_identifying_field_values(model:PersistentModel) -> Dict[str, Any]:
+    return {f:getattr(model, f) for f in get_identifying_fields(type(model))}
+
+
 def _get_json_paths(field_name, field_type) -> Tuple[str,...]:
     paths: List[str] = []
 
@@ -504,5 +517,4 @@ def _validate_json_paths(paths:Tuple[str]):
     # if is_collection and paths[-1] != '$':
     #     _logger.fatal(f'{paths} should end with $ for collection type')
     #     raise RuntimeError('Invalid path expression. collection type should end with $.')
-
 

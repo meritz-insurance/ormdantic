@@ -114,7 +114,7 @@ def use_temp_database_cursor_with_model(*models:PersistentModel,
         create_table(pool, *types)
 
         if model_created:
-            upsert_objects(pool, models)
+            upsert_objects(pool, models, 0)
 
         with pool.open_cursor(True) as cursor:
             yield cursor

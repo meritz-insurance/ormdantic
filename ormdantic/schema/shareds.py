@@ -1,3 +1,4 @@
+import inspect
 from typing import (
     ClassVar, Dict, Generic, Iterator, Iterator, TypeVar, get_args, Union, Type, 
     Set, DefaultDict, Any, cast, Tuple, List, Set, Callable
@@ -16,7 +17,7 @@ from ..util import (
     is_derived_from, unique,
 )
 
-from .base import (IdentifiedMixin, StrId, PersistentModel,  SchemaBaseModel, 
+from .base import (IdentifiedMixin, StrId, PersistentModel,  PersistentModelT, 
                    register_class_preprocessor)
 from .paths import (extract_as, get_path_and_types_for, get_paths_for)
 
@@ -60,7 +61,9 @@ SharedContentModelT = TypeVar('SharedContentModelT', bound=SharedContentMixin)
 class _ReferenceMarker(Generic[SharedContentModelT]):
     pass
 
-def _update_annotation_for_shared_content(name:str, bases:Tuple[Type, ...], namespace:Dict[str, Any]) -> None:
+def _update_annotation_for_shared_content(name:str, 
+                                          bases: Tuple[Type, ...], 
+                                          namespace: Dict[str, Any]) -> None:
     orgs = namespace.get('__orig_bases__', tuple())
 
     if _is_inherit_from_content_reference_model(bases):
@@ -108,7 +111,7 @@ def _is_inherit_from_content_reference_model(bases:Tuple[Type,...]) -> bool:
 
 LazyLoader = Callable[[str], 'SharedContentMixin']  
 
-class ContentReferenceModel(SchemaBaseModel, 
+class ContentReferenceModel(PersistentModel, 
                             _ReferenceMarker[SharedContentModelT]):
     ''' identified by content '''
     content : SharedContentModelT | str = Field(default='', title='content')
@@ -118,7 +121,16 @@ class ContentReferenceModel(SchemaBaseModel,
         arguments = get_union_type_arguments(self.__fields__['content'].outer_type_)
         assert arguments
 
-        return arguments[0]
+        content_type = arguments[0]
+
+        if not inspect.isclass(content_type):
+            _logger.fatal(f'{content_type=} is not general class. if it is TypeVar, '
+                'you should declare class which derived from ContentReferenceModel. '
+                'do not use ContentReferenceModel directly. we could not know what '
+                'is the real class for content')
+            raise RuntimeError('do not use ContentReferenceModel directly.')
+
+        return content_type
 
     def get_content_id(self) -> str:
         return self.content if isinstance(self.content, str) else self.content.id
@@ -157,7 +169,7 @@ def get_shared_content_types(model_type:Type) -> Tuple[Type]:
     )
 
 
-def extract_shared_models(model: SchemaBaseModel,
+def extract_shared_models(model: PersistentModel,
                           replace_with_id: bool = False
                           ) -> DefaultDict[str, Dict[Type, SharedContentMixin]]:
     contents : DefaultDict[str, Dict[Type, SharedContentMixin]] = defaultdict(dict)
@@ -176,7 +188,7 @@ def extract_shared_models(model: SchemaBaseModel,
     return contents
 
 
-def extract_shared_models_for(model: SchemaBaseModel, 
+def extract_shared_models_for(model: PersistentModel, 
                               target_type: Type[SharedContentModelT],
                               replace_with_id: bool = False
                               ) -> Dict[str, SharedContentModelT]:
@@ -201,35 +213,65 @@ def extract_shared_models_for(model: SchemaBaseModel,
     return contents
 
 
-def has_shared_models(model:SchemaBaseModel) -> bool:
+def has_shared_models(model:PersistentModel) -> bool:
     return any(get_paths_for(type(model), ContentReferenceModel))
 
 
-def populate_shared_models(model:SchemaBaseModel, 
-                           cache: ModelCache) -> List[SharedContentMixin]:
+def populate_shared_models(model:PersistentModelT, 
+                           *model_sets: ModelCache) -> PersistentModelT:
     # contents should be dictionary of dictionary. 
     # contents {'1a2221adef12':{field_type:model_object}}
     # we should iterate all item which has same id for checking derived type.
-    populated = []
 
-    for reference_model, field_type in _iterate_content_reference_models_and_type(model):
+    if _has_to_be_populated(model):
+        model = model.copy(deep=True)
+
+    for reference_model in _iterate_content_reference_models(model):
         content = reference_model.content
 
         if isinstance(content, str):
-            matched_models = cache.fetch(reference_model.get_content_type(), content)
+            for model_set in model_sets:
+                matched_models = model_set.find(reference_model.get_content_type(), content)
 
-            if matched_models:
-                reference_model.content = matched_models
-                populated.append(matched_models)
+                if matched_models:
+                    # if shared model has a nested shared model we will populate it.
+                    matched_models = populate_shared_models(matched_models, model_set)
+                    reference_model.content = matched_models
+                    break
             else:
-                _logger.fatal(f'cannot load shared model from cache {content=}')
+                _logger.fatal(f'cannot load shared model from cache {content=}, {model_sets=}')
                 raise RuntimeError('cannot populate shared model.')
 
-    return populated
+    return model
 
 
-def collect_shared_model_field_type_and_ids(model:SchemaBaseModel) -> DefaultDict[Type[SchemaBaseModel], Set[str]]:
-    type_and_ids : DefaultDict[Type[SchemaBaseModel], Set[str]]= defaultdict(set)
+def iterate_isolated_models(model:PersistentModel
+                                    ) -> Iterator[PersistentModel]:
+    has_shared = has_shared_models(model)
+
+    if has_shared:
+        # model will be changed after extract_shared_models_for,
+        # so deepcopy should be called here.
+        model = model.copy(deep=True)
+
+        for content_model in extract_shared_models_for(
+                model, PersistentSharedContentModel, True).values():
+            yield from iterate_isolated_models(content_model)
+
+    yield model
+
+
+def _has_to_be_populated(model:PersistentModel):
+    return any(
+        isinstance(reference_model.content, str) 
+        for reference_model 
+        in _iterate_content_reference_models(model)
+    )
+
+
+def collect_shared_model_field_type_and_ids(
+        model: PersistentModel) -> DefaultDict[Type[PersistentModel], Set[str]]:
+    type_and_ids : DefaultDict[Type[PersistentModel], Set[str]]= defaultdict(set)
 
     # ignore that model is ContentReferenceModel 
 
@@ -244,7 +286,8 @@ def collect_shared_model_field_type_and_ids(model:SchemaBaseModel) -> DefaultDic
     return type_and_ids
  
 
-def _iterate_content_reference_models(model:SchemaBaseModel) -> Iterator[ContentReferenceModel]:
+def _iterate_content_reference_models(
+        model: PersistentModel) -> Iterator[ContentReferenceModel]:
     model_type = type(model)
 
     # if is_derived_from(model_type, ContentReferenceModel):
@@ -257,7 +300,8 @@ def _iterate_content_reference_models(model:SchemaBaseModel) -> Iterator[Content
             yield shared_model
 
 
-def _iterate_content_reference_models_and_type(model:SchemaBaseModel) -> Iterator[Tuple[ContentReferenceModel, Type]]:
+def _iterate_content_reference_models_and_type(
+        model: PersistentModel) -> Iterator[Tuple[ContentReferenceModel, Type]]:
     model_type = type(model)
 
     if is_derived_from(model_type, ContentReferenceModel):

@@ -5,7 +5,7 @@ from .base import (
     PartOfMixin, StringReference, DecimalIndex, IntIndex, IntReference,
     DateIndex, DateTimeIndex, FullTextSearchedStr, FullTextSearchedStringIndex,
     StrId, IntegerArrayIndex, update_forward_refs,
-    StoredFieldDefinitions, SchemaBaseModel, 
+    StoredFieldDefinitions, PersistentModel, 
 )
 
 from .shareds import (
@@ -45,6 +45,6 @@ __all__ = [
     "TypeNamedModel",
     "get_type_named_model_type",
     "parse_object_for_model",
-    "SchemaBaseModel",
+    "PersistentModel",
     "PersistentSharedContentModel"
 ]

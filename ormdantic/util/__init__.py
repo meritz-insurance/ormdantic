@@ -1,5 +1,5 @@
 from .log import get_logger
-from .tools import convert_tuple, unique, digest, convert_as_collection
+from .tools import convert_tuple, convert_list, unique, digest, convert_as_collection, load_json
 from .hints import (
     get_base_generic_alias_of, get_args_of_base_generic_alias,
     get_type_args,
@@ -12,7 +12,9 @@ from .hints import (
 __all__ = [
     'get_logger',
     'convert_tuple',
+    'convert_list',
     'convert_as_collection',
+    'load_json',
     'unique',
     'digest',
     'get_base_generic_alias_of',

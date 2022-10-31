@@ -1,34 +1,34 @@
 from typing import (
     Optional, Iterable, Type, Iterator, Dict, Any, Tuple, 
-    overload, cast, TypeVar, Generic, Callable
+    overload, cast, TypeVar, List
 )
-from collections import deque, defaultdict
-from contextlib import contextmanager
+from collections import deque
 import itertools
 from datetime import date, datetime
 
-from ormdantic.database.verinfo import VersionInfo
 from pymysql.cursors import DictCursor
+
+from ormdantic.util.tools import convert_list
 
 from .connections import DatabaseConnectionPool
 
 from ..util import get_logger, is_derived_from
 from ..schema import ModelT, PersistentModel, get_container_type
 from ..schema.base import (
-    PartOfMixin, SchemaBaseModel, assign_identifying_fields_if_empty, 
-    get_part_types, PersistentModelT, get_type_for_table
+    PartOfMixin, PersistentModel, assign_identifying_fields_if_empty, 
+    get_part_types, PersistentModelT,
+    get_identifying_fields,
 )
+from ..schema.verinfo import VersionInfo
 from ..schema.shareds import ( 
-    PersistentSharedContentModel, SharedContentMixin, 
-    collect_shared_model_field_type_and_ids, 
-    populate_shared_models, extract_shared_models_for, has_shared_models,
-    get_shared_content_types
+    PersistentSharedContentModel, 
+    get_shared_content_types, iterate_isolated_models
 )
 
 from .queries import (
     Where,
-    get_identifying_fields,
     get_query_and_args_for_auditing,
+    get_query_and_args_for_deleting,
     get_query_and_args_for_getting_version,
     get_query_and_args_for_getting_version_info,
     get_query_and_args_for_getting_model_changes_of_version,
@@ -39,18 +39,17 @@ from .queries import (
     get_sql_for_creating_table,
     get_query_and_args_for_upserting, 
     get_query_and_args_for_reading, 
-    get_sql_for_deleting_external_index, get_sql_for_deleting_parts, 
+    get_sql_for_purging_external_index, get_sql_for_purging_parts, 
     get_sql_for_upserting_external_index, 
     get_sql_for_upserting_parts,
-    get_query_and_args_for_deleting,
-    _ROW_ID_FIELD, _JSON_FIELD, _AUDIT_VERSION_FIELD
+    get_query_and_args_for_purging,
+    _ROW_ID_FIELD, _JSON_FIELD, _AUDIT_VERSION_FIELD, _AUDIT_MODEL_ID_FIELD
 )
 
 from ..schema.modelcache import ModelCache
 
 
 # storage will generate pydantic object from json data.
-
 _logger = get_logger(__name__)
 
 
@@ -75,20 +74,23 @@ def create_table(pool:DatabaseConnectionPool, *types:Type[PersistentModelT]):
 @overload
 def upsert_objects(pool: DatabaseConnectionPool, 
                    models: PersistentModelT,
-                   audit:VersionInfo = VersionInfo()
+                   set_id: int,
+                   version_info:VersionInfo = VersionInfo()
                    ) -> PersistentModelT:
     ...
 
 @overload
 def upsert_objects(pool:DatabaseConnectionPool, 
                    models: Iterable[PersistentModelT],
-                   audit:VersionInfo = VersionInfo()
+                   set_id: int,
+                   version_info:VersionInfo = VersionInfo()
                    ) -> Tuple[PersistentModelT, ...]:
     ...
 
 def upsert_objects(pool:DatabaseConnectionPool, 
                    models: PersistentModelT | Iterable[PersistentModelT],
-                   audit:VersionInfo = VersionInfo()
+                   set_id: int,
+                   version_info:VersionInfo = VersionInfo()
                    ):
     is_single = isinstance(models, PersistentModel)
 
@@ -101,12 +103,14 @@ def upsert_objects(pool:DatabaseConnectionPool,
         raise RuntimeError(f'PartOfMixin could not be saved directly.')
 
     with pool.open_cursor(True) as cursor:
+        # we get next seq in current db transaction.
         targets = tuple(
-            assign_identifying_fields_if_empty(m, next_seq=lambda f: _next_seq_for(cursor, type(m), f))
+            assign_identifying_fields_if_empty(
+                m, next_seq=lambda f: _next_seq_for(cursor, type(m), f))
             for m in model_list
         )
 
-        _allocate_audit_version(cursor, audit)
+        allocate_audit_version(cursor, version_info)
 
         for model in targets:
             model._before_save()
@@ -114,8 +118,8 @@ def upsert_objects(pool:DatabaseConnectionPool,
             # we will remove content of the given model. so, we copy it and remove them.
             # for not updating original model.
 
-            for sub_model in _iterate_extracted_persistent_shared_models(model):
-                cursor.execute(*get_query_and_args_for_upserting(sub_model))
+            for sub_model in iterate_isolated_models(model):
+                cursor.execute(*get_query_and_args_for_upserting(sub_model, set_id))
 
                 loop = True
                 while loop:
@@ -130,7 +134,7 @@ def upsert_objects(pool:DatabaseConnectionPool,
     return targets[0] if is_single else targets
 
 
-def _allocate_audit_version(cursor:DictCursor, audit:VersionInfo) -> int:
+def allocate_audit_version(cursor:DictCursor, audit:VersionInfo) -> int:
     cursor.execute(*get_query_and_args_for_inserting_audit(audit))
     fetched = cursor.fetchall()
 
@@ -153,58 +157,50 @@ def _next_seq_for(cursor, t:Type, field:str) -> str | int:
     return record['NEXT_SEQ']
 
 
-def _iterate_extracted_persistent_shared_models(model:PersistentModel) -> Iterator[PersistentModel]:
-    has_shared = has_shared_models(model)
-
-    if has_shared:
-        # model will be changed after extract_shared_models_for,
-        # so deepcopy should be called here.
-        model = model.copy(deep=True)
-
-        for content_model in extract_shared_models_for(model, PersistentSharedContentModel, True).values():
-            yield from _iterate_extracted_persistent_shared_models(content_model)
-
-        yield model
-    else:
-        yield model
-
-
 def squash_objects(pool: DatabaseConnectionPool, 
-                   type_: Type[PersistentModelT], where:Where,
-                   audit:VersionInfo = VersionInfo()):
+                   type_: Type[PersistentModelT], wheres:List[Where] | Where,
+                   set_id: int,
+                   version_info:VersionInfo = VersionInfo()) -> List[Dict[str, Any]]:
     version = get_current_version(pool)
     fields = get_identifying_fields(type_)
 
-    query_and_param = get_query_and_args_for_reading(
-        type_, fields, where, 
-        version=version)
+    wheres = convert_list(wheres)
+    squasheds = []
 
     with pool.open_cursor() as cursor:
-        _allocate_audit_version(cursor, audit)
+        allocate_audit_version(cursor, version_info)
 
-        cursor.execute(*query_and_param)
+        for where in wheres:
+            query_and_param = get_query_and_args_for_reading(
+                type_, fields, where,
+                version=version, set_id=set_id)
 
-        while results := cursor.fetchmany():
-            for result in results:
-                cursor.execute(*get_query_and_args_for_squashing(type_, result))
-                                                                
-                loop = True
-                while loop:
-                    row_ids = []
+            cursor.execute(*query_and_param)
 
-                    for row in cursor.fetchall():
-                        _update_audit_model(cursor, row)
-                        row_ids.append(row[_ROW_ID_FIELD])
+            while results := cursor.fetchmany():
+                for result in results:
+                    squasheds.append(result)
+                    cursor.execute(*get_query_and_args_for_squashing(type_, result, set_id=set_id))
+                                                                    
+                    loop = True
+                    while loop:
+                        row_ids = []
 
-                    if row_ids:
-                        _delete_parts_and_externals(cursor, tuple(row_ids), type_)
+                        for row in cursor.fetchall():
+                            _update_audit_model(cursor, row)
+                            row_ids.append(row[_ROW_ID_FIELD])
 
-                    loop = cursor.nextset()
+                        if row_ids:
+                            _delete_parts_and_externals(cursor, tuple(row_ids), type_)
+
+                        loop = cursor.nextset()
+    return squasheds
 
 
 def delete_objects(pool: DatabaseConnectionPool,
-                   type_: Type[PersistentModelT], where: Where,
-                   audit: VersionInfo = VersionInfo()):
+                   type_: Type[PersistentModelT], wheres: List[Where] | Where,
+                   set_id:int,
+                   version_info: VersionInfo = VersionInfo()) -> List[Dict[str, Any]]:
     if not is_derived_from(type_, PersistentModel):
         _logger.fatal(
             f"try to delete {type_=}. it is impossible. type should be dervied "
@@ -220,29 +216,86 @@ def delete_objects(pool: DatabaseConnectionPool,
         )
         raise RuntimeError(f'PersistentSharedContentModel could not be deleted. you tried to deleted {type_.__name__}')
 
+    deleted = []
+
+    wheres = convert_list(wheres)
+
     with pool.open_cursor(True) as cursor:
-        _allocate_audit_version(cursor, audit)
+        allocate_audit_version(cursor, version_info)
 
-        cursor.execute(*get_query_and_args_for_deleting(type_, where))
+        for where in wheres:
+            cursor.execute(*get_query_and_args_for_deleting(type_, where, set_id=set_id))
 
-        loop = True
-        while loop:
-            row_ids = []
+            loop = True
+            while loop:
+                row_ids = []
 
-            for row in cursor.fetchall():
-                _update_audit_model(cursor, row)
-                row_ids.append(row[_ROW_ID_FIELD])
+                for row in cursor.fetchall():
+                    _update_audit_model(cursor, row)
+                    row_ids.append(row[_ROW_ID_FIELD])
 
-            if row_ids:
-                _delete_parts_and_externals(cursor, tuple(row_ids), type_)
+                    deleted.append(row[_AUDIT_MODEL_ID_FIELD])
 
-            loop = cursor.nextset()
+                if row_ids:
+                    _delete_parts_and_externals(cursor, tuple(row_ids), type_)
+
+                loop = cursor.nextset()
+
+    return deleted
+
+
+def purge_objects(pool: DatabaseConnectionPool,
+                   type_: Type[PersistentModelT], wheres: List[Where] | Where,
+                   set_id:int,
+                   version_info: VersionInfo = VersionInfo()) -> List[Dict[str, Any]]:
+    if not is_derived_from(type_, PersistentModel):
+        _logger.fatal(
+            f"try to delete {type_=}. it is impossible. type should be dervied "
+            f"from PersistentModel. {type_.mro()=}"
+        )
+        raise RuntimeError(f'{type_} could not be deleted. it should be derived from PersistentModel')
+
+    if issubclass(type_, PersistentSharedContentModel):
+        _logger.fatal(
+            f"try to delete PersistentSharedContentModel {type_=}. it is impossible. "
+            "we don't know whether share context mixin can be referenced by "
+            "other entity or not"
+        )
+        raise RuntimeError(f'PersistentSharedContentModel could not be deleted. you tried to deleted {type_.__name__}')
+
+    deleted = []
+
+    wheres = convert_list(wheres)
+
+    with pool.open_cursor(True) as cursor:
+        allocate_audit_version(cursor, version_info)
+
+        for where in wheres:
+            cursor.execute(*get_query_and_args_for_purging(type_, where, set_id=set_id))
+
+            loop = True
+            while loop:
+                row_ids = []
+
+                for row in cursor.fetchall():
+                    _update_audit_model(cursor, row)
+                    row_ids.append(row[_ROW_ID_FIELD])
+
+                    deleted.append(row[_AUDIT_MODEL_ID_FIELD])
+
+                if row_ids:
+                    _delete_parts_and_externals(cursor, tuple(row_ids), type_)
+
+                loop = cursor.nextset()
+
+    return deleted
 
 
 def get_current_version(pool:DatabaseConnectionPool)->int:
     return get_version_info(pool).version or 0
 
-def get_version_info(pool:DatabaseConnectionPool, version_or_datetime:datetime | None | int = None) -> VersionInfo:
+def get_version_info(pool:DatabaseConnectionPool, 
+                     version_or_datetime: datetime | None | int = None) -> VersionInfo:
     with pool.open_cursor(True) as cursor:
         if isinstance(version_or_datetime, datetime) or version_or_datetime is None:
             cursor.execute(*get_query_and_args_for_getting_version(version_or_datetime))
@@ -260,7 +313,8 @@ def get_version_info(pool:DatabaseConnectionPool, version_or_datetime:datetime |
         return VersionInfo.from_dict(record)
 
 
-def get_model_changes_of_version(pool:DatabaseConnectionPool, version:int) -> Iterator[Dict[str, Any]]:
+def get_model_changes_of_version(pool:DatabaseConnectionPool, 
+                                 version: int) -> Iterator[Dict[str, Any]]:
     with pool.open_cursor(True) as cursor:
         cursor.execute(*get_query_and_args_for_getting_model_changes_of_version(version))
 
@@ -268,14 +322,14 @@ def get_model_changes_of_version(pool:DatabaseConnectionPool, version:int) -> It
 
 
 def load_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:Where, 
+                set_id:int,
                 *, 
-                populate_shared_models: bool = False,
                 unwind:Tuple[str,...] | str = tuple(),
                 version:int = 0,
                 ref_date:date | None = None) -> PersistentModelT:
     found = find_object(pool, type_, where, 
-                        populate_shared_models=populate_shared_models, 
-                        unwind=unwind, version=version, ref_date=ref_date)
+                        unwind=unwind, version=version, 
+                        ref_date=ref_date, set_id=set_id)
 
     if not found:
         _logger.fatal(f'cannot found {type_=} object for {where=} in {pool=}')
@@ -285,91 +339,42 @@ def load_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where
         
 
 def find_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:Where, 
+                set_id:int,
                 *, 
-                populate_shared_models: bool = False, 
                 unwind:Tuple[str,...] | str = tuple(),
                 version:int = 0,
-                ref_date:date | None = None,
-                cache:ModelCache | None = None) -> Optional[PersistentModelT]:
-    objs = list(query_records(pool, type_, where, 2, unwind=unwind, version=version, ref_date=ref_date))
+                ref_date:date | None = None) ->Optional[PersistentModelT]:
+    objs = list(query_records(pool, type_, where, set_id, 2, 
+                              unwind=unwind, version=version, 
+                              ref_date=ref_date))
 
     if len(objs) >= 2:
         _logger.fatal(f'More than one object found. {type_=} {where=} in {pool=}. {[obj[_ROW_ID_FIELD] for obj in objs]}')
         raise RuntimeError(f'More than one object is found of {type_} condition {where}')
 
     if len(objs) == 1: 
-        with _context_for_shared_model(pool, populate_shared_models, cache) as convert_model:
-            return convert_model(type_, objs[0])
+        return cast(PersistentModelT, _convert_model(type_, objs[0]))
 
     return None
 
 
 def find_objects(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:Where, 
+                set_id:int,
                 *, fetch_size: Optional[int] = None,
-                populate_shared_models: bool = False,
                 unwind:Tuple[str, ...] | str = tuple(),
                 version:int = 0,
                 ref_date:date | None = None,
-                cache:ModelCache | None = None) -> Iterator[PersistentModelT]:
+                ) -> Iterator[PersistentModelT]:
+    for record in query_records(pool, type_, where, set_id, fetch_size, 
+                                fields=(_JSON_FIELD, _ROW_ID_FIELD),
+                                unwind=unwind, version=version, ref_date=ref_date, 
+                                ):
+        model = _convert_model(type_, record)
 
-    with _context_for_shared_model(pool, populate_shared_models, cache) as convert_model:
-        for record in query_records(pool, type_, where, fetch_size, 
-                                    fields=(_JSON_FIELD, _ROW_ID_FIELD),
-                                    unwind=unwind, version=version, ref_date=ref_date):
-            model = convert_model(type_, record)
-
-            yield model
-
-
-def _build_shared_model_set(pool:DatabaseConnectionPool, model:PersistentModel, 
-                            cache: ModelCache):
-    type_and_ids = collect_shared_model_field_type_and_ids(model)
-
-    for shared_type, shared_ids in type_and_ids.items():
-        to_be_retreived = tuple(id for id in shared_ids if not cache.fetch(shared_type, id))
-
-        if not to_be_retreived:
-            continue
-
-        if is_derived_from(shared_type, PersistentSharedContentModel):
-            for shared_model_record in query_records(pool,
-                    shared_type, (('id', 'in', to_be_retreived),),
-                    fields=(_JSON_FIELD, _ROW_ID_FIELD)):
-
-                shared_model = cast(PersistentSharedContentModel, 
-                                    _convert_record_to_model(shared_type, shared_model_record))
-
-                cache.register(shared_type, shared_model.id, shared_model)
-                
-                _build_shared_model_set(pool, shared_model, cache)
+        yield cast(PersistentModelT, model)
 
 
-def _populate_shared_models_recursively(model:SchemaBaseModel, 
-                                        cache: ModelCache):
-    populated_shareds = populate_shared_models(model, cache)
-
-    for another_model in populated_shareds:
-        if another_model and has_shared_models(another_model):
-            _populate_shared_models_recursively(another_model, cache)
-
-
-@contextmanager
-def _context_for_shared_model(pool:DatabaseConnectionPool, populate_shared_models:bool, caches:ModelCache | None):
-    caches = caches or ModelCache()
-
-    def convert_model(type_:Type, record:Dict[str, Any]):
-        model = _convert_record_to_model(type_, record)
-
-        if populate_shared_models:
-            _build_shared_model_set(pool, model, caches)
-            _populate_shared_models_recursively(model, caches)
-
-        return model
-
-    yield convert_model
-
-
-def _convert_record_to_model(type_:Type[PersistentModelT], record:Dict[str, Any]) -> PersistentModelT:
+def _convert_model(type_:Type[PersistentModelT], record:Dict[str, Any]) -> PersistentModelT:
     model = type_.parse_raw(record[_JSON_FIELD].encode())
     model._row_id = record[_ROW_ID_FIELD]
 
@@ -397,6 +402,7 @@ def _convert_record_to_model(type_:Type[PersistentModelT], record:Dict[str, Any]
 def query_records(pool: DatabaseConnectionPool, 
                   type_: Type[PersistentModelT], 
                   where: Where,
+                  set_id: int,
                   fetch_size: Optional[int] = None,
                   fields: Tuple[str, ...] = (_JSON_FIELD, _ROW_ID_FIELD),
                   order_by: Tuple[str, ...] | str= tuple(),
@@ -405,7 +411,7 @@ def query_records(pool: DatabaseConnectionPool,
                   unwind: Tuple[str,...] | str = tuple(),
                   joined: Dict[str, Type[PersistentModelT]] | None = None,
                   version: int = 0,
-                  ref_date: date | None = None
+                  ref_date: date | None = None,
                   ) -> Iterator[Dict[str, Any]]:
 
     query_and_param = get_query_and_args_for_reading(
@@ -414,7 +420,7 @@ def query_records(pool: DatabaseConnectionPool,
         unwind=unwind,
         ns_types=joined,
         version=version or get_current_version(pool),
-        current=ref_date)
+        current=ref_date, set_id=set_id)
 
     with pool.open_cursor() as cursor:
         cursor.execute(*query_and_param)
@@ -475,10 +481,10 @@ def _delete_parts_and_externals(cursor, root_deleted_ids:Tuple[int,...], type_:T
         '__root_row_ids': root_deleted_ids,
     }
 
-    for sql in get_sql_for_deleting_external_index(type_):
+    for sql in get_sql_for_purging_external_index(type_):
         cursor.execute(sql, args)
 
-    for (part_type, sqls) in get_sql_for_deleting_parts(type_).items():
+    for (part_type, sqls) in get_sql_for_purging_parts(type_).items():
         for sql in sqls:
             cursor.execute(sql, args)
 

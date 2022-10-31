@@ -8,7 +8,7 @@ import inspect
 from ormdantic.util.hints import get_args_of_list_or_tuple
 from ormdantic.util.tools import convert_tuple
 
-from .base import ( ModelT, SchemaBaseModel)
+from .base import ( ModelT, PersistentModel)
 from ..util import (
     get_logger, is_derived_from, is_list_or_tuple_of, convert_as_collection,
     is_derived_or_collection_of_derived
@@ -34,7 +34,7 @@ def get_path_and_types_for(type_:Type[ModelT],
                       predicate: Type | Callable[[Type], bool] | None = None,
                       ) -> Iterator[Tuple[str, Type]]:
     
-    if not is_derived_from(type_, SchemaBaseModel):
+    if not is_derived_from(type_, PersistentModel):
         _logger.fatal(f'{type_=} should be subclass of SchemaBaseModel. '
                       f'check the mro {inspect.getmro(type_)=}')
         raise RuntimeError(f'invalid type {type_} for get path and type')
@@ -47,7 +47,7 @@ def _get_path_and_type(type_:Type[ModelT],
                       ) -> Iterator[Tuple[List[str], Type]]:
     # TODO:
     # checking recursively refere4nce should be implemented
-    assert is_derived_from(type_, SchemaBaseModel)
+    assert is_derived_from(type_, PersistentModel)
 
     for field_name, model_field in type_.__fields__.items():
         field_type = model_field.outer_type_ 
@@ -70,12 +70,12 @@ def _get_path_and_type(type_:Type[ModelT],
                 field_type = generic_param
 
             yield (json_path, field_type)
-        elif is_derived_from(field_type, SchemaBaseModel):
+        elif is_derived_from(field_type, PersistentModel):
             yield from (([field_name] + paths, type_) 
                 for paths, type_ in 
                 _get_path_and_type(field_type, predicate)
             )
-        elif is_list_or_tuple_of(field_type, SchemaBaseModel):
+        elif is_list_or_tuple_of(field_type, PersistentModel):
             generic_param = get_args_of_list_or_tuple(field_type)
 
             assert not isinstance(generic_param, tuple), "not support heterogeneous type for collection"
@@ -87,7 +87,7 @@ def _get_path_and_type(type_:Type[ModelT],
                 )
 
 
-def extract(model:SchemaBaseModel, path:str) -> Any:
+def extract(model:PersistentModel, path:str) -> Any:
     current = model
 
     for field in path.split('.'):
@@ -112,7 +112,7 @@ def extract(model:SchemaBaseModel, path:str) -> Any:
     return current
             
 
-def extract_as(model:SchemaBaseModel, path:str, target_type_:Type[T]) -> T | Tuple[T] | None:
+def extract_as(model:PersistentModel, path:str, target_type_:Type[T]) -> T | Tuple[T] | None:
     data = extract(model, path)
 
     if data is None:

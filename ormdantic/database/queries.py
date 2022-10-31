@@ -1,5 +1,4 @@
 from dataclasses import asdict
-from inspect import getmro
 from typing import (
     Type, Iterator, overload, Iterable, List, Tuple, cast, Dict, 
     Any, DefaultDict, Optional, Set
@@ -11,7 +10,6 @@ import itertools
 import functools
 
 from pydantic import ConstrainedStr, ConstrainedDecimal
-from ormdantic.database.verinfo import VersionInfo
 
 from ormdantic.util import is_derived_from, convert_tuple
 from ormdantic.util.hints import get_args_of_base_generic_alias
@@ -20,13 +18,17 @@ from ..util import get_logger
 from ..schema.base import (
     ArrayIndexMixin, DatedMixin, PersistentModelT, ReferenceMixin, FullTextSearchedMixin, 
     IdentifyingMixin, IndexMixin, SequenceStrId, 
-    StoredFieldDefinitions, PersistentModelT, StoredMixin, PartOfMixin, UseBaseClassTableMixin, 
-    VersionMixin, 
+    StoredFieldDefinitions, PersistentModelT, StoredMixin, PartOfMixin, 
+    UseBaseClassTableMixin, VersionMixin, 
     UniqueIndexMixin, get_container_type, get_root_container_type,
     get_field_names_for, get_part_types, is_field_list_or_tuple_of,
     PersistentModel, is_list_or_tuple_of, get_stored_fields,
-    get_stored_fields_for, get_type_for_table
+    get_stored_fields_for, get_type_for_table, get_identifying_field_values,
+    get_identifying_fields
 )
+from ..schema.shareds import PersistentSharedContentModel
+from ..schema.verinfo import VersionInfo
+from ..schema.source import Where
 
 _MAX_VAR_CHAR_LENGTH = 200
 _MAX_DECIMAL_DIGITS = 65
@@ -61,8 +63,13 @@ _VERSION_CHANGE_TABLE = '_model_changes'
 
 _AUDIT_OP_FIELD = 'op'
 _AUDIT_TABLE_NAME_FIELD = 'table_name'
+# After we deleted model, we could not know which item 
+# is delete because it contains __row_id only. so, we will keep id of model 
+# if it is deleted.
+_AUDIT_MODEL_ID_FIELD = 'model_id'
 
 _ROW_ID_FIELD = '__row_id'
+_SET_ID_FIELD = '__set_id'
 _ORG_ROW_ID_FIELD = '__org_row_id'
 _CONTAINER_ROW_ID_FIELD = '__container_row_id'
 _ROOT_ROW_ID_FIELD = '__root_row_id'
@@ -80,7 +87,6 @@ _ENGINE = ""
 _FULL_TEXT_SEARCH_OPTION = r"""COMMENT 'parser "TokenBigramIgnoreBlankSplitSymbolAlphaDigit"'"""
 
 
-Where = Tuple[Tuple[str, str, Any], ...]
 FieldOp = Tuple[Tuple[str, str]]
 
 _logger = get_logger(__name__)
@@ -184,7 +190,9 @@ def get_sql_for_creating_version_info_table():
             f'{field_exprs(_AUDIT_VERSION_FIELD)} BIGINT',
             f'{field_exprs(_AUDIT_OP_FIELD)} VARCHAR(32)',
             f'{field_exprs(_AUDIT_TABLE_NAME_FIELD)} VARCHAR(80)',
+            f'{field_exprs(_SET_ID_FIELD)} BIGINT',
             f'{field_exprs(_ROW_ID_FIELD)} BIGINT',
+            f'{field_exprs(_AUDIT_MODEL_ID_FIELD)} VARCHAR(256)',
             f"KEY `__row_id_index` ({field_exprs(_ROW_ID_FIELD)})",
             f"KEY `__version_index` ({field_exprs(_AUDIT_VERSION_FIELD)})"
         ])
@@ -196,7 +204,14 @@ def _get_sql_for_auditing_model():
         f'INSERT INTO {field_exprs(_VERSION_CHANGE_TABLE)}',
         '(',
         tab_each_line(
-            field_exprs([_AUDIT_VERSION_FIELD, _AUDIT_OP_FIELD, _AUDIT_TABLE_NAME_FIELD, _ROW_ID_FIELD]),
+            field_exprs([
+                _AUDIT_VERSION_FIELD, 
+                _AUDIT_OP_FIELD, 
+                _AUDIT_TABLE_NAME_FIELD, 
+                _SET_ID_FIELD,
+                _ROW_ID_FIELD,
+                _AUDIT_MODEL_ID_FIELD
+            ]),
             use_comma=True
         ),
         ')',
@@ -204,9 +219,11 @@ def _get_sql_for_auditing_model():
         '(',
         tab_each_line(
             '@VERSION',
-            '%(op)s',
-            '%(table_name)s',
-            '%(__row_id)s',
+            f'%({_AUDIT_OP_FIELD})s',
+            f'%({_AUDIT_TABLE_NAME_FIELD})s',
+            f'%({_SET_ID_FIELD})s',
+            f'%({_ROW_ID_FIELD})s',
+            f'%({_AUDIT_MODEL_ID_FIELD})s',
             use_comma=True
         ),
         ')'
@@ -219,18 +236,24 @@ def _get_sql_for_allocating_version():
         f'INSERT INTO {field_exprs(_VERSION_INFO_TABLE)}',
         '(',
         tab_each_line(
-            field_exprs([_AUDIT_WHO_FIELD, _AUDIT_WHERE_FIELD, _AUDIT_WHEN_FIELD, _AUDIT_WHY_FIELD, _AUDIT_TAG_FIELD]),
+            field_exprs([
+                _AUDIT_WHO_FIELD, 
+                _AUDIT_WHERE_FIELD, 
+                _AUDIT_WHEN_FIELD, 
+                _AUDIT_WHY_FIELD, 
+                _AUDIT_TAG_FIELD
+            ]),
             use_comma=True
         ),
         ')',
         'VALUES'
         '(',
         tab_each_line(
-            '%(who)s',
-            '%(where)s',
+            f'%({_AUDIT_WHO_FIELD})s',
+            f'%({_AUDIT_WHERE_FIELD})s',
             'CURRENT_TIMESTAMP(6)',
-            '%(why)s',
-            '%(tag)s',
+            f'%({_AUDIT_WHY_FIELD})s',
+            f'%({_AUDIT_TAG_FIELD})s',
             use_comma=True
         ),
         ')',
@@ -272,17 +295,14 @@ def get_sql_for_creating_table(type_:Type[PersistentModelT]):
                 'if the root container type is VersionMixin, the PartOfMixin may be handled as VersionMixin ')
             raise RuntimeError('VersionMixin is not support for PartOfMixin.')
 
-        if _is_version_type(get_root_container_type(type_)):
-            valid_fields = (_VALID_START_FIELD, _VALID_END_FIELD)
-        else:
-            valid_fields = (_VALID_START_FIELD,)
+        additional_fields = (_SET_ID_FIELD, _VALID_START_FIELD, _VALID_END_FIELD)
 
         container_table_name = get_table_name(container_type)
 
         part_fields = (_ROW_ID_FIELD, _ROOT_ROW_ID_FIELD, _CONTAINER_ROW_ID_FIELD, 
                        *part_stored.keys())
 
-        container_fields = tuple(set(stored.keys()) - set(part_fields)) + valid_fields
+        container_fields = tuple(set(stored.keys()) - set(part_fields)) + additional_fields
 
         joined_table = _build_join_table(
             (part_table_name, _CONTAINER_ROW_ID_FIELD), 
@@ -424,14 +444,15 @@ def _build_join_table(*table_names:Tuple[str, str]) -> str:
 
 def _get_table_fields() -> Iterator[str]:
     yield f'{field_exprs(_ROW_ID_FIELD)} BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY'
+    yield f'{field_exprs(_SET_ID_FIELD)} BIGINT UNSIGNED NOT NULL DEFAULT 0'
     yield f'{field_exprs(_JSON_FIELD)} {_JSON_TYPE} {_JSON_CHECK.format(field_exprs(_JSON_FIELD))}'
 
 
 def _get_table_version_fields(type_:Type) -> Iterator[str]:
     yield f'{field_exprs(_VALID_START_FIELD)} BIGINT'
+    yield f'{field_exprs(_VALID_END_FIELD)} BIGINT DEFAULT {_BIG_INT_MAX}'
 
     if _is_version_type(type_):
-        yield f'{field_exprs(_VALID_END_FIELD)} BIGINT DEFAULT {_BIG_INT_MAX}'
         yield f'{field_exprs(_SQUASHED_FROM_FIELD)} BIGINT'
 
 
@@ -610,29 +631,21 @@ def get_query_and_args_for_getting_model_changes_of_version(audit_version:int):
     return f'SELECT * FROM {field_exprs(_VERSION_CHANGE_TABLE)} where version = %(version)s', {'version':audit_version}
 
 
-def get_query_and_args_for_upserting(model:PersistentModel):
-    query_args : Dict[str, Any] = {}
-
-    for f in get_identifying_fields(type(model)):
-        query_args[f] = getattr(model, f) 
+def get_query_and_args_for_upserting(model:PersistentModel, set_id:int):
+    query_args : Dict[str, Any] = get_identifying_field_values(model)
 
     query_args[_JSON_FIELD] = model.json()
+    query_args[_SET_ID_FIELD] = set_id
 
     return _get_sql_for_upserting(cast(Type, type(model))), query_args
 
 
-def get_identifying_fields(model_type:Type[PersistentModelT]) -> Tuple[str,...]:
-    stored_fields = get_stored_fields_for(model_type, IdentifyingMixin)
-
-    return tuple(field_name for field_name, _ in stored_fields.items())
-
-
-def get_query_and_args_for_squashing(type_:Type[PersistentModelT], identifier:Dict[str, Any]):
+def get_query_and_args_for_squashing(type_:Type[PersistentModelT], identifier:Dict[str, Any], set_id:int):
     if not _is_version_type(type_):
         _logger.fatal(f'{type_=} is not derived from VersinoMixin. it suppport to squash VersionMixin objects only.')
         raise RuntimeError('to squash is not supported for non version type.')
 
-    return _get_sql_for_squashing(cast(Type, type_)), identifier
+    return _get_sql_for_squashing(cast(Type, type_)), identifier | {'__set_id': set_id}
     
 
 @functools.lru_cache
@@ -640,6 +653,7 @@ def _get_sql_for_squashing(model_type:Type):
     table_name = get_table_name(model_type)
     id_fields = get_identifying_fields(model_type)
     for_id_fields = [f'{field_exprs(f)} = %({f})s' for f in id_fields]
+    for_id_fields.append(f'{field_exprs(_SET_ID_FIELD)} = %({_SET_ID_FIELD})s')
 
     return join_line(
         # find SQUASHED_FROM from current 
@@ -654,7 +668,7 @@ def _get_sql_for_squashing(model_type:Type):
                     [
                         f'{field_exprs(_VALID_START_FIELD)} <= @VERSION',
                         f'@VERSION < {field_exprs(_VALID_END_FIELD)}',
-                        f'{field_exprs(_SQUASHED_FROM_FIELD)} IS NOT NULL'
+                        f'{field_exprs(_SQUASHED_FROM_FIELD)} IS NOT NULL',
                     ]
                 )
             )
@@ -697,7 +711,16 @@ def _get_sql_for_squashing(model_type:Type):
         f'RETURNING',
         tab_each_line(
             field_exprs(_ROW_ID_FIELD),
-            "'DELETE:SQUASHED' as op",
+            field_exprs(_SET_ID_FIELD),
+            f"""CONCAT_WS(',', {
+                join_line(
+                    field_exprs(
+                        itertools.chain(id_fields, 
+                        [_VALID_START_FIELD, _VALID_END_FIELD])
+                    ), use_comma=True, new_line=False
+                    )
+            }) as {_AUDIT_MODEL_ID_FIELD}""",
+            "'PURGED:SQUASHED' as op",
             f"'{table_name}' as table_name",
             use_comma=True
         ),
@@ -736,7 +759,9 @@ def _get_sql_for_upserting(model_type:Type):
     if _is_version_type(model_type):
         assert id_fields
 
-        for_id_fields = [f'{field_exprs(f)} = %({f})s' for f in id_fields]
+        for_id_fields = []
+        for_id_fields.append(f'{field_exprs(_SET_ID_FIELD)} = %({_SET_ID_FIELD})s')
+        for_id_fields.extend([f'{field_exprs(f)} = %({f})s' for f in id_fields])
 
         where_cond = tab_each_line(
             '\nAND '.join(
@@ -776,6 +801,7 @@ def _get_sql_for_upserting(model_type:Type):
                     _JSON_FIELD, 
                     _VALID_START_FIELD, 
                     _SQUASHED_FROM_FIELD, 
+                    _SET_ID_FIELD,
                     *id_fields
                 ]),
                 use_comma=True
@@ -787,14 +813,21 @@ def _get_sql_for_upserting(model_type:Type):
                 '%(__json)s',
                 '@VERSION',
                 'IFNULL(@SQUASHED_FROM, @VERSION)',
+                f'%({_SET_ID_FIELD})s',
                 [f'%({f})s' for f in id_fields],
                 use_comma=True
             ),
             ')',
             f'RETURNING',
             tab_each_line(
+                field_exprs(_SET_ID_FIELD),
                 field_exprs(_ROW_ID_FIELD),
-                "'UPSERT' as op",
+                f"""CONCAT_WS(',', {
+                    join_line(field_exprs(
+                        itertools.chain(id_fields, [_VALID_START_FIELD])
+                    ), use_comma=True, new_line=False)
+                }) as {_AUDIT_MODEL_ID_FIELD}""",
+                "'UPSERTED' as op",
                 f"'{table_name}' as table_name",
                 use_comma=True
             )
@@ -804,30 +837,38 @@ def _get_sql_for_upserting(model_type:Type):
             f'INSERT INTO {table_name}', 
             '(',
             tab_each_line(
-                field_exprs([_JSON_FIELD, _VALID_START_FIELD, *id_fields]),
+                field_exprs([_JSON_FIELD, _SET_ID_FIELD, *id_fields, _VALID_START_FIELD]),
                 use_comma=True
             ),
             ')',
             f'VALUES',
             '(',
             tab_each_line(
-                '%(__json)s',
-                '@VERSION',
+                f'%({_JSON_FIELD})s',
+                f'%({_SET_ID_FIELD})s',
                 [f'%({f})s' for f in id_fields],
+                '@VERSION',
                 use_comma=True
             ),
             ')',
             f'ON DUPLICATE KEY UPDATE',
             tab_each_line(
-                f'{field_exprs(_JSON_FIELD)} = %(__json)s',
+                f'{field_exprs(_JSON_FIELD)} = %({_JSON_FIELD})s',
                 f'{field_exprs(_VALID_START_FIELD)} = @VERSION',
                 use_comma=True
             ),
             f'RETURNING',
             tab_each_line(
+                field_exprs(_SET_ID_FIELD),
                 field_exprs(_ROW_ID_FIELD),
-                "'UPSERT' as op",
+                "'UPSERTED' as op",
                 f"'{table_name}' as table_name",
+                f"""CONCAT_WS(',', {
+                    join_line(field_exprs(id_fields), use_comma=True, new_line=False) 
+                    if id_fields
+                    else 
+                    "''"
+                }) as {_AUDIT_MODEL_ID_FIELD}""",
                 use_comma=True
             )
         ) 
@@ -880,7 +921,7 @@ def get_sql_for_upserting_parts(model_type:Type) -> Dict[Type, Tuple[str, ...]]:
 
         delete_sql = join_line([
             f'DELETE FROM {get_table_name(part_type, _PART_BASE_TABLE)}',
-            f'WHERE {field_exprs(_ROOT_ROW_ID_FIELD)} = %(__root_row_id)s'
+            f'WHERE {field_exprs(_ROOT_ROW_ID_FIELD)} = %({_ROOT_ROW_ID_FIELD})s'
         ])
 
         sqls.append(delete_sql)
@@ -944,7 +985,7 @@ def get_sql_for_upserting_parts(model_type:Type) -> Dict[Type, Tuple[str, ...]]:
                     ),
                     f'WHERE',
                     tab_each_line(
-                        f'{root_field} = %(__root_row_id)s'
+                        f'{root_field} = %({_ROOT_ROW_ID_FIELD})s'
                     ),
                 ),
                 ') AS T1',
@@ -983,7 +1024,7 @@ def get_sql_for_upserting_external_index(model_type:Type) -> Iterator[str]:
         # delete previous items.
         yield join_line([
             f'DELETE FROM {table_name}',
-            f'WHERE {field_exprs(_ROOT_ROW_ID_FIELD)} = %(__root_row_id)s'
+            f'WHERE {field_exprs(_ROOT_ROW_ID_FIELD)} = %({_ROOT_ROW_ID_FIELD})s'
         ])
 
         yield join_line(
@@ -1017,7 +1058,7 @@ def get_sql_for_upserting_external_index(model_type:Type) -> Iterator[str]:
             ),
             f'WHERE',
             tab_each_line(
-                f"""{field_exprs(_ROOT_ROW_ID_FIELD if is_part else _ROW_ID_FIELD, '__ORG')} = %(__root_row_id)s"""
+                f"""{field_exprs(_ROOT_ROW_ID_FIELD if is_part else _ROW_ID_FIELD, '__ORG')} = %({_ROOT_ROW_ID_FIELD})s"""
             )
         )
 
@@ -1109,11 +1150,10 @@ def _generate_nested_json_table(first_path:str,
     )
 
 
-def get_sql_for_deleting_parts(model_type:Type) -> Dict[Type, Tuple[str, ...]]:
+def get_sql_for_purging_parts(model_type:Type) -> Dict[Type, Tuple[str, ...]]:
     type_sqls : Dict[str, Tuple[str, str]] = {}
     part_types = get_part_types(model_type)
 
-    is_root = not is_derived_from(model_type, PartOfMixin)
     sqls = []
     
     for part_type in part_types:
@@ -1128,17 +1168,13 @@ def get_sql_for_deleting_parts(model_type:Type) -> Dict[Type, Tuple[str, ...]]:
 
         sqls.append(delete_sql)
 
-        fields = get_stored_fields_for_part_of(part_type)
-
         type_sqls[part_type] = tuple(sqls)
 
     return type_sqls
 
 
-def get_sql_for_deleting_external_index(model_type:Type) -> Iterator[str]:
-    is_part = is_derived_from(model_type, PartOfMixin)
-
-    for field_name, (json_paths, field_type) in get_stored_fields_for_external_index(model_type).items():
+def get_sql_for_purging_external_index(model_type:Type) -> Iterator[str]:
+    for field_name in get_stored_fields_for_external_index(model_type):
         table_name = get_table_name(model_type, field_name)
 
         # delete previous items.
@@ -1149,7 +1185,9 @@ def get_sql_for_deleting_external_index(model_type:Type) -> Iterator[str]:
 
 
 # fields is the json key , it can contain '.' like product.name
-def get_query_and_args_for_reading(type_:Type[PersistentModelT], fields:Tuple[str,...] | str, where:Where, 
+def get_query_and_args_for_reading(type_:Type[PersistentModelT], 
+                                   fields: Tuple[str, ...] | str, where: Where,
+                                   set_id: int,
                                    *,
                                    order_by: Tuple[str, ...] | str = tuple(), 
                                    offset : None | int = None, 
@@ -1179,8 +1217,8 @@ def get_query_and_args_for_reading(type_:Type[PersistentModelT], fields:Tuple[st
     unwind = convert_tuple(unwind)
     order_by = convert_tuple(order_by)
 
-    where = _fill_empty_fields_for_match(where, 
-                                         get_stored_fields_for_full_text_search(type_))
+    where = _fill_empty_fields_for_match(
+        where, get_stored_fields_for_full_text_search(type_))
 
     ns_types = dict(
         _build_namespace_types(
@@ -1198,7 +1236,7 @@ def get_query_and_args_for_reading(type_:Type[PersistentModelT], fields:Tuple[st
             order_by, offset, limit, 
             unwind, 
             cast(Type, base_type), for_count, bool(current)), 
-        _build_database_args(where) | {'VERSION':version, 'CURRENT_DATE':current}
+        _build_database_args(where, set_id) | {'version':version, 'current_date':current}
     )
 
     # first, we make a group for each table.
@@ -1365,25 +1403,86 @@ def _extract_fields(items:Iterable[str], ns:str) -> Tuple[str,...]:
             if item.startswith(removed) and '.' not in item[started:])
 
 
-def get_query_and_args_for_deleting(type_:Type, where:Where):
+def get_query_and_args_for_purging(type_:Type, where:Where, set_id:int):
     # TODO delete parts and externals.
-    query_args = _build_database_args(where)
+    query_args = _build_database_args(where, set_id)
 
-    return _get_sql_for_deleting(type_, tuple((f, o) for f, o, _ in where)), query_args
+    field_and_op = tuple((f, o) for f, o, _ in where) + ((_SET_ID_FIELD, '='),)
+
+    return _get_sql_for_purging(type_, field_and_op), query_args
+
+
+@functools.lru_cache
+def _get_sql_for_purging(type_:Type, field_and_value:FieldOp):
+    table_name = get_table_name(type_)
+    id_fields = get_identifying_fields(type_)
+
+    return join_line(
+        f"DELETE FROM {table_name}",
+        _build_where(field_and_value),
+        f"RETURNING",
+        tab_each_line(
+            _ROW_ID_FIELD, 
+            _SET_ID_FIELD, 
+            "'PURGED' as op", 
+            f"'{table_name}' as table_name",
+            f"""CONCAT_WS(',', {
+                join_line(field_exprs(id_fields), use_comma=True, new_line=False)
+                if id_fields else 
+                "''"
+            }) as {_AUDIT_MODEL_ID_FIELD}""",
+            use_comma=True
+        )
+    )
+
+
+def get_query_and_args_for_deleting(type_:Type, where:Where, set_id:int):
+    # TODO delete parts and externals.
+    query_args = _build_database_args(where, set_id)
+
+    field_and_op = tuple((f, o) for f, o, _ in where) + ((_SET_ID_FIELD, '='),)
+
+    return _get_sql_for_deleting(type_, field_and_op), query_args
 
 
 @functools.lru_cache
 def _get_sql_for_deleting(type_:Type, field_and_value:FieldOp):
     table_name = get_table_name(type_)
-    return (f"DELETE FROM {table_name} {_build_where(field_and_value)} "
-            f"RETURNING {_ROW_ID_FIELD}, 'DELETE' as op, '{table_name}' as table_name")
+    id_fields = get_identifying_fields(type_)
+
+    return join_line(
+        f"UPDATE {table_name}",
+        f"SET",
+        tab_each_line(
+            f'{field_exprs(_VALID_END_FIELD)} = @VERSION',
+        ),
+        _build_where(field_and_value),
+        ";",
+        "SELECT",
+        tab_each_line(
+            _ROW_ID_FIELD, 
+            _SET_ID_FIELD, 
+            f"'DELETED' as op", 
+            f"'{table_name}' as table_name",
+            f"""CONCAT_WS(',', {
+                    join_line(field_exprs(id_fields), use_comma=True, new_line=False)
+                    if id_fields else 
+                    "''"
+            }) as {_AUDIT_MODEL_ID_FIELD}""",
+            use_comma=True
+        ),
+        f"FROM {table_name}",
+        _build_where(field_and_value),
+    )
 
 
-def _build_database_args(where:Where) -> Dict[str, Any]:
-    return {_get_parameter_variable_for_multiple_fields(field):value for field, _, value in where}
+def _build_database_args(where:Where, set_id:int ) -> Dict[str, Any]:
+    return {
+        _get_parameter_variable_for_multiple_fields(field):value for field, _, value in where
+    } | {'__set_id': set_id}
 
 
-def _build_where(field_and_ops:FieldOp | Tuple[Tuple[str, str, str]], ns:str = '') -> str:
+def _build_where(field_and_ops:FieldOp | Tuple[Tuple[str, str, str],...], ns:str = '') -> str:
     if field_and_ops:
         return join_line(
             'WHERE',
@@ -1424,7 +1523,12 @@ def _build_where_op(fields_op:Tuple[str, str] | Tuple[str, str, str], ns:str = '
 
     field = fields_op[0]
     op = fields_op[1]
-    variable = _normalize_database_object_name(ns + (fields_op[2] if len(fields_op) == 3 else fields_op[0]))
+    variable = fields_op[2] if len(fields_op) == 3 else fields_op[0]
+
+    if variable.lower() in [_SET_ID_FIELD, 'version']:
+        ns = ''
+
+    variable = _normalize_database_object_name(ns + _normalize_database_object_name(variable), False)
 
     assert op != 'match'
 
@@ -1492,8 +1596,8 @@ def _build_query_and_fields_for_core_table(
     if _is_dated_type(target_type):
         if has_current_date:
             field_op_var = field_op_var + (
-                (field_exprs(_APPLIED_START_FIELD, '__ORG'), '<=', 'CURRENT_DATE'),
-                (field_exprs(_APPLIED_END_FIELD, '__ORG'), '>', 'CURRENT_DATE')
+                (field_exprs(_APPLIED_START_FIELD, '__ORG'), '<=', 'current_date'),
+                (field_exprs(_APPLIED_END_FIELD, '__ORG'), '>', 'current_date')
             )
 
         id_fields = [
@@ -1501,14 +1605,16 @@ def _build_query_and_fields_for_core_table(
             if f != _APPLIED_AT_FIELD
         ]
 
+        org_field_op_var: Tuple[Tuple[str, str, str],...]= (
+            (field_exprs(_SET_ID_FIELD), '=', '__set_id'),
+        )
+
         # we should apply the version at first. then generate applied_end.
         if _is_version_type(get_root_container_type(target_type) or target_type):
-            org_field_op_var: Tuple[Tuple[str, str, str],...] = (
+            org_field_op_var += (
                 (field_exprs(_VALID_START_FIELD), '<=', 'version'),
                 (field_exprs(_VALID_END_FIELD), '>', 'version'),
             )
-        else:
-            org_field_op_var: Tuple[Tuple[str, str, str],...]= tuple()
  
         origin = _alias_table_or_query(join_line(
             "SELECT",
@@ -1529,12 +1635,17 @@ def _build_query_and_fields_for_core_table(
             get_table_name(target_type),
             _build_where(org_field_op_var, ns)
         ), '__ORG')
-    elif _is_version_type(get_root_container_type(target_type) or target_type):
+    else:
         field_op_var = field_op_var + (
-            (field_exprs(_VALID_START_FIELD, '__ORG'), '<=', 'version'),
-            (field_exprs(_VALID_END_FIELD, '__ORG'), '>', 'version')
+            (field_exprs(_SET_ID_FIELD, '__ORG'), '=', '__set_id'),
         )
 
+        if not is_derived_from(target_type, PersistentSharedContentModel):
+            field_op_var = field_op_var + (
+                (field_exprs(_VALID_START_FIELD, '__ORG'), '<=', 'version'),
+                (field_exprs(_VALID_END_FIELD, '__ORG'), '>', 'version')
+            )
+         
     field_list = [] 
 
     for prefix, sub_fields in prefix_fields.items():
@@ -1856,8 +1967,13 @@ def _get_populated_table_query_from_base(query_for_base:str,
     )
 
 
-def _normalize_database_object_name(value:str) -> str:
-    return value.replace('.', '_').replace(',', '_').replace(' ', '').upper()
+def _normalize_database_object_name(value:str, to_lower:bool = False) -> str:
+    normalized = value.replace('.', '_').replace(',', '_').replace(' ', '')
+
+    if to_lower:
+        normalized = normalized.lower()
+
+    return normalized
 
 
 def _is_version_type(type_:Type) -> bool:
