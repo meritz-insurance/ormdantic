@@ -1,6 +1,7 @@
 from typing import Type, Tuple, Iterator, Any, Dict, Iterable, List
 
 from datetime import date
+from ormdantic.schema.modelcache import ModelCache
 
 from ormdantic.schema.verinfo import VersionInfo
 from ormdantic.util.tools import convert_tuple
@@ -8,7 +9,8 @@ from ormdantic.util.tools import convert_tuple
 from ..util import get_logger
 from ..schema.base import PersistentModelT, get_identifying_fields, PersistentModel
 from ..schema.source import (
-    ModelStorage, SharedModelSource, Where, 
+    ModelStorage, QueryConditionType, SharedModelSource, Where, to_normalize_query_condition,
+    NormalizedQueryConditionType
 )
 
 from .connections import DatabaseConnectionPool
@@ -20,40 +22,43 @@ from .queries import _ROW_ID_FIELD, _JSON_FIELD
 
 _logger = get_logger(__name__)
 
-class DatabasePersistentSharedModelSource(SharedModelSource):
+class SharedModelDatabaseSource(SharedModelSource):
     def __init__(self, 
                  pool: DatabaseConnectionPool,
-                 set_id:int):
+                 set_id:int,
+                 cache: ModelCache | None = None):
         self._set_id = set_id
         self._pool = pool
 
+        super().__init__(None)
+
     def find_records(self, type_:Type[PersistentModelT], *ids:str | int
                      ) -> Iterator[Tuple[str, int]]:
-        return _find_objects(self._pool, type_, (('id', 'in', ids),), self._set_id)
+        return _find_objects(self._pool, type_, {'id': ('in', ids)}, self._set_id)
 
 
-class DatabasePersistentModelStorage(ModelStorage):
+class ModelDatabaseStorage(ModelStorage):
     def __init__(self, 
                  pool: DatabaseConnectionPool, shared_source: SharedModelSource,
                  set_id:int, 
                  ref_date: date, version: int | None):
         
-        super().__init__(shared_source, ref_date, version)
-        self._set_id = set_id
         self._pool = pool
+        self._set_id = set_id
 
-    def find_record(self, type_:Type[PersistentModelT], *id_values:Any
+        super().__init__(shared_source, ref_date, version)
+
+    def find_record(self, type_:Type[PersistentModelT], query_condition: QueryConditionType,
                     ) -> Tuple[str, int] | None:
-        where = _build_where_from_id_values(type_, id_values)
 
-        return _find_object(self._pool, type_, where, self._set_id,
+        return _find_object(self._pool, type_, query_condition, self._set_id,
                               version=self._version, ref_date=self._ref_date)
 
-    def query_records(self, type_:Type, where:Where, 
+    def query_records(self, type_:Type, where:QueryConditionType, 
              *,
-             fetch_size:int | None,
-             fields:Tuple[str, ...],
-             order_by:Tuple[str, ...] | str,
+             fetch_size:int | None = None,
+             fields:Tuple[str, ...] = tuple(),
+             order_by:Tuple[str, ...] | str = tuple(),
              limit: int | None = None,
              offset: int | None = None,
              unwind: Tuple[str, ...] | str = tuple(),
@@ -65,7 +70,7 @@ class DatabasePersistentModelStorage(ModelStorage):
                              unwind=unwind, joined=joined,
                              version=self._version, ref_date=self._ref_date)
 
-    def get_current_version(self) -> int:
+    def get_latest_version(self) -> int:
         return get_current_version(self._pool)
 
     def store(self, models:Iterable[PersistentModel] | PersistentModel, 
@@ -83,6 +88,11 @@ class DatabasePersistentModelStorage(ModelStorage):
         return purge_objects(self._pool, type_, wheres, self._set_id, version_info=version_info) 
 
 
+def create_database_source(pool:DatabaseConnectionPool, set_id:int, ref_date:date, version:int = 0):
+    return ModelDatabaseStorage(pool, SharedModelDatabaseSource(pool, set_id), 
+                                set_id, ref_date, version)
+
+
 def _build_where_from_id_values(type_:Type, id_values:Any):
     id_values = convert_tuple(id_values)
 
@@ -93,11 +103,11 @@ def _build_where_from_id_values(type_:Type, id_values:Any):
             f'{fields=}, {id_values=}')
         raise RuntimeError('mismatched size of id values')
 
-    return tuple((field, '=', value) for field, value in zip(fields, id_values))
+    return dict(zip(fields, id_values))
 
 
 def _find_object(pool: DatabaseConnectionPool, 
-                  type_: Type[PersistentModelT], where: Where,
+                  type_: Type[PersistentModelT], where: QueryConditionType,
                   set_id: int,
                   *,
                   ref_date: date | None = None,
@@ -120,7 +130,7 @@ def _find_object(pool: DatabaseConnectionPool,
  
 
 def _find_objects(pool: DatabaseConnectionPool, 
-                  type_: Type[PersistentModelT], where: Where,
+                  type_: Type[PersistentModelT], where: QueryConditionType,
                   set_id:int,
                   *,
                   fetch_size: int | None = None,

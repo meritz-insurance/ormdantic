@@ -115,10 +115,10 @@ def test_purge_objects():
     with use_temp_database_pool_with_model(ContainerModel) as pool:
         upserted = upsert_objects(pool, model, 0)
 
-        found = find_objects(pool, PartModel, tuple(), 0)
+        found = find_objects(pool, PartModel, {}, 0)
         assert found 
 
-        found = find_objects(pool, SubPartModel, tuple(), 0)
+        found = find_objects(pool, SubPartModel, {}, 0)
         assert found 
 
         # multiple same object does not affect the database.
@@ -130,10 +130,10 @@ def test_purge_objects():
 
         assert found is None
 
-        found = list(find_objects(pool, PartModel, tuple(), 0))
+        found = list(find_objects(pool, PartModel, {}, 0))
         assert not found 
 
-        found = list(find_objects(pool, SubPartModel, tuple(), 0))
+        found = list(find_objects(pool, SubPartModel, {}, 0))
         assert not found
 
         # check empty external table
@@ -145,17 +145,17 @@ def test_purge_objects():
             pass
 
         with pytest.raises(RuntimeError):
-            purge_objects(pool, cast(Type[PersistentModel], CannotDelete), tuple(), 0)
+            purge_objects(pool, cast(Type[PersistentModel], CannotDelete), {}, 0)
 
 
 def test_delete_objects():
     with use_temp_database_pool_with_model(ContainerModel) as pool:
         upserted = upsert_objects(pool, model, 0)
 
-        found = find_objects(pool, PartModel, tuple(), 0)
+        found = find_objects(pool, PartModel, {}, 0)
         assert found 
 
-        found = find_objects(pool, SubPartModel, tuple(), 0)
+        found = find_objects(pool, SubPartModel, {}, 0)
         assert found 
 
         # multiple same object does not affect the database.
@@ -171,13 +171,13 @@ def test_delete_objects():
         found = find_object(pool, ContainerModel, where, 0)
         assert found is None
 
-        found = list(find_objects(pool, PartModel, tuple(), 0, version=version))
+        found = list(find_objects(pool, PartModel, {}, 0, version=version))
         assert not found 
 
-        found = list(find_objects(pool, PartModel, tuple(), 0))
+        found = list(find_objects(pool, PartModel, {}, 0))
         assert not found 
 
-        found = list(find_objects(pool, SubPartModel, tuple(), 0))
+        found = list(find_objects(pool, SubPartModel, {}, 0))
         assert not found
 
         # check empty external table
@@ -189,7 +189,7 @@ def test_delete_objects():
             pass
 
         with pytest.raises(RuntimeError):
-            delete_objects(pool, cast(Type[PersistentModel], CannotDelete), tuple(), 0)
+            delete_objects(pool, cast(Type[PersistentModel], CannotDelete), {}, 0)
 
 
 
@@ -198,7 +198,7 @@ def test_find_object(pool_and_model):
     pool, _ = pool_and_model
 
     with pytest.raises(RuntimeError, match='More than one object.*'):
-        find_object(pool, PartModel, tuple(), 0)
+        find_object(pool, PartModel, {}, 0)
 
     found = find_object(pool, PartModel, build_where([('name', 'part1')]), 0)
     assert found == model.parts[0]
@@ -213,7 +213,7 @@ def test_find_objects(pool_and_model):
     assert next(found) == model.parts[1]
     assert next(found, None) is None
 
-    found = find_objects(pool, SubPartModel, (('name', 'match', '+sub1 -part2'),), 0)
+    found = find_objects(pool, SubPartModel, {'name': ('match', '+sub1 -part2')}, 0)
 
     assert next(found) == model.parts[0].parts[0]
     assert next(found, None) is None
@@ -222,7 +222,7 @@ def test_find_objects(pool_and_model):
 def test_find_objects_for_multiple_nested_parts(pool_and_model):
     pool, _ = pool_and_model
 
-    found = find_objects(pool, SubPartModel, tuple(), 0)
+    found = find_objects(pool, SubPartModel, {}, 0)
 
     assert {'part1-sub1', 'part2-sub1', 'part2-sub2'} == {found.name for found in found}
 
@@ -231,14 +231,14 @@ def test_load_object(pool_and_model):
     pool, _ = pool_and_model
 
     with pytest.raises(RuntimeError, match='cannot found matched item.*'):
-        load_object(pool, PartModel, (('name', '=', 'not_existed'),), 0)
+        load_object(pool, PartModel, {'name': 'not_existed'}, 0)
 
 
 def test_query_records_with_match(pool_and_model):
     pool, _ = pool_and_model
 
     objects = list(
-        query_records(pool, SubPartModel, (('name', 'match', 'part sub1'),), 0, 
+        query_records(pool, SubPartModel, {'name': ('match', 'part sub1')}, 0, 
                       fields=('name',))
     )
 
@@ -249,7 +249,7 @@ def test_query_records(pool_and_model):
     pool, _ = pool_and_model
 
     objects = list(
-        query_records(pool, PartModel, tuple(), 0,
+        query_records(pool, PartModel, {}, 0,
         fields=('_container_name', 'name'))
     )
 
@@ -300,9 +300,9 @@ def test_upsert_objects_for_versioning():
         upsert_objects(pool, second, 0)
         upsert_objects(pool, third, 0)
 
-        assert first == load_object(pool, VersionModel, (('id', '=', 'test'),), 0, version=1)
-        assert second == load_object(pool, VersionModel, (('id', '=', 'test'),), 0, version=2)
-        assert third == load_object(pool, VersionModel, (('id', '=', 'test'),), 0, version=3)
+        assert first == load_object(pool, VersionModel, {'id': 'test'}, 0, version=1)
+        assert second == load_object(pool, VersionModel, {'id': 'test'}, 0, version=2)
+        assert third == load_object(pool, VersionModel, {'id': 'test'}, 0, version=3)
 
 
 def test_upsert_objects_for_dated():
@@ -319,20 +319,20 @@ def test_upsert_objects_for_dated():
         upsert_objects(pool, second, 0)
         upsert_objects(pool, third, 0)
 
-        assert third == load_object(pool, DatedModel, (('id', '=', 'test'),), 0,
+        assert third == load_object(pool, DatedModel, {'id': 'test'}, 0,
                                     version=3, 
                                     ref_date=date.today())
 
-        assert second == load_object(pool, DatedModel, (('id', '=', 'test'),), 0,
+        assert second == load_object(pool, DatedModel, {'id': 'test'}, 0,
                                     version=3, 
                                     ref_date=date(2012, 12, 2))
 
-        assert first == load_object(pool, DatedModel, (('id', '=', 'test'),), 0,
+        assert first == load_object(pool, DatedModel, {'id': 'test'}, 0,
                                     version=1, 
                                     ref_date=date.today())
 
         # if ref_date is None, we get the all item.
-        assert [1,2,3] == list(record['__row_id'] for record in query_records(pool, DatedModel, tuple(), 0))
+        assert [1,2,3] == list(record['__row_id'] for record in query_records(pool, DatedModel, {}, 0))
 
 
 def test_get_version():
@@ -375,12 +375,12 @@ def test_squash_objects():
         upsert_objects(pool, second, 0)
         upsert_objects(pool, third, 0)
 
-        assert [{'id':'test'}] == squash_objects(pool, VersionModel, (('id', '=', 'test'),), set_id=0)
+        assert [{'id':'test'}] == squash_objects(pool, VersionModel, {'id':'test'}, 0)
 
-        assert third == load_object(pool, VersionModel, (('id', '=', 'test'),), 0, version=1)
-        assert third == load_object(pool, VersionModel, (('id', '=', 'test'),), 0, version=2)
-        assert third == load_object(pool, VersionModel, (('id', '=', 'test'),), 0, version=3)
-        assert third == load_object(pool, VersionModel, (('id', '=', 'test'),), 0, version=4)
+        assert third == load_object(pool, VersionModel, {'id':'test'}, 0, version=1)
+        assert third == load_object(pool, VersionModel, {'id':'test'}, 0, version=2)
+        assert third == load_object(pool, VersionModel, {'id':'test'}, 0, version=3)
+        assert third == load_object(pool, VersionModel, {'id':'test'}, 0, version=4)
 
         assert [
             {'__row_id': 1, 'op': 'UPSERTED', 'table_name': 'md_VersionModel', 
@@ -396,13 +396,13 @@ def test_squash_objects():
 
         upsert_objects(pool, fourth, 0)
 
-        assert fourth == load_object(pool, VersionModel, (('id', '=', 'test'),), 0)
+        assert fourth == load_object(pool, VersionModel, {'id':'test'}, 0)
 
-        assert [{'id':'test'}] == squash_objects(pool, VersionModel, (('id', '=', 'test'),), set_id=0)
+        assert [{'id':'test'}] == squash_objects(pool, VersionModel, {'id':'test'}, 0)
 
-        assert third == load_object(pool, VersionModel, (('id', '=', 'test'),), 0, version=4)
-        assert fourth == load_object(pool, VersionModel, (('id', '=', 'test'),), 0, version=5)
-        assert fourth == load_object(pool, VersionModel, (('id', '=', 'test'),), 0, version=6)
+        assert third == load_object(pool, VersionModel, {'id':'test'}, 0, version=4)
+        assert fourth == load_object(pool, VersionModel, {'id':'test'}, 0, version=5)
+        assert fourth == load_object(pool, VersionModel, {'id':'test'}, 0, version=6)
 
 
 def test_squash_objects_raises():
@@ -415,6 +415,6 @@ def test_squash_objects_raises():
             first = NonVersionModel(id=StrId('test'), message='first')
             upsert_objects(pool, first, 0)
 
-            squash_objects(pool, NonVersionModel, (('id', '=', 'test'),), 0)
+            squash_objects(pool, NonVersionModel, {'id': 'test'}, 0)
 
  

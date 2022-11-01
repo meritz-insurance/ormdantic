@@ -920,7 +920,7 @@ def test_get_query_and_args_for_reading_for_matching():
         order: FullTextSearchedStr
         name: FullTextSearchedStr
 
-    sql, args = get_query_and_args_for_reading(MyModel, ('order',), (('', 'match', '+FAST'),), set_id=1)
+    sql, args = get_query_and_args_for_reading(MyModel, ('order',), {'': ('match', '+FAST')}, set_id=1)
 
     assert join_line (
         "SELECT",
@@ -973,7 +973,7 @@ def test_get_query_and_args_for_reading_for_order_by():
         order: FullTextSearchedStr
         name: FullTextSearchedStr
 
-    sql, _ = get_query_and_args_for_reading(MyModel, ('order',), tuple(), 0, order_by=('order desc', 'name'))
+    sql, _ = get_query_and_args_for_reading(MyModel, ('order',), {}, 0, order_by=('order desc', 'name'))
 
     print(sql)
 
@@ -1024,7 +1024,7 @@ def test_get_query_and_args_for_reading_for_dated():
         name: FullTextSearchedStr
 
     sql, _ = get_query_and_args_for_reading(
-        MyModel, ('name',), (('name', '=', 'ab'),), 0, current=date.today())
+        MyModel, ('name',), {'name': ('=', 'ab')}, 0, current=date.today())
 
     print(sql)
 
@@ -1289,7 +1289,7 @@ def test_get_query_and_args_for_purging():
         id: StrId
 
     sqls = get_query_and_args_for_purging(
-        SimpleBaseModel, (('id','=', '@'),), 0)
+        SimpleBaseModel, {'id':('=', '@')}, 0)
 
     assert join_line(
         "DELETE FROM md_SimpleBaseModel",
@@ -1312,7 +1312,7 @@ def test_get_query_and_args_for_deleting():
         id: StrId
 
     sqls = get_query_and_args_for_deleting(
-        SimpleBaseModel, (('id','=', '@'),), 0)
+        SimpleBaseModel, {'id': ('=', '@')}, 0)
 
     assert join_line(
         "UPDATE md_SimpleBaseModel",

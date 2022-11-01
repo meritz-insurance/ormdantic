@@ -1,17 +1,18 @@
-from typing import (DefaultDict, Dict, Type, Callable, Tuple, Any, cast)
+from typing import (DefaultDict, Dict, Type, Callable, Tuple, cast)
 from collections import defaultdict
 
-from ormdantic.schema.base import PersistentModel, PersistentModelT, get_identifying_field_values
+from ormdantic.schema.base import PersistentModel, PersistentModelT, get_identifying_field_values, ScalarType
 
-from ..util import get_logger
+from ..util import get_logger, convert_tuple
 
 
 _logger = get_logger(__name__)
 
+
 class ModelCache():
     def __init__(self, threshold:int = 100_000, 
-                 entries: Dict[Tuple[Any, ...], Dict[Type, PersistentModel]] = {}):
-        self._cached : DefaultDict[Tuple[Any,...], Dict[Type, PersistentModel]] = defaultdict(dict)
+                 entries: Dict[Tuple[ScalarType, ...], Dict[Type, PersistentModel]] = {}):
+        self._cached : DefaultDict[Tuple[ScalarType,...], Dict[Type, PersistentModel]] = defaultdict(dict)
         self._threshold = threshold
 
         if entries:
@@ -29,7 +30,9 @@ class ModelCache():
 
         return model
 
-    def find(self, type_:Type[PersistentModelT], *id_values:Any) -> PersistentModelT | None:
+    def find(self, type_:Type[PersistentModelT], id_values:ScalarType | Tuple[ScalarType]) -> PersistentModelT | None:
+        id_values = convert_tuple(id_values)
+
         if id_values in self._cached:
             type_and_model = self._cached[id_values]
 
@@ -42,8 +45,10 @@ class ModelCache():
         
         return None
 
-    def load(self, type_:Type, *id_values:Any) -> PersistentModel:
-        found = self.find(type_, *id_values)
+    def load(self, type_:Type, id_values:ScalarType | Tuple[ScalarType]) -> PersistentModel:
+        id_values = convert_tuple(id_values)
+
+        found = self.find(type_, id_values)
 
         if found is None:
             raise RuntimeError('no such item in model cache')
@@ -53,7 +58,9 @@ class ModelCache():
     def clear(self):
         return self._cached.clear()
 
-    def delete(self, type_:Type, *id_values:Any):
+    def delete(self, type_:Type, id_values:ScalarType | Tuple[ScalarType]):
+        id_values = convert_tuple(id_values)
+
         targets = self._cached[id_values]
 
         if type_ in targets:
@@ -65,8 +72,10 @@ class ModelCache():
                     break
 
     def cached_get(self, type_:Type[PersistentModel], 
-                   func: Callable[..., PersistentModel | None], *id_values:Any) -> PersistentModel | None:
-        fetch = self.find(type_, *id_values)
+                   func: Callable[..., PersistentModel | None], 
+                   id_values:ScalarType | Tuple[ScalarType]) -> PersistentModel | None:
+        id_values = convert_tuple(id_values)
+        fetch = self.find(type_, id_values)
 
         if fetch:
             return fetch
@@ -78,7 +87,9 @@ class ModelCache():
 
         return None
 
-    def has_entry(self, type_:Type, *key:Any) -> bool:
+    def has_entry(self, type_:Type, key:ScalarType | Tuple[ScalarType]) -> bool:
+        key = convert_tuple(key)
+
         if key in self._cached:
             if type_ in self._cached[key]:
                 return True

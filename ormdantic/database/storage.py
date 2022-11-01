@@ -20,13 +20,13 @@ from ..schema.base import (
     get_identifying_fields,
 )
 from ..schema.verinfo import VersionInfo
+from ..schema.source import QueryConditionType, to_normalize_query_condition
 from ..schema.shareds import ( 
     PersistentSharedContentModel, 
     get_shared_content_types, iterate_isolated_models
 )
 
 from .queries import (
-    Where,
     get_query_and_args_for_auditing,
     get_query_and_args_for_deleting,
     get_query_and_args_for_getting_version,
@@ -57,8 +57,8 @@ _T = TypeVar('_T')
 
 
 def build_where(items:Iterator[Tuple[str, str]] | Iterable[Tuple[str, str]]
-                ) -> Where:
-    return tuple((item[0], '=', item[1]) for item in items)
+                ) -> QueryConditionType:
+    return {item[0]:('=', item[1]) for item in items}
 
        
 def create_table(pool:DatabaseConnectionPool, *types:Type[PersistentModelT]):
@@ -158,7 +158,7 @@ def _next_seq_for(cursor, t:Type, field:str) -> str | int:
 
 
 def squash_objects(pool: DatabaseConnectionPool, 
-                   type_: Type[PersistentModelT], wheres:List[Where] | Where,
+                   type_: Type[PersistentModelT], wheres:List[QueryConditionType] | QueryConditionType,
                    set_id: int,
                    version_info:VersionInfo = VersionInfo()) -> List[Dict[str, Any]]:
     version = get_current_version(pool)
@@ -172,7 +172,7 @@ def squash_objects(pool: DatabaseConnectionPool,
 
         for where in wheres:
             query_and_param = get_query_and_args_for_reading(
-                type_, fields, where,
+                type_, fields, to_normalize_query_condition(where),
                 version=version, set_id=set_id)
 
             cursor.execute(*query_and_param)
@@ -198,7 +198,7 @@ def squash_objects(pool: DatabaseConnectionPool,
 
 
 def delete_objects(pool: DatabaseConnectionPool,
-                   type_: Type[PersistentModelT], wheres: List[Where] | Where,
+                   type_: Type[PersistentModelT], wheres: List[QueryConditionType] | QueryConditionType,
                    set_id:int,
                    version_info: VersionInfo = VersionInfo()) -> List[Dict[str, Any]]:
     if not is_derived_from(type_, PersistentModel):
@@ -224,7 +224,9 @@ def delete_objects(pool: DatabaseConnectionPool,
         allocate_audit_version(cursor, version_info)
 
         for where in wheres:
-            cursor.execute(*get_query_and_args_for_deleting(type_, where, set_id=set_id))
+            cursor.execute(
+                *get_query_and_args_for_deleting(
+                    type_, to_normalize_query_condition(where), set_id=set_id))
 
             loop = True
             while loop:
@@ -245,7 +247,7 @@ def delete_objects(pool: DatabaseConnectionPool,
 
 
 def purge_objects(pool: DatabaseConnectionPool,
-                   type_: Type[PersistentModelT], wheres: List[Where] | Where,
+                   type_: Type[PersistentModelT], wheres: List[QueryConditionType] | QueryConditionType,
                    set_id:int,
                    version_info: VersionInfo = VersionInfo()) -> List[Dict[str, Any]]:
     if not is_derived_from(type_, PersistentModel):
@@ -271,7 +273,8 @@ def purge_objects(pool: DatabaseConnectionPool,
         allocate_audit_version(cursor, version_info)
 
         for where in wheres:
-            cursor.execute(*get_query_and_args_for_purging(type_, where, set_id=set_id))
+            cursor.execute(*get_query_and_args_for_purging(type_, 
+                to_normalize_query_condition(where), set_id=set_id))
 
             loop = True
             while loop:
@@ -321,7 +324,7 @@ def get_model_changes_of_version(pool:DatabaseConnectionPool,
         yield from iter(cursor.fetchall())
 
 
-def load_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:Where, 
+def load_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:QueryConditionType, 
                 set_id:int,
                 *, 
                 unwind:Tuple[str,...] | str = tuple(),
@@ -338,7 +341,7 @@ def load_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where
     return found
         
 
-def find_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:Where, 
+def find_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:QueryConditionType, 
                 set_id:int,
                 *, 
                 unwind:Tuple[str,...] | str = tuple(),
@@ -358,7 +361,7 @@ def find_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where
     return None
 
 
-def find_objects(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:Where, 
+def find_objects(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where:QueryConditionType, 
                 set_id:int,
                 *, fetch_size: Optional[int] = None,
                 unwind:Tuple[str, ...] | str = tuple(),
@@ -401,7 +404,7 @@ def _convert_model(type_:Type[PersistentModelT], record:Dict[str, Any]) -> Persi
 #
 def query_records(pool: DatabaseConnectionPool, 
                   type_: Type[PersistentModelT], 
-                  where: Where,
+                  where: QueryConditionType,
                   set_id: int,
                   fetch_size: Optional[int] = None,
                   fields: Tuple[str, ...] = (_JSON_FIELD, _ROW_ID_FIELD),
@@ -415,7 +418,7 @@ def query_records(pool: DatabaseConnectionPool,
                   ) -> Iterator[Dict[str, Any]]:
 
     query_and_param = get_query_and_args_for_reading(
-        type_, fields, where, 
+        type_, fields, to_normalize_query_condition(where), 
         order_by=order_by, limit=limit, offset=offset, 
         unwind=unwind,
         ns_types=joined,

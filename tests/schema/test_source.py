@@ -1,5 +1,3 @@
-from imp import find_module
-from re import A
 import pytest
 
 from typing import List, Type
@@ -9,8 +7,8 @@ from ormdantic.schema.modelcache import ModelCache
 from ormdantic.schema.shareds import ContentReferenceModel, PersistentSharedContentModel
 
 from ormdantic.schema.source import (
-    ChainedSharedModelSource, SharedModelSource, ModelSource,
-    MemorySharedModelSource, MemoryModelSource
+    ChainedModelSource, ChainedSharedModelSource, SharedModelSource, ModelSource,
+    MemoryModelSource
 )
 
 class MySharedContent(PersistentSharedContentModel): 
@@ -46,8 +44,10 @@ found_2_shared = MySharedContent(name=StringIndex('found-2'))
 nested_shared = MyNestedContent(description=StringIndex('nested'), 
                          item=SharedContentReferenceModel(content=first_shared.id))
 
-found_1 = MyProduct(code=StrId('found-1'), name=FullTextSearchedStr('found product'), nested=NestedContentReferenceModel(content=nested_shared.id))
-found_2 = MyProduct(code=StrId('found-2'), name=FullTextSearchedStr('found product'), nested=NestedContentReferenceModel(content=''))
+found_1 = MyProduct(code=StrId('found-1'), name=FullTextSearchedStr('found product'), 
+                    nested=NestedContentReferenceModel(content=nested_shared.id))
+found_2 = MyProduct(code=StrId('found-2'), name=FullTextSearchedStr('found product'), 
+                    nested=NestedContentReferenceModel(content=''))
 
 def _find_records(type:Type, *id_values:str):
     for index, item in enumerate([found_1, found_2]):
@@ -94,7 +94,7 @@ def other_shared_source(monkeypatch:pytest.MonkeyPatch):
     return source
 
 
-@pytest.fixture()
+@pytest.fixture(scope='function')
 def chained_shared_source(shared_source, other_shared_source):
     return ChainedSharedModelSource(shared_source, other_shared_source)
 
@@ -105,10 +105,16 @@ def source(shared_source, monkeypatch:pytest.MonkeyPatch):
     source = MemoryModelSource([found_1, found_2], shared_source=shared_source)
 
     monkeypatch.setattr(source, 'find_record', _find_records)
-    monkeypatch.setattr(source, 'get_current_version', lambda: 0)
+    monkeypatch.setattr(source, 'get_latest_version', lambda: 0)
 
     return source
 
+@pytest.fixture(scope='function')
+def chained_source():
+    return ChainedModelSource(
+        MemoryModelSource([found_1]),
+        MemoryModelSource([found_2])
+    )
 
 def test_shared_source_find(shared_source):
     assert not shared_source._cache.has_entry(MySharedContent, found_1_shared.id)
@@ -156,53 +162,53 @@ def test_shared_source_populate(shared_source):
 
 def test_source_query_records(source:ModelSource):
     records = list(source.query_records(
-        MyProduct, (('code', '=', 'found-1'),),
+        MyProduct, {'code': 'found-1'},
         fields=('code', '')
     ))
     assert [{'code': 'found-1'}] == records
 
 
 def test_source_reset_version(source:ModelSource):
-    assert 0 == source.reset_version(0)
+    assert 0 == source.update_version(0)
 
     cache = source._cache
-    assert 1 == source.reset_version(1)
+    assert 1 == source.update_version(1)
 
     assert cache != source._cache
 
 
 def test_source_find(source:ModelSource):
-    assert found_1 == source.find(MyProduct, 'found-1')
+    assert found_1 == source.find(MyProduct, {'code':'found-1'})
 
-    assert found_1 != source.find(MyProduct, 'found-1', populated=True)
+    assert found_1 != source.find(MyProduct, {'code':'found-1'}, populated=True)
 
     assert (
         source._shared_source.populate_shared_models(found_1) 
-        == source.find(MyProduct, 'found-1', populated=True)
+        == source.find(MyProduct, {'code':'found-1'}, populated=True)
     )
 
-    assert None is source.find(MyProduct, 'not existed')
+    assert None is source.find(MyProduct, {'code':'not existed'})
 
 
 def test_source_load(source:ModelSource):
-    assert found_1 == source.load(MyProduct, 'found-1')
+    assert found_1 == source.load(MyProduct, {'code':'found-1'})
     assert (
         source._shared_source.populate_shared_models(found_1) 
-        == source.load(MyProduct, 'found-1', populated=True)
+        == source.load(MyProduct, {'code':'found-1'}, populated=True)
     )
 
     with pytest.raises(RuntimeError, match='no such MyProduct'):
-        source.load(MyProduct, 'not existed')
+        source.load(MyProduct, {'code':'not existed'})
 
 def test_source_query(source:ModelSource):
-    assert [found_1, found_2] == list(source.query(MyProduct, (('name', '=', 'found product'),)))
+    assert [found_1, found_2] == list(source.query(MyProduct, {'name': 'found product'}))
 
     assert (
         [source._shared_source.populate_shared_models(found_1) ]
-        == list(source.query(MyProduct, (('code', '=', 'found-1'),), populated=True))
+        == list(source.query(MyProduct, {'code': 'found-1'}, populated=True))
     )
 
-    assert [] == list(source.query(MyProduct, (('id', '=', 'not-existed'),)))
+    assert [] == list(source.query(MyProduct, {'id': 'not-existed'}))
 
 def test_clone_with():
     pass
@@ -238,17 +244,20 @@ def test_chained_shared_populate_share_model(chained_shared_source:ChainedShared
     assert first_shared == populated.nested.content.item.content
 
 
-def test_chained_find_record():
-    pass
+def test_chained_find_record(chained_source:ModelSource):
+    assert None is chained_source.find_record(MyProduct, 'not-existed')
 
-def test_chained_reset_version():
-    pass
 
-def test_chained_find():
-    pass
+def test_chained_find(chained_source:ModelSource):
+    assert found_1 == chained_source.find(MyProduct, {'code':'found-1'})
+    assert found_2 == chained_source.find(MyProduct, {'code':'found-2'})
+    assert None is chained_source.find(MyProduct, {'code':'not-existed'})
 
-def test_chained_query():
-    pass
+
+def test_chained_query(chained_source:ModelSource):
+    assert {found_1.code, found_2.code} == set(
+        model.code for model in chained_source.query(MyProduct, {'name': 'found product'})
+    )
 
 def test_chained_clone_with():
     pass

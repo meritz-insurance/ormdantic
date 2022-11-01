@@ -28,7 +28,7 @@ from ..schema.base import (
 )
 from ..schema.shareds import PersistentSharedContentModel
 from ..schema.verinfo import VersionInfo
-from ..schema.source import Where
+from ..schema.source import NormalizedQueryConditionType
 
 _MAX_VAR_CHAR_LENGTH = 200
 _MAX_DECIMAL_DIGITS = 65
@@ -541,6 +541,9 @@ def _get_field_db_type(type_:Type) -> str:
     if type_ is int:
         return 'BIGINT'
 
+    if type_ is float:
+        return 'FLOAT'
+
     if issubclass(type_, Decimal):
         if issubclass(type_, ConstrainedDecimal):
             max_digits = min(type_.max_digits or _MAX_DECIMAL_DIGITS, _MAX_DECIMAL_DIGITS)
@@ -624,11 +627,11 @@ def get_query_and_args_for_getting_version(when:datetime | None):
 
 
 def get_query_and_args_for_getting_version_info(audit_version:int):
-    return f'SELECT * FROM {field_exprs(_VERSION_INFO_TABLE)} where version = %(version)s', {'version':audit_version}
+    return f'SELECT * FROM {field_exprs(_VERSION_INFO_TABLE)} WHERE version = %(version)s', {'version':audit_version}
 
 
 def get_query_and_args_for_getting_model_changes_of_version(audit_version:int):
-    return f'SELECT * FROM {field_exprs(_VERSION_CHANGE_TABLE)} where version = %(version)s', {'version':audit_version}
+    return f'SELECT * FROM {field_exprs(_VERSION_CHANGE_TABLE)} WHERE version = %(version)s', {'version':audit_version}
 
 
 def get_query_and_args_for_upserting(model:PersistentModel, set_id:int):
@@ -1186,7 +1189,8 @@ def get_sql_for_purging_external_index(model_type:Type) -> Iterator[str]:
 
 # fields is the json key , it can contain '.' like product.name
 def get_query_and_args_for_reading(type_:Type[PersistentModelT], 
-                                   fields: Tuple[str, ...] | str, where: Where,
+                                   fields: Tuple[str, ...] | str, 
+                                   where: NormalizedQueryConditionType,
                                    set_id: int,
                                    *,
                                    order_by: Tuple[str, ...] | str = tuple(), 
@@ -1223,8 +1227,7 @@ def get_query_and_args_for_reading(type_:Type[PersistentModelT],
     ns_types = dict(
         _build_namespace_types(
             type_, ns_types or {},
-            _build_namespace_set(
-                _merge_fields_and_where_fields(fields, where))
+            _build_namespace_set(_merge_fields_and_where_fields(fields, where))
         )
     )
 
@@ -1232,7 +1235,7 @@ def get_query_and_args_for_reading(type_:Type[PersistentModelT],
         _get_sql_for_reading(
             tuple(ns_types.items()), 
             fields, 
-            tuple((f, o) for f, o, _ in where), 
+            tuple((f, o) for f, (o, _) in where.items()), 
             order_by, offset, limit, 
             unwind, 
             cast(Type, base_type), for_count, bool(current)), 
@@ -1248,17 +1251,18 @@ def get_query_and_args_for_reading(type_:Type[PersistentModelT],
 
 
 # check fields and where for requiring the join.
-def _merge_fields_and_where_fields(fields:Tuple[str,...], where:Where) -> Tuple[str, ...]:
-    return tuple(itertools.chain(fields, (w[0] for w in where)))
+def _merge_fields_and_where_fields(fields:Tuple[str,...], where:NormalizedQueryConditionType) -> Tuple[str, ...]:
+    return tuple(itertools.chain(fields, where))
 
 
-def _fill_empty_fields_for_match(where:Where, fields:Iterable[str]) -> Where:
+def _fill_empty_fields_for_match(where:NormalizedQueryConditionType, 
+                                 fields: Iterable[str]) -> NormalizedQueryConditionType:
     fields_expr = ','.join(fields)
 
-    return tuple(
-        (fields_expr, w[1], w[2]) if w[1] == 'match' and not w[0] else w
-        for w in where
-    )
+    return {
+        (fields_expr if not field and value[0] == 'match' else field):value  
+        for field, value in where.items()
+    }
 
 
 @functools.lru_cache()
@@ -1403,11 +1407,11 @@ def _extract_fields(items:Iterable[str], ns:str) -> Tuple[str,...]:
             if item.startswith(removed) and '.' not in item[started:])
 
 
-def get_query_and_args_for_purging(type_:Type, where:Where, set_id:int):
+def get_query_and_args_for_purging(type_:Type, where:NormalizedQueryConditionType, set_id:int):
     # TODO delete parts and externals.
     query_args = _build_database_args(where, set_id)
 
-    field_and_op = tuple((f, o) for f, o, _ in where) + ((_SET_ID_FIELD, '='),)
+    field_and_op = tuple((f, o) for f, (o, _) in where.items()) + ((_SET_ID_FIELD, '='),)
 
     return _get_sql_for_purging(type_, field_and_op), query_args
 
@@ -1436,11 +1440,11 @@ def _get_sql_for_purging(type_:Type, field_and_value:FieldOp):
     )
 
 
-def get_query_and_args_for_deleting(type_:Type, where:Where, set_id:int):
+def get_query_and_args_for_deleting(type_:Type, where:NormalizedQueryConditionType, set_id:int):
     # TODO delete parts and externals.
     query_args = _build_database_args(where, set_id)
 
-    field_and_op = tuple((f, o) for f, o, _ in where) + ((_SET_ID_FIELD, '='),)
+    field_and_op = tuple((f, o) for f, (o, _) in where.items()) + ((_SET_ID_FIELD, '='),)
 
     return _get_sql_for_deleting(type_, field_and_op), query_args
 
@@ -1476,9 +1480,9 @@ def _get_sql_for_deleting(type_:Type, field_and_value:FieldOp):
     )
 
 
-def _build_database_args(where:Where, set_id:int ) -> Dict[str, Any]:
+def _build_database_args(where:NormalizedQueryConditionType, set_id:int ) -> Dict[str, Any]:
     return {
-        _get_parameter_variable_for_multiple_fields(field):value for field, _, value in where
+        _get_parameter_variable_for_multiple_fields(field):value for field, (_, value) in where.items()
     } | {'__set_id': set_id}
 
 

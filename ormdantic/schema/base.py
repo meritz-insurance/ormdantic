@@ -7,6 +7,7 @@ import inspect
 from uuid import uuid4
 
 import orjson
+from decimal import Decimal
 
 from pydantic import (
     BaseModel, ConstrainedDecimal, ConstrainedInt, Field, ConstrainedStr, 
@@ -27,6 +28,7 @@ JsonPathAndType = Tuple[Tuple[str,...], Type[Any]]
 StoredFieldDefinitions = Dict[str, JsonPathAndType]
  
 T = TypeVar('T')
+ScalarType = bool | int | Decimal | datetime.datetime | datetime.date | str | float
 
 
 def _orjson_dumps(v, *, default):

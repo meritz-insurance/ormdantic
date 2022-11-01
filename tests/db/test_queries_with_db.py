@@ -46,7 +46,7 @@ def test_get_query_and_args_for_reading():
         cursor.execute(*query_and_args)
 
         query_and_args = get_query_and_args_for_reading(
-            SimpleBaseModel, '*', tuple(), set_id=0, version=new_version)
+            SimpleBaseModel, '*', {}, set_id=0, version=new_version)
 
         cursor.execute(*query_and_args)
 
@@ -56,7 +56,7 @@ def test_get_query_and_args_for_reading():
         ] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(
-            SimpleBaseModel, ('__row_id',), (('__row_id', '=', 2),), 0,
+            SimpleBaseModel, ('__row_id',), {'__row_id': ('=', 2)}, 0,
             version=new_version
         )
 
@@ -69,7 +69,7 @@ def test_get_query_and_args_for_purging():
 
     with use_temp_database_cursor_with_model(model) as cursor:
         query_and_args = get_query_and_args_for_purging(
-            SimpleBaseModel, tuple(), 0)
+            SimpleBaseModel, {}, 0)
 
         cursor.execute(*query_and_args)
 
@@ -79,7 +79,7 @@ def test_get_query_and_args_for_purging():
         ] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(
-            SimpleBaseModel, ('id',), tuple(), 0, version=2)
+            SimpleBaseModel, ('id',), {}, 0, version=2)
 
         cursor.execute(*query_and_args)
 
@@ -91,7 +91,7 @@ def test_get_query_and_args_for_deleting():
     with use_temp_database_cursor_with_model(model) as cursor:
         allocate_audit_version(cursor, VersionInfo())
         query_and_args = get_query_and_args_for_deleting(
-            SimpleBaseModel, tuple(), 0)
+            SimpleBaseModel, {}, 0)
 
         cursor.execute(*query_and_args)
 
@@ -103,14 +103,14 @@ def test_get_query_and_args_for_deleting():
         ] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(
-            SimpleBaseModel, ('id',), tuple(), 0, version=2)
+            SimpleBaseModel, ('id',), {}, 0, version=2)
 
         cursor.execute(*query_and_args)
 
         assert tuple() == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(
-            SimpleBaseModel, ('id',), tuple(), 0, version=1)
+            SimpleBaseModel, ('id',), {}, 0, version=1)
 
         cursor.execute(*query_and_args)
 
@@ -143,7 +143,7 @@ def test_get_query_and_args_for_reading_for_parts():
 
         model.id = StrId("@")
         query_and_args = get_query_and_args_for_reading(
-            ContainerModel, ('id', 'name'), (('name', 'match', 'sample'),), 0,
+            ContainerModel, ('id', 'name'), {'name': ('match', 'sample')}, 0,
             version=new_version)
 
         cursor.execute(*query_and_args)
@@ -151,7 +151,7 @@ def test_get_query_and_args_for_reading_for_parts():
         assert [{'id':'@', 'name':'sample'}] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(
-            PartModel, ('__row_id', '__json', 'name', '__valid_start'), tuple(), 0, 
+            PartModel, ('__row_id', '__json', 'name', '__valid_start'), {}, 0, 
             version=new_version)
 
         cursor.execute(*query_and_args)
@@ -190,7 +190,7 @@ def test_get_query_and_args_for_reading_for_multiple_parts():
                                              keep_database_when_except=False) as cursor:
         
         query_and_args = get_query_and_args_for_reading(
-            PartModel, ('__row_id', '__json', 'name'), tuple(), 0, version=2)
+            PartModel, ('__row_id', '__json', 'name'), {}, 0, version=2)
 
         cursor.execute(*query_and_args)
 
@@ -233,14 +233,14 @@ def test_get_query_and_args_for_reading_for_nested_parts():
                                              keep_database_when_except=False) as cursor:
         model.id = StrId("@")
         query_and_args = get_query_and_args_for_reading(
-            ContainerModel, ('id', 'name'), (('name', '=', 'sample'),), 0, version=2)
+            ContainerModel, ('id', 'name'), {'name': ('=', 'sample')}, 0, version=2)
 
         cursor.execute(*query_and_args)
 
         assert [{'id':'@', 'name':'sample'}] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(
-            PartModel, ('__row_id', 'name'), tuple(), 0, version=2)
+            PartModel, ('__row_id', 'name'), {}, 0, version=2)
 
         cursor.execute(*query_and_args)
 
@@ -249,7 +249,7 @@ def test_get_query_and_args_for_reading_for_nested_parts():
         ] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(
-            MemberModel, ('__row_id', '__json', 'descriptions'), tuple(), 0, version=2)
+            MemberModel, ('__row_id', '__json', 'descriptions'), {}, 0, version=2)
 
         cursor.execute(*query_and_args)
 
@@ -277,7 +277,7 @@ def test_get_query_and_args_for_reading_for_external_index():
     with use_temp_database_cursor_with_model(model, emptry_codes_model,
                                              keep_database_when_except=False) as cursor:
         query_and_args = get_query_and_args_for_reading(
-            PartModel, ('__row_id', 'name', 'codes'), (('codes', '=', 'code1'),), 
+            PartModel, ('__row_id', 'name', 'codes'), {'codes': ('=', 'code1')}, 
             0, unwind='codes', version=2)
 
 
@@ -288,7 +288,8 @@ def test_get_query_and_args_for_reading_for_external_index():
         ] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(
-            PartModel, ('__row_id', 'name', 'codes'), (('name', '=', 'part1'),), 0, version=2)
+            PartModel, ('__row_id', 'name', 'codes'), {'name': ('=', 'part1')}, 
+            0, version=2)
 
         cursor.execute(*query_and_args)
 
@@ -297,7 +298,7 @@ def test_get_query_and_args_for_reading_for_external_index():
         ] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(
-            PartModel, ('__row_id', 'name', 'codes'), (('name', '=', 'empty code'),), 
+            PartModel, ('__row_id', 'name', 'codes'), {'name': ('=', 'empty code')}, 
             0, unwind='codes', version=2)
 
         cursor.execute(*query_and_args)
@@ -333,8 +334,8 @@ def test_get_query_and_args_for_reading_for_stored_fields():
     with use_temp_database_cursor_with_model(model, 
                                              keep_database_when_except=False) as cursor:
         query_and_args = get_query_and_args_for_reading(
-            MemberModel, ('__row_id', '__json', 'descriptions'), (('_part_name', '=', 'part1'),), 0,
-            version=2)
+            MemberModel, ('__row_id', '__json', 'descriptions'), 
+            {'_part_name': ('=', 'part1')}, 0, version=2)
 
         cursor.execute(*query_and_args)
 
@@ -377,7 +378,7 @@ def test_get_query_and_args_for_reading_for_explicit_external_index():
         query_and_args = get_query_and_args_for_reading(
             PartModel, 
             ('__row_id', 'name', '_container_codes', '_members_names'), 
-            tuple(), 0,
+            {}, 0,
             version=2,
             )
 
@@ -390,7 +391,7 @@ def test_get_query_and_args_for_reading_for_explicit_external_index():
         query_and_args = get_query_and_args_for_reading(
             PartModel, 
             ('__row_id', 'name', '_container_codes', '_members_names'), 
-            tuple(), 0,
+            {}, 0,
             unwind='_container_codes',
             version=2,
             )
@@ -405,7 +406,7 @@ def test_get_query_and_args_for_reading_for_explicit_external_index():
         query_and_args = get_query_and_args_for_reading(
             PartModel, 
             ('__row_id', 'name', '_container_codes', '_members_names'), 
-            tuple(), 0,
+            {}, 0,
             unwind=('_container_codes', '_members_names'),
             order_by=('_container_codes', '_members_names'),
             version=2,
@@ -423,7 +424,8 @@ def test_get_query_and_args_for_reading_for_explicit_external_index():
         query_and_args = get_query_and_args_for_reading(
             PartModel, 
             ('__row_id', 'name', '_container_codes', '_members_names'), 
-            (('_container_codes', '=', 'code1'), ('_members_names', '=', 'part1-member2')), 0,
+            {'_container_codes': ('=', 'code1'), '_members_names': ('=', 'part1-member2')}, 
+            0,
             unwind=('_container_codes', '_members_names'),
             version=2,
         )
@@ -476,7 +478,7 @@ def test_get_query_and_args_for_reading_for_reference():
         query_and_args = get_query_and_args_for_reading(
             ContainerModel, 
             ('name', 'part'),
-            tuple(), 0,
+            {}, 0,
             version=2,
             )
 
@@ -490,7 +492,7 @@ def test_get_query_and_args_for_reading_for_reference():
         query_and_args = get_query_and_args_for_reading(
             ContainerModel, 
             ('name', 'part.name', 'part.description'),
-            tuple(), 0,
+            {}, 0,
             version=2,
             )
 
@@ -504,7 +506,7 @@ def test_get_query_and_args_for_reading_for_reference():
         query_and_args = get_query_and_args_for_reading(
             ContainerModel, 
             ('name', 'part.name', 'part.part_info.name'),
-            tuple(), 0, 
+            {}, 0, 
             ns_types={'part.part_info':PartInfoModel},
             version=2,
             )
@@ -518,7 +520,7 @@ def test_get_query_and_args_for_reading_for_reference():
         query_and_args = get_query_and_args_for_reading(
             ContainerModel, 
             ('name', 'part.name', 'part.part_info.name'),
-            (('part.part_info.codes', '=', 'code-1'), ), 0,
+            {'part.part_info.codes': ('=', 'code-1')}, 0,
             ns_types={'part.part_info':PartInfoModel},
             unwind="part.part_info.codes",
             version=2,
@@ -562,7 +564,7 @@ def test_get_query_and_args_for_reading_for_reference_with_base_type():
                                              keep_database_when_except=False) as cursor:
         # simple one
         query_and_args = get_query_and_args_for_reading(
-            PartModel, ('name'), tuple(), 0,
+            PartModel, ('name'), {}, 0,
             version=2)
 
         cursor.execute(*query_and_args)
@@ -573,7 +575,7 @@ def test_get_query_and_args_for_reading_for_reference_with_base_type():
         ] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(
-            PartModel, ('name', 'info.name', 'attr.name'), tuple(),  0,
+            PartModel, ('name', 'info.name', 'attr.name'), {},  0,
             ns_types={'info':PartInfoModel, 'attr':PartAttrModel},
             version=2)
 
@@ -584,7 +586,7 @@ def test_get_query_and_args_for_reading_for_reference_with_base_type():
         ] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(
-            PartModel, ('name', 'attr.name'), tuple(), 0,
+            PartModel, ('name', 'attr.name'), {}, 0,
             ns_types={'attr':PartInfoModel}, 
             base_type=PartInfoModel,
             version=2)
@@ -597,7 +599,7 @@ def test_get_query_and_args_for_reading_for_reference_with_base_type():
         ] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(
-            PartModel, ('name', 'attr.name'), (('name', 'is null', None),),  0,
+            PartModel, ('name', 'attr.name'), {'name': ('is null', None)},  0,
             ns_types={'attr':PartInfoModel}, 
             base_type=PartInfoModel,
             version=2)
@@ -610,7 +612,7 @@ def test_get_query_and_args_for_reading_for_reference_with_base_type():
         
 
         query_and_args = get_query_and_args_for_reading(
-            PartModel, ('name', 'attr.name'), tuple(), 0, 
+            PartModel, ('name', 'attr.name'), {}, 0, 
             ns_types={'attr': PartInfoModel},
             base_type=PartModel,
             version=2)
@@ -653,7 +655,7 @@ def test_get_query_and_args_for_reading_for_where_is_null():
                                              keep_database_when_except=False) as cursor:
         # simple one
         query_and_args = get_query_and_args_for_reading(
-            PartModel, ('name', 'attr.name'), (('name', 'is null', None),), 0,
+            PartModel, ('name', 'attr.name'), {'name': ('is null', None)}, 0,
             ns_types={'attr':PartInfoModel}, 
             base_type=PartInfoModel, version=2)
 
@@ -692,7 +694,7 @@ def test_get_query_and_args_for_counting():
                                              keep_database_when_except=False) as cursor:
 
         query_and_args = get_query_and_args_for_reading(
-            PartModel, ('*',), tuple(), 0,
+            PartModel, ('*',), {}, 0,
             base_type=PartModel, for_count=True,
             version=2)
 
@@ -723,7 +725,7 @@ def test_get_query_and_args_for_reading_with_limit():
                                              keep_database_when_except=False) as cursor:
         # simple one
         query_and_args = get_query_and_args_for_reading(
-            EntryModel, ('name',), tuple(), 0,
+            EntryModel, ('name',), {}, 0,
             offset=2, limit=4, order_by='name',
             version=2)
 
@@ -758,7 +760,7 @@ def test_seq_id():
 
         # simple one
         query_and_args = get_query_and_args_for_reading(
-            Model, ('name', 'seq_1', 'seq_2'), tuple(), 0,
+            Model, ('name', 'seq_1', 'seq_2'), {}, 0,
             version=2)
 
         cursor.execute(*query_and_args)
@@ -786,7 +788,7 @@ def test_use_base_class_table_mixin():
                                              keep_database_when_except=False) as cursor:
         # simple one
         query_and_args = get_query_and_args_for_reading(
-            BaseModel, ('name','__json'), tuple(), 0, version=2)
+            BaseModel, ('name','__json'), {}, 0, version=2)
 
         cursor.execute(*query_and_args)
 
@@ -796,4 +798,4 @@ def test_use_base_class_table_mixin():
         ] == cursor.fetchall()
 
         with pytest.raises(RuntimeError, match='cannot make query for UseBaseClassTableMixin'):
-            get_query_and_args_for_reading(DerivedModel, ('*',), tuple(), 0)
+            get_query_and_args_for_reading(DerivedModel, ('*',), {}, 0)

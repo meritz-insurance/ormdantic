@@ -1,20 +1,21 @@
-from typing import  List, Tuple
-from weakref import ref
-from pyparsing import oneOf
+from typing import  List
 import pytest
 from pydantic import Field
+from datetime import date
 
 from ormdantic.database.storage import (
-    purge_objects, upsert_objects, load_object, 
-    find_objects, find_object
+    upsert_objects, 
 )
+
+from ormdantic.database.dbsource import ModelDatabaseStorage, create_database_source
 
 from ormdantic.schema import (
     PersistentModel, FullTextSearchedStringIndex, PartOfMixin, StringArrayIndex, 
-    update_forward_refs, IdentifiedModel, StrId, StoredFieldDefinitions,
+    update_forward_refs, IdentifiedModel, StrId
 )
 from ormdantic.schema.base import ( StringIndex,)
 from ormdantic.schema.shareds import ContentReferenceModel, PersistentSharedContentModel
+from ormdantic.schema.verinfo import VersionInfo
 
 from .tools import (
     use_temp_database_pool_with_model, 
@@ -142,33 +143,34 @@ models = [
 ]
 
 @pytest.fixture(scope='module')
-def pool():
+def storage():
     with use_temp_database_pool_with_model(
         SimpleContentModel, NestedContentModel, 
         DescriptionWithExternalModel, ReferenceWithPartsModel) as pool:
-        upsert_objects(pool, models)
+        upsert_objects(pool, models, 0)
 
-        yield pool
+        yield create_database_source(pool, 0, date.today(), 0)
 
 
-def test_upsert_objects_with_shared(pool):
-    simple_model = load_object(pool, SimpleContentModel, (('id', '=', 'first'),), 0)
+def test_load_with_shared(storage:ModelDatabaseStorage):
+    simple_model = storage.load(SimpleContentModel, {'id':'first'})
 
     assert isinstance(simple_model.contents[0].content, str)
     assert isinstance(simple_model.contents[1].content, str)
 
-    simple_model = load_object(pool, SimpleContentModel, (('id', '=', 'first'),), 0)
+    simple_model = storage.load(SimpleContentModel, {'id':'first'}, 
+                                populated=True)
 
     assert not isinstance(simple_model.contents[0].content, str)
     assert not isinstance(simple_model.contents[1].content, str)
 
 
-def test_upsert_objects_with_nested_shared(pool):
-    nested_model = load_object(pool, NestedContentModel, (('id', '=', 'nested'),), 0)
+def test_load_with_nested_shared(storage:ModelDatabaseStorage):
+    nested_model = storage.load(NestedContentModel, {'id':'nested'})
 
     assert isinstance(nested_model.nested.content, str)
 
-    nested_model = load_object(pool, NestedContentModel, (('id', '=', 'nested'),), 0,
+    nested_model = storage.load(NestedContentModel, {'id':'nested'},
                                populated=True)
 
     assert not isinstance(nested_model.nested.content, str)
@@ -181,59 +183,59 @@ def test_upsert_objects_with_nested_shared(pool):
         )
     )
     
-    upsert_objects(pool, created)
+    storage.store(created, VersionInfo())
 
-    created_model = load_object(pool, NestedContentModel, (('id', '=', 'created'),))
+    assert None is storage.find( NestedContentModel, {'id':'created'})
+
+    storage.update_version()
+
+    created_model = storage.load( NestedContentModel, {'id':'created'})
 
     assert created_model.nested.content == nested_model.nested.content.id
 
 
-def test_upsert_objects_with_shared_and_externals(pool):    
-    assert None is find_object(
-        pool, CodedDescriptionModel, (('codes', '=', 'code_a'),),
+def test_load_object_with_shared_and_externals(storage:ModelDatabaseStorage):    
+    assert None is storage.find(
+        CodedDescriptionModel, {'codes':'code_a'},
     ) 
 
-    description_model = load_object(
-        pool, CodedDescriptionModel, (('codes', '=', 'code_a'),),
+    description_model = storage.load(
+        CodedDescriptionModel, {'codes': 'code_a'},
         unwind='codes'
     )
 
     assert isinstance(description_model, CodedDescriptionModel)
 
-    description = load_object(pool, DescriptionWithExternalModel, (('id', '=', 'external'),),
-        populated=True)
+    description = storage.load(DescriptionWithExternalModel, {'id':'external'},
+                               populated=True)
 
     assert description.ref_model.get_content().description == description_model.description
     
 
-def test_upsert_objects_with_shared_and_parts(pool):
-    part_1_model = load_object(
-        pool, PartModel, (('name', '=', 'part_1'),),
-    ) 
+# def test_upsert_objects_with_shared_and_parts(storage:ModelDatabaseStorage):
+#     part_1_model = storage.load(PartModel, 'part_1')
 
-    container = load_object(
-        pool, ContainerModel, (('id', '=', 'f0c9920d60433b61c6aa3536e0c91697fb6d6af5'),)
-    )
+#     container = storage.load(
+#         ContainerModel, 'f0c9920d60433b61c6aa3536e0c91697fb6d6af5')
 
-    assert container.parts[0] == part_1_model
+#     assert container.parts[0] == part_1_model
 
-    ref_with_parts = load_object(
-        pool, ReferenceWithPartsModel, (('id', '=', 'part'),),
-        populated= True
-    )
+#     ref_with_parts = storage.load(
+#         ReferenceWithPartsModel, 'part', populated=True)
 
-    assert ref_with_parts.ref_model.content == container
+#     assert ref_with_parts.ref_model.content == container
 
 
-def test_delete_objects_with_shared(pool):
-    with pytest.raises(RuntimeError, match='PersistentSharedContentModel could not be deleted. you tried to deleted ContainerModel'):
-        purge_objects(pool, ContainerModel, (('id', '=', 'f0c9920d60433b61c6aa3536e0c91697fb6d6af5'),))
+# def test_delete_objects_with_shared(storage:ModelDatabaseStorage):
+#     with pytest.raises(RuntimeError, match='PersistentSharedContentModel could not be deleted. you tried to deleted ContainerModel'):
+#         storage.purge(ContainerModel, ('id', '=', 'f0c9920d60433b61c6aa3536e0c91697fb6d6af5'), 
+#                       version_info=VersionInfo())
 
 
-def test_find_objects_with_shared(pool):
-    objects = find_objects(pool, SimpleContentModel, tuple(), populated=True)
+# def test_find_objects_with_shared(storage:ModelDatabaseStorage):
+#     objects = storage.query(SimpleContentModel, tuple(), populated=True)
 
-    first = next(objects)
-    second = next(objects)
+#     first = next(objects)
+#     second = next(objects)
 
-    assert first.contents[0].content is first.contents[0].content
+#     assert first.contents[0].content is first.contents[0].content
