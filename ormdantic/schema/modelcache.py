@@ -1,7 +1,10 @@
 from typing import (DefaultDict, Dict, Type, Callable, Tuple, cast)
 from collections import defaultdict
 
-from ormdantic.schema.base import PersistentModel, PersistentModelT, get_identifying_field_values, ScalarType
+from ormdantic.schema.base import (
+    PersistentModel, PersistentModelT, 
+    get_identifying_field_values, ScalarType
+)
 
 from ..util import get_logger, convert_tuple
 
@@ -30,7 +33,8 @@ class ModelCache():
 
         return model
 
-    def find(self, type_:Type[PersistentModelT], id_values:ScalarType | Tuple[ScalarType]) -> PersistentModelT | None:
+    def find(self, type_:Type[PersistentModelT], 
+             id_values: ScalarType | Tuple[ScalarType, ...]) -> PersistentModelT | None:
         id_values = convert_tuple(id_values)
 
         if id_values in self._cached:
@@ -45,20 +49,10 @@ class ModelCache():
         
         return None
 
-    def load(self, type_:Type, id_values:ScalarType | Tuple[ScalarType]) -> PersistentModel:
-        id_values = convert_tuple(id_values)
-
-        found = self.find(type_, id_values)
-
-        if found is None:
-            raise RuntimeError('no such item in model cache')
-
-        return found
-
     def clear(self):
         return self._cached.clear()
 
-    def delete(self, type_:Type, id_values:ScalarType | Tuple[ScalarType]):
+    def delete(self, type_:Type, id_values:ScalarType | Tuple[ScalarType,...]):
         id_values = convert_tuple(id_values)
 
         targets = self._cached[id_values]
@@ -71,15 +65,15 @@ class ModelCache():
                     targets.pop(key)
                     break
 
-    def cached_get(self, type_:Type[PersistentModel], 
-                   func: Callable[..., PersistentModel | None], 
-                   id_values:ScalarType | Tuple[ScalarType]) -> PersistentModel | None:
+    def get(self, type_:Type[PersistentModel], 
+            id_values: ScalarType | Tuple[ScalarType, ...],
+            func: Callable[..., PersistentModel | None]) -> PersistentModel | None:
         id_values = convert_tuple(id_values)
         fetch = self.find(type_, id_values)
 
         if fetch:
             return fetch
-        else:
+        elif func:
             result = func(type_, *id_values)
 
             if result:
@@ -87,7 +81,7 @@ class ModelCache():
 
         return None
 
-    def has_entry(self, type_:Type, key:ScalarType | Tuple[ScalarType]) -> bool:
+    def has_entry(self, type_:Type, key:ScalarType | Tuple[ScalarType,...]) -> bool:
         key = convert_tuple(key)
 
         if key in self._cached:

@@ -144,11 +144,16 @@ def is_derived_from(type_:Type, base_type:Type[_T] | Tuple[Type,...]) -> TypeGua
     return False
 
 
-def get_union_type_arguments(type_:Type) -> Tuple[Type,...] | None:
+def get_union_type_arguments(type_:Type, target_type:Type | None = None) -> Tuple[Type,...] | None:
     union_generic = get_base_generic_alias_of(type_, Union, UnionType)
 
     if union_generic:
-        return get_args(union_generic)
+        args = get_args(union_generic)
+
+        if not target_type:
+            return args
+
+        return tuple(a for a in args if is_derived_from(a, target_type))
 
     return None
 

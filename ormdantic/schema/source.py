@@ -6,7 +6,7 @@ from datetime import date
 import copy
 import orjson
 
-import jsonpath_ng
+from ormdantic.util.tools import convert_as_list_or_tuple
 
 from ..util import get_logger, is_derived_from
 
@@ -19,6 +19,7 @@ from .shareds import (
     PersistentSharedContentModel, collect_shared_model_field_type_and_ids, 
     populate_shared_models, iterate_isolated_models
 )
+from .paths import extract
 from .modelcache import ModelCache
 from .verinfo import VersionInfo
 
@@ -40,15 +41,15 @@ class SharedModelSource:
     def __init__(self, cache: ModelCache | None = None):
         self._cache = cache or ModelCache()
 
-    def find(self, type_:Type[PersistentModel], id:str | int) -> PersistentModel | None: 
+    def find(self, type_:Type[PersistentModelT], id:str | int) -> PersistentModelT | None: 
         ''' check internal cache and load item if not exist. '''
         if self._cache.has_entry(type_, id):
             return self._cache.find(type_, id)
 
-        record = next(self.find_records(type_, id), None)
+        record = next(self.find_records_by_ids(type_, id), None)
 
         if record:
-            return self._cache.register(type_, _parse_model(type_, *record))
+            return cast(PersistentModelT, self._cache.register(type_, _parse_model(type_, *record)))
 
         return None
 
@@ -56,7 +57,7 @@ class SharedModelSource:
         ''' check internal cache and load items if not exist. '''
         to_find = [id for id in ids if not self._cache.has_entry(type_, id)]
 
-        for record in self.find_records(type_, *to_find):
+        for record in self.find_records_by_ids(type_, *to_find):
             self._cache.register(type_, _parse_model(type_, *record))
 
         for id in ids:
@@ -73,7 +74,7 @@ class SharedModelSource:
 
         return found
 
-    def find_records(self, type_:Type, *ids:str | int) -> Iterator[Tuple[str, int]]:
+    def find_records_by_ids(self, type_:Type, *ids:str | int) -> Iterator[Tuple[str, int]]:
         raise NotImplementedError('_find_records should be implemented')
 
     def _build_shared_model_set(self, model:PersistentModel):
@@ -89,7 +90,7 @@ class SharedModelSource:
             for shared_model in self.find_multiple(shared_type, *shared_ids):
                 self._build_shared_model_set(shared_model)
 
-    def populate_shared_models(self, model:PersistentModel):
+    def populate_shared_models(self, model:PersistentModelT) -> PersistentModelT:
         self._build_shared_model_set(model)
 
         return populate_shared_models(model, self._cache)
@@ -119,14 +120,16 @@ class ModelSource:
                      ) -> Iterator[Dict[str, Any]]:
         raise NotImplementedError('query should be implemented')
      
-    def find_record(self, type_:Type, *id_values:Any) -> Tuple[str, int] | None:
+    def find_record(self, type_:Type, 
+                    query_condition: QueryConditionType, 
+                    unwind: Tuple[str, ...] | str = tuple()) -> Tuple[str, int] | None:
         raise NotImplementedError('find_record should be implemented')
 
     def get_latest_version(self) -> int:
         raise NotImplementedError('get current version should be implemented')
 
     def update_version(self, version:int | None = None) -> int:
-        current = version or self.get_latest_version()
+        current = self.get_latest_version() if version is None else min(version, self.get_latest_version())
 
         if current != self._version:
             self._version = current
@@ -135,17 +138,18 @@ class ModelSource:
         return current
 
     def find(self, type_:Type[PersistentModelT], query_condition:QueryConditionType, 
-             populated: bool = False, unwind: Tuple[str, ...] | str = tuple()) -> PersistentModelT | None:
+             populated: bool = False, 
+             unwind: Tuple[str, ...] | str = tuple()) -> PersistentModelT | None:
         id_values = extract_id_values(type_, query_condition)
 
         if id_values:
             if is_derived_from(type_, PersistentSharedContentModel):
-                return cast(PersistentModelT, self._shared_source.find(type_, id_values[0]))
-
-            model = cast(Any, self._cache.cached_get(type_, self._find_model, id_values))
+                model = cast(PersistentModelT, self._shared_source.find(type_, id_values[0]))
+            else:
+                model = cast(Any, self._cache.get(type_, id_values, self._find_model))
 
             if model and populated:
-                return cast(PersistentModelT, self._shared_source.populate_shared_models(model))
+                return self._shared_source.populate_shared_models(model)
 
             return model
         else:     
@@ -158,13 +162,18 @@ class ModelSource:
             second = next(items, None)
 
             if second:
-                raise RuntimeError(f'multiple items for find. check {query_condition=} for {type_=} in {self=}')
+                _logger.fatal(f'multiple items for find. {query_condition=} for {type_=} in {self=}')
+                raise RuntimeError(f'multiple items for find')
 
             return first
     
-    def load(self, type_:Type[PersistentModelT], query_condition:QueryConditionType, 
-             populated: bool = False, unwind: Tuple[str, ...] | str = tuple()) -> PersistentModelT:
-        fetch = self.find(type_, query_condition, populated=populated, unwind=unwind)
+    def load(self, type_:Type[PersistentModelT], 
+             query_condition: QueryConditionType,
+             populated: bool = False, 
+             unwind: Tuple[str, ...] | str = tuple()) -> PersistentModelT:
+
+        fetch = self.find(type_, query_condition, 
+                          populated=populated, unwind=unwind)
 
         if fetch is None:
             _logger.fatal(f'cannot load {type_=}:{query_condition=} from {self=}')
@@ -172,13 +181,13 @@ class ModelSource:
 
         return fetch
 
-    def query(self, type_:Type[PersistentModelT], query_condition:QueryConditionType, *, 
-            populated:bool = False, 
-            unwind:Tuple[str,...] | str = tuple()) -> Iterator[PersistentModelT]:
-        fields = get_identifying_fields(type_)
+    def query(self, type_:Type[PersistentModelT], 
+              query_condition: QueryConditionType,
+              populated: bool = False,
+              unwind: Tuple[str, ...] | str = tuple()) -> Iterator[PersistentModelT]:
 
-        for record in self.query_records(type_, query_condition, fields=fields, unwind=unwind):
-            found = self.find(type_, record, populated=populated)
+        for identified in self._iterate_identified_result_record(type_, query_condition, unwind):
+            found = self.find(type_, identified, populated=populated)
 
             if found:
                 yield found
@@ -192,7 +201,12 @@ class ModelSource:
             copied._ref_date = ref_date
             changed = True
 
-        if version and copied._version != version:
+        if version is None:
+            version = self.get_latest_version()
+        else:
+            version = min(version, self.get_latest_version())
+
+        if copied._version != version:
             copied._version = version
             changed = True
 
@@ -211,6 +225,23 @@ class ModelSource:
 
         return None
 
+    def _iterate_identified_result_record(self,
+                                          type_: Type, 
+                                          query_condition: QueryConditionType,
+                                          unwind: Tuple[str, ...] | str = tuple()
+                                          ) -> Iterator[Dict[str, Any]]:
+        fields = get_identifying_fields(type_)
+
+        if fields and len(fields) == len(query_condition.keys()):
+            if all(f in query_condition and _is_op_equals(query_condition[f]) for f in fields):
+                yield query_condition
+                return
+
+        for record in self.query_records(type_, query_condition, fields=fields, unwind=unwind):
+            yield record
+
+def _is_op_equals(item:Tuple[str, Any] | ScalarType) -> bool:
+    return not isinstance(item, tuple) or item[0] == '='
 
 class ModelStorage(ModelSource):
     @overload
@@ -227,18 +258,41 @@ class ModelStorage(ModelSource):
               version_info: VersionInfo) -> Iterable[PersistentModel] | PersistentModel:
         raise NotImplementedError('store should be implemented')
 
-    def squash(self, type_:Type, *id_values:Iterable[Tuple[Any,...]], 
-               version_info: VersionInfo) -> List[Dict[str, Any]]:
-        raise NotImplementedError('squash should be implemented')
+    def squash(self, type_:Type, query_condition:QueryConditionType,
+               version_info: VersionInfo, unwind:Tuple[str,...]|str = tuple()) -> List[Dict[str, Any]]:
 
-    def delete(self, type_:Type, *id_values:Iterable[Tuple[Any,...]], 
+        return self._squash_models(type_,
+                           self._iterate_identified_result_record(
+                               type_, query_condition, unwind),
+                           version_info)
+                                    
+    
+    def _squash_models(self, type_:Type, identifieds:Iterator[Dict[str, Any]],
                version_info: VersionInfo) -> List[Dict[str, Any]]:
-        raise NotImplementedError('delete should be implemented')
+        raise NotImplementedError('_squash_model should be implemented')
 
-    def purge(self, type_:Type, *id_values:Iterable[Tuple[Any,...]],
+    def delete(self, type_:Type, query_condition:QueryConditionType,
+               version_info: VersionInfo, unwind:Tuple[str,...]|str = tuple()) -> List[Dict[str, Any]]:
+
+        return self._delete_models(type_,
+                           self._iterate_identified_result_record(
+                               type_, query_condition, unwind),
+                           version_info)
+
+    def _delete_models(self, type_:Type, identifieds:Iterator[Dict[str, Any]],
                version_info: VersionInfo) -> List[Dict[str, Any]]:
-        raise NotImplementedError('delete should be implemented')
-        
+        raise NotImplementedError('_squash_model should be implemented')
+
+    def purge(self, type_:Type, query_condition:QueryConditionType,
+               version_info: VersionInfo, unwind:Tuple[str,...]|str = tuple()) -> List[Dict[str, Any]]:
+        return self._purge_models(type_,
+                           self._iterate_identified_result_record(
+                               type_, query_condition, unwind),
+                           version_info)
+
+    def _purge_models(self, type_:Type, identifieds:Iterator[Dict[str, Any]],
+               version_info: VersionInfo) -> List[Dict[str, Any]]:
+        raise NotImplementedError('_squash_model should be implemented')
 
 def _parse_model(type_:Type[PersistentModelT], json:str, row_id:int) -> PersistentModelT:
     model = parse_object_for_model(orjson.loads(json), type_)
@@ -268,10 +322,10 @@ class ChainedSharedModelSource(SharedModelSource):
             if found:
                 yield found
 
-    def find_records(self, type_: Type, *ids: str | int) -> Iterator[Tuple[str, int]]:
+    def find_records_by_ids(self, type_: Type, *ids: str | int) -> Iterator[Tuple[str, int]]:
         for id in ids:
             for s in self._sources:
-                found = list(s.find_records(type_, id))
+                found = list(s.find_records_by_ids(type_, id))
 
                 if found:
                     yield from found
@@ -299,17 +353,21 @@ class ChainedModelSource(ModelSource):
               joined: Dict[str, Type[PersistentModel]] | None = None) -> Iterator[Dict[str, Any]]:
         raise NotImplementedError('query should be implemented')
      
-    def find_record(self, type_:Type, *id_values:Any) -> Tuple[str, int] | None:
+    def find_record(self, type_:Type, query_condition:QueryConditionType, 
+                    unwind: Tuple[str, ...] | str = tuple()) -> Tuple[str, int] | None:
         for source in self._sources:
-            found = source.find_record(type_, id_values)
+            found = source.find_record(type_, query_condition, unwind)
             
             if found:
                 return found
 
         return None
 
-    def update_version(self, version:int | None = None):
+    def update_version(self, version:int | None = None) -> int:
         return max(source.update_version(version) for source in self._sources)
+
+    def get_latest_version(self) -> int:
+        return max(source.get_latest_version() for source in self._sources)
 
     def find(self, type_:Type[PersistentModel], *id_values:Any,
              populated: bool = False) -> PersistentModel | None:
@@ -341,6 +399,9 @@ class ChainedModelSource(ModelSource):
                     break
 
     def clone_with(self, ref_date:date | None = None, version: int | None = None):
+        if version is None:
+            version = self.get_latest_version()
+
         return ChainedModelSource(*tuple(s.clone_with(ref_date, version) for s in self._sources))
 
 
@@ -350,7 +411,7 @@ class MemorySharedModelSource(SharedModelSource):
         cache = ModelCache()
 
         for model in shared_models:
-            self._cache.register(type(model), model)
+            cache.register(type(model), model)
 
         super().__init__(cache)
 
@@ -360,7 +421,7 @@ class MemorySharedModelSource(SharedModelSource):
     def delete(self, type, id:str):
         self._cache.delete(type, id)
 
-    def find_records(self, type_:Type, *ids:str | int) -> Iterator[Tuple[str, int]]:
+    def find_records_by_ids(self, type_:Type, *ids:str | int) -> Iterator[Tuple[str, int]]:
         # we keep all model in cache. 
         return
         yield
@@ -374,6 +435,7 @@ class MemoryModelSource(ModelStorage):
             model_sets[isinstance(model, PersistentSharedContentModel)].append(model)
 
         shared_source = shared_source or MemorySharedModelSource(model_sets[1])
+
         super().__init__(shared_source, date.today(), 0, name=name)
 
         for model in model_sets[0]:
@@ -399,7 +461,7 @@ class MemoryModelSource(ModelStorage):
         for field, op_value in query_condition.items():
             if isinstance(op_value, tuple):
                 if op_value[0] != '=':
-                    raise NotImplementedError('query_record should be implemented for specific case')
+                    raise NotImplementedError('query_record should be implemented for specific op')
                 sub_key = (field, op_value[1])
             else:
                 sub_key = (field, op_value)
@@ -413,7 +475,7 @@ class MemoryModelSource(ModelStorage):
         for key in keys:
             yield {f:v for f, v in targets[key].items() if not fields or f in fields}
 
-    def find_record(self, type_:Type, query_cond:QueryConditionType) -> Tuple[str, int] | None:
+    def find_record(self, type_:Type, query_cond:QueryConditionType, unwind:Tuple[str,...]|str = tuple()) -> Tuple[str, int] | None:
         return None
 
     def get_latest_version(self) -> int:
@@ -440,40 +502,44 @@ class MemoryModelSource(ModelStorage):
                     self._cache.register(type(model), model)
                     model_dict = model.dict()
 
-                    self._model_maps[_build_model_map_key(type(model), model_dict)] = model_dict
+                    self._model_maps[type(model)][_build_model_map_key(type(model), model_dict)] = model_dict
 
             saved.append(model)
 
         return saved
 
-    def squash(self, type_:Type, *id_values_set:Any, version_info:VersionInfo):
+    def squash(self, type_:Type, query_condition:QueryConditionType, version_info:VersionInfo):
         return []
 
-    def delete(self, type_:Type, *id_values_set:Any, version_info:VersionInfo):
+    def _delete_models(self, type_:Type, identifieds:Iterator[Dict[str, Any]], version_info: VersionInfo):
         if is_derived_from(type_, PersistentSharedContentModel):
             shared_source = self._shared_source
-            if isinstance(shared_source, MemorySharedModelSource):
-                shared_source.delete(type_, *id_values_set)
+            for identified in identifieds:
+                if isinstance(shared_source, MemorySharedModelSource):
+                    shared_source.delete(type_, next(iter(identified.values())))
         else:
-            fields = get_identifying_fields(type_)
-            targets = self._model_maps[type_]
+            for identified in identifieds:
+                targets = self._model_maps[type_]
 
-            for id_values in id_values_set:
-                self._cache.delete(type_, *id_values)
+                self._cache.delete(type_, *identified.values())
 
-                key_and_values = frozenset(zip(fields, id_values))
+                key_and_values = frozenset(identified.items())
                 keys = _find_matched_keys(targets, key_and_values)
 
                 for key in keys:
                     targets.pop(key)
 
-    def purge(self, type_:Type, *id_values_set:Any, version_info:VersionInfo):
-        self.delete(self, type_, *id_values_set, version_info=version_info)
+    def purge(self, type_:Type, query_condition:QueryConditionType, version_info:VersionInfo):
+        self.delete(type_, query_condition, version_info)
 
 
 def extract_id_values(type_:Type, where_condition:QueryConditionType) -> Tuple[Any,...] | None:
     id_fields = get_identifying_fields(type_)
     id_values = []
+
+    if not id_fields:
+        _logger.fatal(f'identified field should be existed for {type_=}')
+        raise RuntimeError('no identified fields')
 
     for field in id_fields:
         if field not in where_condition:
@@ -500,7 +566,7 @@ def to_normalize_query_condition(query_condition:QueryConditionType) -> Normaliz
 
 
 def _build_model_maps(models:List[PersistentModel]):
-    model_maps: DefaultDict[Type, Dict[FrozenSet[Tuple[str, Any]], Dict]] = defaultdict(dict)
+    model_maps: DefaultDict[Type, Dict[FrozenSet[Tuple[str, Any]], Dict[str, Any]]] = defaultdict(dict)
 
     for model in models:
         model_type = type(model)
@@ -519,17 +585,20 @@ def _find_matched_keys(targets:Dict[FrozenSet[Tuple[str, Any]], Any],
 def _build_model_map_key(model_type:Type, model_dict:Dict[str, Any]) -> FrozenSet[Tuple[str, Any]]:
     key = []
 
-    for field, (paths, field_type) in get_stored_fields(model_type).items():
-        full_path = '.'.join([p for p in paths if p != '$' and p != '.'])
+    for field, (paths, _) in get_stored_fields(model_type).items():
+        values = cast(Any, model_dict)
 
-        json_expr = jsonpath_ng.parse(full_path)
+        for path in paths:
+            values = extract(values, path)
 
-        values = tuple(match.value for match in json_expr.find(model_dict))
+        items = convert_as_list_or_tuple(values)
 
-        if len(values) == 1:
-            values = values[0]
+        if len(items) == 1:
+            field_value = items[0]
+        else:
+            field_value = tuple(items) if isinstance(items, list) else items
 
-        key.append((field, values))
+        key.append((field, field_value))
 
     return frozenset(key)
 

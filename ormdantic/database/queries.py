@@ -541,8 +541,8 @@ def _get_field_db_type(type_:Type) -> str:
     if type_ is int:
         return 'BIGINT'
 
-    if type_ is float:
-        return 'FLOAT'
+    # if type_ is float:
+    #     return 'FLOAT'
 
     if issubclass(type_, Decimal):
         if issubclass(type_, ConstrainedDecimal):
@@ -626,12 +626,12 @@ def get_query_and_args_for_getting_version(when:datetime | None):
         )
 
 
-def get_query_and_args_for_getting_version_info(audit_version:int):
-    return f'SELECT * FROM {field_exprs(_VERSION_INFO_TABLE)} WHERE version = %(version)s', {'version':audit_version}
+def get_query_and_args_for_getting_version_info(version:int):
+    return f'SELECT * FROM {field_exprs(_VERSION_INFO_TABLE)} WHERE version = %(version)s', {'version':version}
 
 
-def get_query_and_args_for_getting_model_changes_of_version(audit_version:int):
-    return f'SELECT * FROM {field_exprs(_VERSION_CHANGE_TABLE)} WHERE version = %(version)s', {'version':audit_version}
+def get_query_and_args_for_getting_model_changes_of_version(version:int):
+    return f'SELECT * FROM {field_exprs(_VERSION_CHANGE_TABLE)} WHERE version = %(version)s', {'version':version}
 
 
 def get_query_and_args_for_upserting(model:PersistentModel, set_id:int):
@@ -1532,7 +1532,7 @@ def _build_where_op(fields_op:Tuple[str, str] | Tuple[str, str, str], ns:str = '
     if variable.lower() in [_SET_ID_FIELD, 'version']:
         ns = ''
 
-    variable = _normalize_database_object_name(ns + _normalize_database_object_name(variable), False)
+    variable = _normalize_database_object_name(ns + _normalize_database_object_name(variable))
 
     assert op != 'match'
 
@@ -1971,11 +1971,8 @@ def _get_populated_table_query_from_base(query_for_base:str,
     )
 
 
-def _normalize_database_object_name(value:str, to_lower:bool = False) -> str:
+def _normalize_database_object_name(value:str) -> str:
     normalized = value.replace('.', '_').replace(',', '_').replace(' ', '')
-
-    if to_lower:
-        normalized = normalized.lower()
 
     return normalized
 

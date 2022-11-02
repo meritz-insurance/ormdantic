@@ -11,6 +11,8 @@
         "**/__pycache__"
     ] ,
 
+    "useLibraryCodeForTypes": true,
+
     "reportMissingImports": true,
     "reportPrivateUsage": "none",
     "reportTypeshedErrors": "warning"

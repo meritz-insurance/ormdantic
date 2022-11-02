@@ -4,7 +4,9 @@ from pymysql import Connection, connect
 from pymysql.cursors import DictCursor
 from contextlib import contextmanager
 
-from ormdantic.database import DatabaseConnectionPool, create_table, upsert_objects
+from ormdantic.database import (
+    DatabaseConnectionPool, create_table, upsert_objects
+)
 from ormdantic.database.connections import _DATABASE, _PASSWORD
 
 from ormdantic.schema.base import PersistentModel, get_part_types

@@ -22,8 +22,10 @@ from ..schema.base import (
 from ..schema.verinfo import VersionInfo
 from ..schema.source import QueryConditionType, to_normalize_query_condition
 from ..schema.shareds import ( 
-    PersistentSharedContentModel, 
-    get_shared_content_types, iterate_isolated_models
+    PersistentSharedContentModel,
+    extract_shared_models, 
+    get_shared_content_types,
+    has_shared_models, iterate_isolated_models
 )
 
 from .queries import (
@@ -110,15 +112,20 @@ def upsert_objects(pool:DatabaseConnectionPool,
             for m in model_list
         )
 
+        targets = tuple(
+            m.copy(deep=True) if has_shared_models(m) else m
+            for m in targets
+        )
+
         allocate_audit_version(cursor, version_info)
 
         for model in targets:
-            model._before_save()
-
             # we will remove content of the given model. so, we copy it and remove them.
             # for not updating original model.
 
             for sub_model in iterate_isolated_models(model):
+                sub_model._before_save()
+
                 cursor.execute(*get_query_and_args_for_upserting(sub_model, set_id))
 
                 loop = True
@@ -130,6 +137,8 @@ def upsert_objects(pool:DatabaseConnectionPool,
                         _upsert_parts_and_externals(cursor, row[_ROW_ID_FIELD], type(sub_model))
 
                     loop = cursor.nextset()
+
+            extract_shared_models(model, True)
 
     return targets[0] if is_single else targets
 
@@ -230,16 +239,9 @@ def delete_objects(pool: DatabaseConnectionPool,
 
             loop = True
             while loop:
-                row_ids = []
-
                 for row in cursor.fetchall():
                     _update_audit_model(cursor, row)
-                    row_ids.append(row[_ROW_ID_FIELD])
-
                     deleted.append(row[_AUDIT_MODEL_ID_FIELD])
-
-                if row_ids:
-                    _delete_parts_and_externals(cursor, tuple(row_ids), type_)
 
                 loop = cursor.nextset()
 
@@ -282,9 +284,9 @@ def purge_objects(pool: DatabaseConnectionPool,
 
                 for row in cursor.fetchall():
                     _update_audit_model(cursor, row)
-                    row_ids.append(row[_ROW_ID_FIELD])
-
                     deleted.append(row[_AUDIT_MODEL_ID_FIELD])
+
+                    row_ids.append(row[_ROW_ID_FIELD])
 
                 if row_ids:
                     _delete_parts_and_externals(cursor, tuple(row_ids), type_)
@@ -417,12 +419,16 @@ def query_records(pool: DatabaseConnectionPool,
                   ref_date: date | None = None,
                   ) -> Iterator[Dict[str, Any]]:
 
+    if not fields:
+        _logger.fatal('empty fields for query_records. it makes an invalid query.')
+        raise RuntimeError('empty fields for querying')
+
     query_and_param = get_query_and_args_for_reading(
         type_, fields, to_normalize_query_condition(where), 
         order_by=order_by, limit=limit, offset=offset, 
         unwind=unwind,
         ns_types=joined,
-        version=version or get_current_version(pool),
+        version=version,
         current=ref_date, set_id=set_id)
 
     with pool.open_cursor() as cursor:

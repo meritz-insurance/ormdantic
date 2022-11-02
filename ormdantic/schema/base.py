@@ -30,8 +30,7 @@ StoredFieldDefinitions = Dict[str, JsonPathAndType]
 T = TypeVar('T')
 ScalarType = bool | int | Decimal | datetime.datetime | datetime.date | str | float
 
-
-def _orjson_dumps(v, *, default):
+def orjson_dumps(v, *, default=None):
     # orjson.dumps returns bytes, to match standard json.dumps we need to decode
     return orjson.dumps(v, default=default).decode()
 
@@ -76,7 +75,7 @@ class SchemaBaseModel(BaseModel, metaclass=SchemaBaseMetaclass):
     class Config:
         title = 'model which can generate json schema.'
 
-        json_dumps = _orjson_dumps
+        json_dumps = orjson_dumps
         json_loads = orjson.loads
 
 
@@ -368,7 +367,7 @@ def get_identifer_of(model:SchemaBaseModel) -> Iterator[Tuple[str, Any]]:
 
 def assign_identifying_fields_if_empty(model:ModelT, inplace:bool=False, 
                                        next_seq: Callable[[str], Any] | None = None) -> ModelT:
-    to_be_updated  = None
+    to_be_updated = None
 
     for field_name in type(model).__fields__.keys(): 
         field_value = getattr(model, field_name)
@@ -387,7 +386,7 @@ def assign_identifying_fields_if_empty(model:ModelT, inplace:bool=False,
     return to_be_updated or model
 
 
-def get_type_for_table(type_:Type[PersistentModelT]) -> Type:
+def get_type_for_table(type_:Type) -> Type:
     if is_derived_from(type_, UseBaseClassTableMixin):
         for base in inspect.getmro(type_):
             if (is_derived_from(base, PersistentModel) 

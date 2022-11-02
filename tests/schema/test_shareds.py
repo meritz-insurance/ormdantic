@@ -8,6 +8,7 @@ from ormdantic.schema.base import (
 )
 from ormdantic.schema.shareds import (
     SharedContentMixin, ContentReferenceModel, 
+    SharedContentModelT,
     collect_shared_model_field_type_and_ids, populate_shared_models, 
     extract_shared_models, extract_shared_models_for, get_shared_content_types
 )
@@ -110,15 +111,17 @@ def test_get_content_id():
 
 def test_get_content():
     content = MyContent(name='name')
-    model = MySharedModel(content=content, code='1')
+    model = Container(items=[
+        MySharedModel(content=content, code='1')
+    ])
 
-    assert content == model.get_content()
-    assert MyContent == model.get_content_type()
+    assert content == model.items[0].get_content()
+    assert MyContent == model.items[0].get_content_type()
 
     extract_shared_models(model, True)
 
     with pytest.raises(RuntimeError, match='.*cannot get the content.*'):
-        model.get_content()
+        model.items[0].get_content()
 
 
 def test_wrong_using_content_reference_model():
@@ -366,6 +369,7 @@ def test_collect_shared_model_ids():
 def test_get_shared_content_types():
     assert (MyContent, MyAnotherContent) == get_shared_content_types(ComplexContainer)
 
+
 def test_set_loader():
     content1 = MyContent(name='name1')
 
@@ -378,3 +382,13 @@ def test_set_loader():
     shared_model.set_loader(lambda x: content1)
 
     assert content1 == shared_model.get_content()
+
+
+def test_use_content_reference_directly():
+    class MyContentReferenceModel(ContentReferenceModel[SharedContentModelT]):
+        pass
+
+    model = MyContentReferenceModel(content='')
+
+    with pytest.raises(RuntimeError, match='do not use.*'):
+        model.get_content_type()

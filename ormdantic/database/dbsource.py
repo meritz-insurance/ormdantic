@@ -4,18 +4,18 @@ from datetime import date
 from ormdantic.schema.modelcache import ModelCache
 
 from ormdantic.schema.verinfo import VersionInfo
-from ormdantic.util.tools import convert_tuple
 
 from ..util import get_logger
-from ..schema.base import PersistentModelT, get_identifying_fields, PersistentModel
+from ..schema.base import PersistentModelT, PersistentModel
 from ..schema.source import (
-    ModelStorage, QueryConditionType, SharedModelSource, Where, to_normalize_query_condition,
+    ModelStorage, QueryConditionType, SharedModelSource, Where, 
     NormalizedQueryConditionType
 )
 
 from .connections import DatabaseConnectionPool
 from .storage import (
-    purge_objects, get_current_version, query_records, squash_objects, upsert_objects
+    delete_objects, purge_objects, get_current_version, query_records, squash_objects, 
+    upsert_objects, delete_objects
 )
 from .queries import _ROW_ID_FIELD, _JSON_FIELD
 
@@ -30,9 +30,9 @@ class SharedModelDatabaseSource(SharedModelSource):
         self._set_id = set_id
         self._pool = pool
 
-        super().__init__(None)
+        super().__init__(cache)
 
-    def find_records(self, type_:Type[PersistentModelT], *ids:str | int
+    def find_records_by_ids(self, type_:Type[PersistentModelT], *ids:str | int
                      ) -> Iterator[Tuple[str, int]]:
         return _find_objects(self._pool, type_, {'id': ('in', ids)}, self._set_id)
 
@@ -48,11 +48,14 @@ class ModelDatabaseStorage(ModelStorage):
 
         super().__init__(shared_source, ref_date, version)
 
-    def find_record(self, type_:Type[PersistentModelT], query_condition: QueryConditionType,
+    def find_record(self, type_:Type[PersistentModelT], 
+                    query_condition: QueryConditionType,
+                    unwind:Tuple[str,...]|str = tuple()
                     ) -> Tuple[str, int] | None:
 
         return _find_object(self._pool, type_, query_condition, self._set_id,
-                              version=self._version, ref_date=self._ref_date)
+                            unwind=unwind,
+                            version=self._version, ref_date=self._ref_date)
 
     def query_records(self, type_:Type, where:QueryConditionType, 
              *,
@@ -75,17 +78,21 @@ class ModelDatabaseStorage(ModelStorage):
 
     def store(self, models:Iterable[PersistentModel] | PersistentModel, 
               version_info: VersionInfo) -> Tuple[PersistentModel] | PersistentModel:
+
         return upsert_objects(self._pool, models, self._set_id, version_info)
 
-    def squash(self, type_: Type, *id_values_set: Any, version_info: VersionInfo) -> List[Dict[str, Any]]:
-        wheres = [_build_where_from_id_values(type_, id_values) for id_values in id_values_set]
-        
-        return squash_objects(self._pool, type_, wheres, self._set_id, version_info=version_info)
+    def _squash_models(self, type_: Type, identifieds: Iterator[Dict[str, Any]], 
+                       version_info: VersionInfo) -> List[Dict[str, Any]]:
+        return squash_objects(self._pool, type_, list(identifieds), 
+                              self._set_id, version_info=version_info)
 
-    def delete(self, type_:Type, *id_values_set: Any, version_info:VersionInfo) -> List[Dict[str, Any]]:
-        wheres = [_build_where_from_id_values(type_, id_values) for id_values in id_values_set]
+    def _delete_models(self, type_:Type, identifieds: Iterator[Dict[str, Any]], 
+                       version_info: VersionInfo) -> List[Dict[str, Any]]:
+        return delete_objects(self._pool, type_, list(identifieds), self._set_id, version_info=version_info) 
 
-        return purge_objects(self._pool, type_, wheres, self._set_id, version_info=version_info) 
+    def _purge_models(self, type_:Type, identifieds: Iterator[Dict[str, Any]], 
+                       version_info: VersionInfo) -> List[Dict[str, Any]]:
+        return purge_objects(self._pool, type_, list(identifieds), self._set_id, version_info=version_info) 
 
 
 def create_database_source(pool:DatabaseConnectionPool, set_id:int, ref_date:date, version:int = 0):
@@ -93,27 +100,16 @@ def create_database_source(pool:DatabaseConnectionPool, set_id:int, ref_date:dat
                                 set_id, ref_date, version)
 
 
-def _build_where_from_id_values(type_:Type, id_values:Any):
-    id_values = convert_tuple(id_values)
-
-    fields = get_identifying_fields(type_)
-
-    if len(fields) != len(id_values):
-        _logger.fatal(f'cannot build where clause from id_values. mismatched size. '
-            f'{fields=}, {id_values=}')
-        raise RuntimeError('mismatched size of id values')
-
-    return dict(zip(fields, id_values))
-
-
 def _find_object(pool: DatabaseConnectionPool, 
                   type_: Type[PersistentModelT], where: QueryConditionType,
                   set_id: int,
                   *,
+                  unwind: Tuple[str, ...]| str = tuple(),
                   ref_date: date | None = None,
                   version: int = 0) -> Tuple[str, int] | None:
     iterators = _find_objects(pool, type_, where, set_id,
-                              ref_date=ref_date, version=version)
+                              ref_date=ref_date, version=version, 
+                              unwind=unwind)
     
     first = next(iterators, None)
 
@@ -135,11 +131,13 @@ def _find_objects(pool: DatabaseConnectionPool,
                   *,
                   fetch_size: int | None = None,
                   ref_date: date | None = None,
-                  version: int = 0
+                  version: int = 0,
+                  unwind: Tuple[str,...]|str = tuple()
                   ) -> Iterator[Tuple[str, int]]:
     for record in query_records(pool, type_, where, set_id, fetch_size,
                                 fields=(_JSON_FIELD, _ROW_ID_FIELD),
-                                version=version, ref_date=ref_date):
+                                version=version, ref_date=ref_date,
+                                unwind=unwind):
 
         yield record[_JSON_FIELD], record[_ROW_ID_FIELD]
 

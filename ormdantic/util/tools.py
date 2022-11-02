@@ -17,7 +17,7 @@ def convert_list(items:List[T]|T) -> List[T]:
     return items if isinstance(items, list) else [items]
 
 
-def convert_as_collection(items:List[T]|Tuple[T]|T) -> Collection[T]:
+def convert_as_list_or_tuple(items:List[T]|Tuple[T]|T) -> List[T] | Tuple[T]:
     if isinstance(items, (list, tuple)):
         return items
     else:
@@ -47,6 +47,3 @@ def digest_str(item:str, algorithm:str = 'sha1') -> str:
 
     return h.hexdigest()
 
-
-def load_json(item:str | bytes) -> Any:
-    return orjson.loads(item)

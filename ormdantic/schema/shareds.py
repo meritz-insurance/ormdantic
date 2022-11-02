@@ -13,12 +13,12 @@ from ormdantic.util.hints import (
 )
 
 from ..util import (
-    digest, convert_as_collection, get_logger, get_base_generic_alias_of, 
+    digest, convert_as_list_or_tuple, get_logger, get_base_generic_alias_of, 
     is_derived_from, unique,
 )
 
 from .base import (IdentifiedMixin, StrId, PersistentModel,  PersistentModelT, 
-                   register_class_preprocessor)
+                   register_class_preprocessor, orjson_dumps, SchemaBaseModel)
 from .paths import (extract_as, get_path_and_types_for, get_paths_for)
 
 
@@ -51,7 +51,7 @@ class SharedContentMixin(IdentifiedMixin):
 def _get_content_id(content:Dict[str, Any]) -> str:
     content.pop('id', None)
 
-    return digest(orjson.dumps(content).decode(), 'sha1')
+    return digest(orjson_dumps(content), 'sha1')
 
 
 SharedContentModelT = TypeVar('SharedContentModelT', bound=SharedContentMixin)
@@ -111,7 +111,7 @@ def _is_inherit_from_content_reference_model(bases:Tuple[Type,...]) -> bool:
 
 LazyLoader = Callable[[str], 'SharedContentMixin']  
 
-class ContentReferenceModel(PersistentModel, 
+class ContentReferenceModel(SchemaBaseModel, 
                             _ReferenceMarker[SharedContentModelT]):
     ''' identified by content '''
     content : SharedContentModelT | str = Field(default='', title='content')
@@ -172,7 +172,8 @@ def get_shared_content_types(model_type:Type) -> Tuple[Type]:
 def extract_shared_models(model: PersistentModel,
                           replace_with_id: bool = False
                           ) -> DefaultDict[str, Dict[Type, SharedContentMixin]]:
-    contents : DefaultDict[str, Dict[Type, SharedContentMixin]] = defaultdict(dict)
+
+    shared_models : DefaultDict[str, Dict[Type, SharedContentMixin]] = defaultdict(dict)
 
     for shared_model, field_type in _iterate_content_reference_models_and_type(model):
         content = shared_model.content
@@ -180,19 +181,19 @@ def extract_shared_models(model: PersistentModel,
         if isinstance(content, SharedContentMixin):
             content.refresh_id()
 
-            contents[content.id][field_type] = content
+            shared_models[content.id][field_type] = content
 
             if replace_with_id:
                 shared_model.content = content.id
 
-    return contents
+    return shared_models
 
 
 def extract_shared_models_for(model: PersistentModel, 
                               target_type: Type[SharedContentModelT],
                               replace_with_id: bool = False
                               ) -> Dict[str, SharedContentModelT]:
-    contents : Dict[str, SharedContentModelT] = dict()
+    shared_models : Dict[str, SharedContentModelT] = dict()
 
     for shared_model in _iterate_content_reference_models(model):
         content = cast(SharedContentMixin, shared_model.content)
@@ -200,17 +201,17 @@ def extract_shared_models_for(model: PersistentModel,
         if is_derived_from(type(content), target_type):
             content.refresh_id()
 
-            if content.id in contents:
-                if type(contents[content.id]) is not type(content):
+            if content.id in shared_models:
+                if type(shared_models[content.id]) is not type(content):
                     _logger.fatal(f'{content=} has different type but has same {content.id=}')
                     raise RuntimeError('cannot support the contents of different type which have same id.')
 
-            contents[content.id] = cast(SharedContentModelT, content)
+            shared_models[content.id] = cast(SharedContentModelT, content)
 
             if replace_with_id:
                 shared_model.content = content.id
 
-    return contents
+    return shared_models
 
 
 def has_shared_models(model:PersistentModel) -> bool:
@@ -278,7 +279,7 @@ def collect_shared_model_field_type_and_ids(
     for path, field_type in get_path_and_types_for(type(model), ContentReferenceModel):
         ref_type = get_args_of_base_generic_alias(field_type, ContentReferenceModel)[0]
 
-        for sharedModel in convert_as_collection(
+        for sharedModel in convert_as_list_or_tuple(
                 extract_as(model, path, ContentReferenceModel)
                 or cast(List[ContentReferenceModel], [])):
             type_and_ids[ref_type].add(sharedModel.get_content_id())
@@ -294,7 +295,7 @@ def _iterate_content_reference_models(
     #     yield cast(ContentReferenceModel, model)
 
     for path in get_paths_for(model_type, ContentReferenceModel) :
-        for shared_model in convert_as_collection(
+        for shared_model in convert_as_list_or_tuple(
                 extract_as(model, path, ContentReferenceModel)
                 or cast(List[ContentReferenceModel], [])):
             yield shared_model
@@ -304,11 +305,11 @@ def _iterate_content_reference_models_and_type(
         model: PersistentModel) -> Iterator[Tuple[ContentReferenceModel, Type]]:
     model_type = type(model)
 
-    if is_derived_from(model_type, ContentReferenceModel):
-        yield cast(ContentReferenceModel, model), model_type
+    # if is_derived_from(model_type, ContentReferenceModel):
+    #     yield cast(ContentReferenceModel, model), model_type
 
     for path, type_ in get_path_and_types_for(model_type, ContentReferenceModel) :
-        for shared_model in convert_as_collection(
+        for shared_model in convert_as_list_or_tuple(
                 extract_as(model, path, ContentReferenceModel)
                 or cast(List[ContentReferenceModel], [])):
             yield shared_model, type_

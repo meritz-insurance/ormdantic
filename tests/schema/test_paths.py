@@ -4,7 +4,10 @@ import pytest
 
 from ormdantic.schema.base import (
     PersistentModel, StringIndex, 
-    update_forward_refs, 
+    update_forward_refs, IdentifiedModel, PartOfMixin
+)
+from ormdantic.schema.shareds import (
+    PersistentSharedContentModel, ContentReferenceModel
 )
 
 from ormdantic.schema.paths import (
@@ -30,6 +33,25 @@ class PartModel(PersistentModel):
 class SubPartModel(PersistentModel):
     name:StringIndex
     description:str
+
+class ContainerPartModel(PersistentSharedContentModel):
+    name: StringIndex
+
+class ContainerPartContentReferenceModel(ContentReferenceModel[ContainerPartModel]):
+    pass
+
+class ContainerModel(PersistentSharedContentModel):
+    name: StringIndex
+    parts: List[ContainerPartContentReferenceModel]
+
+update_forward_refs(PartModel, locals())
+
+class ContainerContentReferenceModel(ContentReferenceModel[ContainerModel]):
+    pass
+
+class ReferenceWithPartsModel(IdentifiedModel):
+    ref_model : ContainerContentReferenceModel
+
 
 update_forward_refs(StartModel, locals())
 update_forward_refs(PartModel, locals())
@@ -107,3 +129,10 @@ def test_get_paths_for_type():
         '$.part.name',
         '$.part.sub_parts.name',
     ) == get_paths_for(StartModel, StringIndex)
+
+
+def test_get_paths_for_shared_type():
+    assert (
+        "$.ref_model",
+        "$.ref_model.content.parts"
+    ) == get_paths_for(ReferenceWithPartsModel, ContentReferenceModel)

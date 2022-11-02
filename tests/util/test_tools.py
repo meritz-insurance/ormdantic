@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 
 from ormdantic.util import (
-    convert_tuple, convert_as_collection, unique, digest
+    convert_tuple, convert_as_list_or_tuple, unique, digest
 )
 
 def test_convert_tuple():
@@ -10,9 +10,9 @@ def test_convert_tuple():
 
 
 def test_convert_as_collection():
-    assert convert_as_collection(42) == (42,)
-    assert convert_as_collection((32, 42)) == (32, 42)
-    assert convert_as_collection([32, 42]) == [32, 42]
+    assert convert_as_list_or_tuple(42) == (42,)
+    assert convert_as_list_or_tuple((32, 42)) == (32, 42)
+    assert convert_as_list_or_tuple([32, 42]) == [32, 42]
 
 
 def test_unique():

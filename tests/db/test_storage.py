@@ -7,18 +7,22 @@ from typing import  List, Tuple, cast, Type
 import pytest
 
 from ormdantic.database.storage import (
-    allocate_audit_version, delete_objects, get_current_version, purge_objects, get_model_changes_of_version, get_version_info, query_records, 
+    delete_objects, get_current_version, purge_objects, get_model_changes_of_version, get_version_info, query_records, 
     squash_objects, upsert_objects, find_object, 
     find_objects, build_where, load_object, delete_objects
 )
 
 from ormdantic.schema import PersistentModel
+from ormdantic.schema import verinfo
 from ormdantic.schema.verinfo import VersionInfo
 from ormdantic.schema.base import (
     DatedMixin, FullTextSearchedStringIndex, PartOfMixin, PersistentModel, 
     StringArrayIndex, VersionMixin, get_identifer_of, update_forward_refs, 
     IdentifiedModel, StrId, DateId,
     StoredFieldDefinitions, SchemaBaseModel
+)
+from ormdantic.schema.shareds import (
+    PersistentSharedContentModel
 )
 
 from .tools import (
@@ -99,7 +103,8 @@ def test_upsert_objects(pool_and_model):
 
     where = build_where(get_identifer_of(upserted))
 
-    found = find_object(pool, ContainerModel, where, 0)
+    found = find_object(pool, ContainerModel, where, 0, 
+                        version=get_current_version(pool))
 
     assert upserted == found
 
@@ -172,7 +177,7 @@ def test_delete_objects():
         assert found is None
 
         found = list(find_objects(pool, PartModel, {}, 0, version=version))
-        assert not found 
+        assert found 
 
         found = list(find_objects(pool, PartModel, {}, 0))
         assert not found 
@@ -183,13 +188,16 @@ def test_delete_objects():
         # check empty external table
         with pool.open_cursor() as cursor:
             cursor.execute('SELECT * FROM md_SubPartModel_codes')
-            assert tuple() == cursor.fetchall()
+            assert 4 == len(cursor.fetchall())
 
         class CannotDelete(SchemaBaseModel):
             pass
 
         with pytest.raises(RuntimeError):
             delete_objects(pool, cast(Type[PersistentModel], CannotDelete), {}, 0)
+
+        with pytest.raises(RuntimeError):
+            delete_objects(pool, cast(Type[PersistentModel], PersistentSharedContentModel), {}, 0)
 
 
 
@@ -198,22 +206,27 @@ def test_find_object(pool_and_model):
     pool, _ = pool_and_model
 
     with pytest.raises(RuntimeError, match='More than one object.*'):
-        find_object(pool, PartModel, {}, 0)
+        find_object(pool, PartModel, {}, 0, version=get_current_version(pool))
 
-    found = find_object(pool, PartModel, build_where([('name', 'part1')]), 0)
+    found = find_object(pool, PartModel, build_where([('name', 'part1')]), 0,
+                        version=get_current_version(pool))
     assert found == model.parts[0]
 
 
 def test_find_objects(pool_and_model):
     pool, _ = pool_and_model
 
-    found = find_objects(pool, PartModel, build_where([('_container_name', 'sample')]), 0)
+    current_version = get_current_version(pool)
+
+    found = find_objects(pool, PartModel, build_where([('_container_name', 'sample')]), 
+                         0, version=current_version)
 
     assert next(found) == model.parts[0]
     assert next(found) == model.parts[1]
     assert next(found, None) is None
 
-    found = find_objects(pool, SubPartModel, {'name': ('match', '+sub1 -part2')}, 0)
+    found = find_objects(pool, SubPartModel, {'name': ('match', '+sub1 -part2')}, 
+                         0, version=current_version)
 
     assert next(found) == model.parts[0].parts[0]
     assert next(found, None) is None
@@ -222,7 +235,7 @@ def test_find_objects(pool_and_model):
 def test_find_objects_for_multiple_nested_parts(pool_and_model):
     pool, _ = pool_and_model
 
-    found = find_objects(pool, SubPartModel, {}, 0)
+    found = find_objects(pool, SubPartModel, {}, 0, version=get_current_version(pool))
 
     assert {'part1-sub1', 'part2-sub1', 'part2-sub2'} == {found.name for found in found}
 
@@ -239,7 +252,8 @@ def test_query_records_with_match(pool_and_model):
 
     objects = list(
         query_records(pool, SubPartModel, {'name': ('match', 'part sub1')}, 0, 
-                      fields=('name',))
+                      fields=('name',),
+                      version=get_current_version(pool))
     )
 
     assert ['part1-sub1', 'part2-sub1'] == list(o['name'] for o in objects)
@@ -250,13 +264,25 @@ def test_query_records(pool_and_model):
 
     objects = list(
         query_records(pool, PartModel, {}, 0,
-        fields=('_container_name', 'name'))
+        fields=('_container_name', 'name'),
+        version=get_current_version(pool))
     )
 
     assert [
         {'name':'part1', '_container_name':'sample'},
         {'name':'part2', '_container_name':'sample'},
     ] == objects
+
+
+def test_query_records_raise(pool_and_model):
+    pool, _ = pool_and_model
+
+    with pytest.raises(RuntimeError, match='empty fields for querying'):
+        list(
+            query_records(pool, PartModel, {}, 0,
+                          fields=tuple(),
+                          version=get_current_version(pool))
+        )
 
 
 def test_upsert_objects_makes_entry_in_audit_models():
@@ -332,7 +358,10 @@ def test_upsert_objects_for_dated():
                                     ref_date=date.today())
 
         # if ref_date is None, we get the all item.
-        assert [1,2,3] == list(record['__row_id'] for record in query_records(pool, DatedModel, {}, 0))
+        assert [1,2,3] == list(
+            record['__row_id'] 
+            for record in query_records(
+                pool, DatedModel, {}, 0, version=get_current_version(pool)))
 
 
 def test_get_version():
@@ -396,7 +425,8 @@ def test_squash_objects():
 
         upsert_objects(pool, fourth, 0)
 
-        assert fourth == load_object(pool, VersionModel, {'id':'test'}, 0)
+        assert fourth == load_object(pool, VersionModel, {'id':'test'}, 0, 
+                                     version=get_current_version(pool))
 
         assert [{'id':'test'}] == squash_objects(pool, VersionModel, {'id':'test'}, 0)
 
