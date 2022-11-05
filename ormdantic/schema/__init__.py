@@ -1,4 +1,5 @@
 from .base import (
+    SchemaBaseModel,
     ModelT, PersistentModelT, IdentifiedModelT, PersistentModel, IdentifiedModel,
     get_base_generic_alias_of, get_container_type, get_field_name_and_type,
     StoredMixin, StringIndex, StringArrayIndex, UniqueStringIndex,
@@ -13,8 +14,12 @@ from .shareds import (
 )
 
 from .typed import TypeNamedModel, get_type_named_model_type, parse_object_for_model
+from .source import (
+    SharedModelSource, ModelSource, MemoryModelSource, MemorySharedModelSource
+)
 
 __all__ = [
+    "SchemaBaseModel",
     'ModelT',
     'PersistentModelT',
     'IdentifiedModelT',
@@ -46,5 +51,9 @@ __all__ = [
     "get_type_named_model_type",
     "parse_object_for_model",
     "PersistentModel",
-    "PersistentSharedContentModel"
+    "PersistentSharedContentModel",
+    "SharedModelSource",
+    "ModelSource",
+    "MemorySharedModelSource",
+    "MemoryModelSource",
 ]

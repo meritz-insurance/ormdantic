@@ -1,4 +1,5 @@
 from .schema import (
+    SchemaBaseModel,
     ModelT, PersistentModelT, IdentifiedModelT, PersistentModel, IdentifiedModel,
     StoredMixin, StringIndex, StringArrayIndex, UniqueStringIndex,
     PartOfMixin, StringReference, DecimalIndex, IntIndex, IntReference,
@@ -10,22 +11,17 @@ from .schema import (
 
 from .database import (
     DatabaseConnectionPool, 
-    create_table, 
-    upsert_objects, find_object, find_objects, purge_objects,
-    query_records
+    SharedModelDatabaseSource, ModelDatabaseStorage
 )
 
 
 
 __all__ = [
     "DatabaseConnectionPool",
-    "create_table",
-    "upsert_objects",
-    "find_object",
-    "find_objects",
-    "purge_objects",
-    "query_records",
+    "SharedModelDatabaseSource",
+    "ModelDatabaseStorage",
     "update_forward_refs",
+    "SchemaBaseModel",
     "ModelT",
     "PersistentModelT",
     "IdentifiedModelT",
