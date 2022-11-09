@@ -8,8 +8,7 @@ from ormdantic.schema.verinfo import VersionInfo
 from ..util import get_logger
 from ..schema.base import PersistentModelT, PersistentModel
 from ..schema.source import (
-    ModelStorage, QueryConditionType, SharedModelSource, Where, 
-    NormalizedQueryConditionType
+    ModelStorage, QueryConditionType, SharedModelSource, 
 )
 
 from .connections import DatabaseConnectionPool
@@ -95,7 +94,10 @@ class ModelDatabaseStorage(ModelStorage):
         return purge_objects(self._pool, type_, list(identifieds), self._set_id, version_info=version_info) 
 
 
-def create_database_source(pool:DatabaseConnectionPool, set_id:int, ref_date:date, version:int = 0):
+def create_database_source(set_id:int, ref_date:date, version:int = 0, pool:DatabaseConnectionPool | None = None):
+    pool = pool or load_database_pool('domain_object_storage')
+
+
     return ModelDatabaseStorage(pool, SharedModelDatabaseSource(pool, set_id), 
                                 set_id, ref_date, version)
 

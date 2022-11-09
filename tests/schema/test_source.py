@@ -12,7 +12,7 @@ from ormdantic.schema.shareds import ContentReferenceModel, PersistentSharedCont
 
 from ormdantic.schema.source import (
     ChainedModelSource, ChainedSharedModelSource, SharedModelSource, ModelSource,
-    MemoryModelSource, MemorySharedModelSource,
+    MemoryModelStorage, MemorySharedModelSource,
     extract_id_values
 )
 from ormdantic.schema.verinfo import VersionInfo
@@ -115,7 +115,7 @@ def chained_shared_source(shared_source, other_shared_source):
 def source(shared_source, monkeypatch:pytest.MonkeyPatch):
     cache = ModelCache()
 
-    source = MemoryModelSource([found_1, found_2], shared_source=shared_source)
+    source = MemoryModelStorage([found_1, found_2], shared_source=shared_source)
 
     monkeypatch.setattr(source, 'find_record', _find_records)
     monkeypatch.setattr(source, 'get_latest_version', lambda: 0)
@@ -125,8 +125,8 @@ def source(shared_source, monkeypatch:pytest.MonkeyPatch):
 @pytest.fixture(scope='function')
 def chained_source():
     return ChainedModelSource(
-        MemoryModelSource([found_1]),
-        MemoryModelSource([found_2])
+        MemoryModelStorage([found_1]),
+        MemoryModelStorage([found_2])
     )
 
 def test_shared_source_find(shared_source):
@@ -285,7 +285,7 @@ def test_memory_shared_model_source_find_records_by_ids():
     assert [] == list(shared_source.find_records_by_ids(MyProduct, '1', '2'))
 
 def test_memory_model_source_store():
-    source = MemoryModelSource([])
+    source = MemoryModelStorage([])
 
     assert None is source.find(MyProduct, {'code':'found-1'})
 
@@ -296,7 +296,7 @@ def test_memory_model_source_store():
 
 
 def test_memory_model_source_delete():
-    source = MemoryModelSource([first_shared, found_1])
+    source = MemoryModelStorage([first_shared, found_1])
 
     assert None is not source.find(MyProduct, {'code':'found-1'})
     source.delete(MyProduct, {'code':found_1.code}, version_info=VersionInfo())
@@ -307,7 +307,7 @@ def test_memory_model_source_delete():
 
 
 def test_memory_model_source_purge():
-    source = MemoryModelSource([first_shared, found_1])
+    source = MemoryModelStorage([first_shared, found_1])
 
     assert None is not source.find(MyProduct, {'code':'found-1'})
     source.purge(MyProduct, {'code':found_1.code}, version_info=VersionInfo())
@@ -316,7 +316,7 @@ def test_memory_model_source_purge():
  
 
 def test_memory_model_source_squash():
-    source = MemoryModelSource([first_shared, found_1])
+    source = MemoryModelStorage([first_shared, found_1])
 
     assert [] == source.squash(MyProduct, {'code':'found-1'}, VersionInfo())
     

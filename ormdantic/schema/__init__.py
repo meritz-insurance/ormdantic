@@ -4,6 +4,7 @@ from .base import (
     get_base_generic_alias_of, get_container_type, get_field_name_and_type,
     StoredMixin, StringIndex, StringArrayIndex, UniqueStringIndex,
     PartOfMixin, StringReference, DecimalIndex, IntIndex, IntReference,
+    DatedMixin, VersionMixin,
     DateIndex, DateTimeIndex, FullTextSearchedStr, FullTextSearchedStringIndex,
     StrId, IntegerArrayIndex, update_forward_refs,
     StoredFieldDefinitions, PersistentModel, 
@@ -15,7 +16,8 @@ from .shareds import (
 
 from .typed import TypeNamedModel, get_type_named_model_type, parse_object_for_model
 from .source import (
-    SharedModelSource, ModelSource, MemoryModelSource, MemorySharedModelSource
+    SharedModelSource, ModelSource, MemoryModelStorage, MemorySharedModelSource,
+    ChainedModelSource, ChainedSharedModelSource
 )
 
 __all__ = [
@@ -37,6 +39,8 @@ __all__ = [
     "DecimalIndex",
     "IntIndex",
     "IntReference",
+    "DatedMixin",
+    "VersionMixin",
     "DateIndex",
     "DateTimeIndex",
     "FullTextSearchedStr",
@@ -55,5 +59,7 @@ __all__ = [
     "SharedModelSource",
     "ModelSource",
     "MemorySharedModelSource",
-    "MemoryModelSource",
+    "MemoryModelStorage",
+    "ChainedModelSource",
+    "ChainedSharedModelSource",
 ]

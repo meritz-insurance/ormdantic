@@ -27,8 +27,6 @@ _logger = get_logger(__name__)
 
 _SourceT = TypeVar('_SourceT', bound='ModelSource')
 
-Where = Tuple[Tuple[str, str, Any], ...]
-
 NormalizedQueryConditionType = Dict[str, Tuple[str, Any]]
 QueryConditionType = Dict[str, Tuple[str, Any] | ScalarType]
 
@@ -427,7 +425,7 @@ class MemorySharedModelSource(SharedModelSource):
         yield
 
 
-class MemoryModelSource(ModelStorage):
+class MemoryModelStorage(ModelStorage):
     def __init__(self, models:Iterable[PersistentModel], *, shared_source:SharedModelSource | None = None, name:str=''):
         model_sets = [[], []]
 
