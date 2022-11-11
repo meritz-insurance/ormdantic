@@ -1,6 +1,9 @@
 from types import UnionType
 from typing import Type, Any, Dict, get_origin, Union, get_args
+
 import copy 
+import inspect
+import traceback
 
 from pydantic import parse_obj_as
 from pydantic.fields import Field 
@@ -22,16 +25,25 @@ class TypeNamedModel(PersistentModel):
 
 def _fill_type_name_field(class_type:Type):
     name = class_type.__name__
+        
+
     model_field = copy.copy(class_type.__fields__[_TYPE_NAME_FIELD])
     model_field.default = name
 
     class_type.__fields__[_TYPE_NAME_FIELD] = model_field
 
     if name in _all_type_named_models:
-        _logger.fatal(f'duplicated type name class {name=}. {_all_type_named_models=}')
-        raise RuntimeError(f'duplicated name {name}')
-
-    _all_type_named_models[name] = class_type
+        previous = _all_type_named_models[name]
+        if (previous is not class_type
+            and inspect.getsourcefile(previous) != inspect.getsourcefile(class_type)
+            and inspect.getsourcelines(previous) != inspect.getsourcelines(class_type)
+        ):
+            _logger.fatal(f'duplicated type name class {name=}. '
+                f'previous {inspect.getsourcefile(previous)=}, {inspect.getsourcelines(previous)=}'
+            )
+            raise RuntimeError(f'duplicated name {name}.')
+    else:
+        _all_type_named_models[name] = class_type
 
  
 register_class_postprocessor(TypeNamedModel, _fill_type_name_field)
