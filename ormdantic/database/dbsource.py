@@ -84,8 +84,8 @@ class ModelDatabaseStorage(ModelStorage):
     def get_latest_version(self) -> int:
         return get_current_version(self._pool)
 
-    def store(self, models:Iterable[PersistentModel] | PersistentModel, 
-              version_info: VersionInfo) -> Tuple[PersistentModel] | PersistentModel:
+    def store(self, models:Iterable[PersistentModelT] | PersistentModelT, 
+              version_info: VersionInfo) -> Tuple[PersistentModelT] | PersistentModelT:
 
         upserted = upsert_objects(self._pool, models, self._set_id, False, version_info)
 

@@ -339,7 +339,7 @@ def test_test_id_values():
 
 
 def test_reduce(chained_source: ModelSource):
-    source = MemoryModelSource([first_shared, found_1])
+    source = MemoryModelStorage([first_shared, found_1])
 
     data = pickle.loads(pickle.dumps(source))
     assert type(data) == type(source)

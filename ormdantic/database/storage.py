@@ -92,6 +92,17 @@ def upsert_objects(pool:DatabaseConnectionPool,
     ...
 
 @overload
+def upsert_objects(pool:DatabaseConnectionPool, 
+                   models: PersistentModelT | Iterable[PersistentModelT],
+                   set_id: int,
+                   ignore_error:Literal[False],
+                   version_info:VersionInfo,
+                   saved_callback:SavedCallback | None = None
+                   ) -> PersistentModelT | Tuple[PersistentModelT, ...]:
+    ...
+
+
+@overload
 def upsert_objects(pool: DatabaseConnectionPool, 
                    models: PersistentModelT | Iterable[PersistentModelT],
                    set_id: int,
@@ -125,7 +136,7 @@ def upsert_objects(pool:DatabaseConnectionPool,
     model_list = [models] if is_single else models
 
     mixins = tuple(filter(lambda x: isinstance(x, PartOfMixin), model_list))
-    results : Dict[Tuple[Any,...], PersistentModel | BaseException] = {}
+    results : Dict[Tuple[Any,...], PersistentModelT | BaseException] = {}
 
     if mixins:
         _logger.fatal(f'{[type(m) for m in mixins]} can not be stored directly. it is part of mixin')
@@ -187,7 +198,7 @@ def upsert_objects(pool:DatabaseConnectionPool,
                     if saved_callback:
                         saved_callback(id_values, e)
 
-    if ignore_error:
+    if isinstance(results, dict):
         return results
     else:
         if isinstance(models, PersistentModel):

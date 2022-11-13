@@ -436,7 +436,7 @@ class MemorySharedModelSource(SharedModelSource):
         yield
 
 
-class MemoryModelSource(ModelStorage):
+class MemoryModelStorage(ModelStorage):
     def __init__(self, models:Iterable[PersistentModel], shared_source:SharedModelSource | None = None, name:str=''):
         model_sets = [[], []]
 
@@ -453,7 +453,7 @@ class MemoryModelSource(ModelStorage):
         self._model_maps = _build_model_maps(model_sets[0])
 
     def __reduce__(self):
-        return (MemoryModelSource, 
+        return (MemoryModelStorage, 
                 (list(self._cache.iterate_all()), self._shared_source, self._name))
 
     def query_records(self, type_: Type, query_condition: QueryConditionType,
