@@ -168,7 +168,7 @@ def storage():
         DescriptionWithExternalModel, ReferenceWithPartsModel, ProductModel) as pool:
         upsert_objects(pool, models, 0, False, VersionInfo())
 
-        yield create_database_source(pool, 0, date.today(), 0)
+        yield create_database_source(0, date.today(), 0, None)
 
 
 @pytest.fixture(scope='module')
@@ -178,8 +178,8 @@ def chained_source():
         DescriptionWithExternalModel, ReferenceWithPartsModel, ProductModel) as pool:
         upsert_objects(pool, models, 0, False, VersionInfo())
 
-        storage_0 = create_database_source(pool, 0, date.today(), 0)
-        storage_1 = create_database_source(pool, 1, date.today(), 0)
+        storage_0 = create_database_source(0, date.today(), 0, None)
+        storage_1 = create_database_source(1, date.today(), 0, None)
 
         storage_0.store(ProductModel(code=StrId('0'), description=StringIndex('first')), VersionInfo())
         storage_1.store(ProductModel(code=StrId('1'), description=StringIndex('second')), VersionInfo())

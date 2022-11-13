@@ -4,22 +4,23 @@ from .schema import (
     StoredMixin, StringIndex, StringArrayIndex, UniqueStringIndex,
     PartOfMixin, StringReference, DecimalIndex, IntIndex, IntReference,
     DateIndex, DateTimeIndex, FullTextSearchedStr, FullTextSearchedStringIndex,
+    DatedMixin, VersionMixin,
     StrId, IntegerArrayIndex, update_forward_refs, StoredFieldDefinitions,
     TypeNamedModel, PersistentModel, SharedContentModel, ContentReferenceModel,
-    PersistentSharedContentModel, get_type_named_model_type, parse_object_for_model
+    PersistentSharedContentModel, get_type_named_model_type, parse_object_for_model,
+
+    SharedModelSource, ModelSource,
+    MemoryModelStorage, MemorySharedModelSource,
+    ChainedSharedModelSource, ChainedModelSource
 )
 
 from .database import (
     DatabaseConnectionPool, 
-    SharedModelDatabaseSource, ModelDatabaseStorage
+    SharedModelDatabaseSource, ModelDatabaseStorage,
 )
 
 
-
 __all__ = [
-    "DatabaseConnectionPool",
-    "SharedModelDatabaseSource",
-    "ModelDatabaseStorage",
     "update_forward_refs",
     "SchemaBaseModel",
     "ModelT",
@@ -37,6 +38,8 @@ __all__ = [
     "DecimalIndex",
     "IntIndex",
     "IntReference",
+    "DatedMixin",
+    "VersionMixin",
     "DateIndex",
     "DateTimeIndex",
     "FullTextSearchedStr",
@@ -49,5 +52,14 @@ __all__ = [
     "ContentReferenceModel",
     "PersistentSharedContentModel",
     "get_type_named_model_type",
-    "parse_object_for_model"
+    "parse_object_for_model",
+    "ModelSource",
+    "SharedModelSource",
+    "MemoryModelStorage",
+    "MemorySharedModelSource",
+    "ChainedModelSource",
+    "ChainedSharedModelSource",
+    "DatabaseConnectionPool",
+    "SharedModelDatabaseSource",
+    "ModelDatabaseStorage",
 ]
