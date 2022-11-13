@@ -16,8 +16,8 @@ from ormdantic.util.hints import get_args_of_base_generic_alias
 
 from ..util import get_logger
 from ..schema.base import (
-    ArrayIndexMixin, DatedMixin, PersistentModelT, ReferenceMixin, FullTextSearchedMixin, 
-    IdentifyingMixin, IndexMixin, SequenceStrId, 
+    ArrayIndexMixin, DatedMixin, PersistentModelT, ReferenceMixin, 
+    FullTextSearchedMixin, IdentifyingMixin, IndexMixin, SequenceStrId, 
     StoredFieldDefinitions, PersistentModelT, StoredMixin, PartOfMixin, 
     UseBaseClassTableMixin, VersionMixin, 
     UniqueIndexMixin, get_container_type, get_root_container_type,
@@ -97,10 +97,6 @@ def get_table_name(type_:Type[PersistentModelT], postfix:str = ''):
 
 def get_seq_name(type_:Type[PersistentModelT], postfix:str):
     return f'{_SEQ_PREFIX}_{_get_name_from_type(type_)}{"_" + postfix if postfix else ""}' 
-
-
-def get_seq_func_name(type_:Type[PersistentModelT], postfix:str):
-    return f'{_FUNC_PREFIX}_{_get_name_from_type(type_)}{"_" + postfix if postfix else ""}' 
 
 
 def _get_name_from_type(type_:Type[PersistentModelT]) -> str:
@@ -390,19 +386,27 @@ def _build_code_seq_statement(type_:Type[PersistentModel]) -> Iterator[str]:
             yield join_line(
                 f'CREATE SEQUENCE {get_seq_name(type_, name)} START WITH 1 INCREMENT 1'
             )
-            yield join_line(
-                f'CREATE FUNCTION {get_seq_func_name(type_, name)}() RETURNS VARCHAR(16)',
-                'BEGIN',
-                tab_each_line(
-                    f"SELECT CONCAT('{prefix}', NEXTVAL({get_seq_name(type_, name)})) INTO @R;"
-                    f'RETURN @R;'
-                ),
-                'END'
-            )
 
-
+    
 def get_query_for_next_seq(type_:Type, field:str) -> str:
-    return f'SELECT {get_seq_func_name(type_, field)}() as NEXT_SEQ'
+    return f'SELECT NEXTVAL({get_seq_name(type_, field)}) as NEXT_SEQ'
+
+
+def get_query_for_adjust_seq(type_:Type[PersistentModel]) -> Iterator[str]:
+    for name, modle_field in type_.__fields__.items():
+        field_element_type = modle_field.type_
+
+        if is_derived_from(field_element_type, SequenceStrId):
+            prefix = field_element_type.prefix
+
+            yield ';\n'.join([
+                join_line(
+                    f'SET @MAX_VALUE = (SELECT',
+                    f"    CAST(REPLACE(MAX({field_exprs(name)}), '{prefix}', '') as INTEGER)",
+                    f"FROM {get_table_name(type_)})"
+                ),
+                f"EXECUTE IMMEDIATE CONCAT('SELECT SETVAL({field_exprs(get_seq_name(type_, name))}, ', @MAX_VALUE, ')')"
+            ])
 
 
 def _build_part_of_model_view_statement(view_name:str, joined_table:str,

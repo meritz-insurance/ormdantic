@@ -10,6 +10,7 @@ from ormdantic.database.storage import (
 from ormdantic.database.connections import _DATABASE, _PASSWORD
 
 from ormdantic.schema.base import PersistentModel, get_part_types
+from ormdantic.schema.verinfo import VersionInfo
 from ormdantic.util import is_derived_from, get_logger
 
 _config = {
@@ -116,7 +117,7 @@ def use_temp_database_cursor_with_model(*models:PersistentModel,
         create_table(pool, *types)
 
         if model_created:
-            upsert_objects(pool, models, 0)
+            upsert_objects(pool, models, 0, False, VersionInfo())
 
         with pool.open_cursor(True) as cursor:
             yield cursor

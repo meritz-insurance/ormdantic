@@ -27,8 +27,6 @@ _logger = get_logger(__name__)
 
 _SourceT = TypeVar('_SourceT', bound='ModelSource')
 
-Where = Tuple[Tuple[str, str, Any], ...]
-
 NormalizedQueryConditionType = Dict[str, Tuple[str, Any]]
 QueryConditionType = Dict[str, Tuple[str, Any] | ScalarType]
 
@@ -212,6 +210,8 @@ class ModelSource:
 
         if changed:
             copied._cache = ModelCache() 
+        else:
+            copied._cache = self._cache
 
         return copied
 
@@ -307,6 +307,9 @@ class ChainedSharedModelSource(SharedModelSource):
     def __init__(self, *sources:SharedModelSource):
         self._sources = sources
 
+    def __reduce__(self):
+        return (ChainedSharedModelSource, self._sources)
+
     def find(self, type_:Type[PersistentModel], id:str | int) -> PersistentModel | None: 
         for s in self._sources:
             found = s.find(type_, id)
@@ -342,6 +345,9 @@ class ChainedModelSource(ModelSource):
     def __init__(self, *sources:ModelSource):
         self._sources = sources
      
+    def __reduce__(self):
+        return (ChainedModelSource, self._sources)
+
     def query_records(self, type_:Type, where:QueryConditionType, 
               *,
               fetch_size: int | None = None,
@@ -415,6 +421,9 @@ class MemorySharedModelSource(SharedModelSource):
 
         super().__init__(cache)
 
+    def __reduce__(self):
+        return (MemorySharedModelSource, (list(self._cache.iterate_all()),))
+
     def store(self, model:PersistentSharedContentModel):
         self._cache.register(type(model), model)
 
@@ -428,7 +437,7 @@ class MemorySharedModelSource(SharedModelSource):
 
 
 class MemoryModelSource(ModelStorage):
-    def __init__(self, models:Iterable[PersistentModel], *, shared_source:SharedModelSource | None = None, name:str=''):
+    def __init__(self, models:Iterable[PersistentModel], shared_source:SharedModelSource | None = None, name:str=''):
         model_sets = [[], []]
 
         for model in models:
@@ -442,6 +451,10 @@ class MemoryModelSource(ModelStorage):
             self._cache.register(type(model), model)
 
         self._model_maps = _build_model_maps(model_sets[0])
+
+    def __reduce__(self):
+        return (MemoryModelSource, 
+                (list(self._cache.iterate_all()), self._shared_source, self._name))
 
     def query_records(self, type_: Type, query_condition: QueryConditionType,
                       *,

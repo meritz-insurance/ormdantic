@@ -1,4 +1,4 @@
-from typing import (DefaultDict, Dict, Type, Callable, Tuple, cast)
+from typing import (DefaultDict, Dict, Type, Callable, Tuple, cast, Iterator)
 from collections import defaultdict
 
 from ormdantic.schema.base import (
@@ -95,4 +95,8 @@ class ModelCache():
                     return True
 
         return False
+
+    def iterate_all(self) -> Iterator[PersistentModel]:
+        for dicts in self._cached.values():
+            yield from dicts.values()
 

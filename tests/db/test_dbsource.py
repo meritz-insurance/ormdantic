@@ -5,6 +5,7 @@ import pytest
 from pydantic import Field
 from datetime import date
 from uuid import uuid4
+import pickle
 
 from ormdantic.database.storage import (
     upsert_objects, 
@@ -165,7 +166,7 @@ def storage():
     with use_temp_database_pool_with_model(
         SimpleContentModel, NestedContentModel, 
         DescriptionWithExternalModel, ReferenceWithPartsModel, ProductModel) as pool:
-        upsert_objects(pool, models, 0)
+        upsert_objects(pool, models, 0, False, VersionInfo())
 
         yield create_database_source(pool, 0, date.today(), 0)
 
@@ -175,7 +176,7 @@ def chained_source():
     with use_temp_database_pool_with_model(
         SimpleContentModel, NestedContentModel, 
         DescriptionWithExternalModel, ReferenceWithPartsModel, ProductModel) as pool:
-        upsert_objects(pool, models, 0)
+        upsert_objects(pool, models, 0, False, VersionInfo())
 
         storage_0 = create_database_source(pool, 0, date.today(), 0)
         storage_1 = create_database_source(pool, 1, date.today(), 0)
@@ -392,3 +393,9 @@ def test_delete_objects_with_shared(storage:ModelDatabaseStorage):
     with pytest.raises(RuntimeError, match='PersistentSharedContentModel could not be deleted. you tried to deleted ContainerModel'):
         storage.purge(ContainerModel, {'id':'f0c9920d60433b61c6aa3536e0c91697fb6d6af5'}, 
                       version_info=VersionInfo())
+
+
+def test_reduce(storage:ModelDatabaseStorage):
+    loaded = pickle.loads(pickle.dumps(storage))
+
+    assert loaded._pool._connection_config == storage._pool._connection_config

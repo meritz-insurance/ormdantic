@@ -1,6 +1,6 @@
 from typing import (
     Optional, Iterable, Type, Iterator, Dict, Any, Tuple, 
-    overload, cast, TypeVar, List
+    overload, cast, TypeVar, List, Callable, Literal
 )
 from collections import deque
 import itertools
@@ -17,7 +17,7 @@ from ..schema import ModelT, PersistentModel, get_container_type
 from ..schema.base import (
     PartOfMixin, PersistentModel, assign_identifying_fields_if_empty, 
     get_part_types, PersistentModelT,
-    get_identifying_fields,
+    get_identifying_fields, get_identifying_field_values
 )
 from ..schema.verinfo import VersionInfo
 from ..schema.source import QueryConditionType, to_normalize_query_condition
@@ -45,15 +45,12 @@ from .queries import (
     get_sql_for_upserting_external_index, 
     get_sql_for_upserting_parts,
     get_query_and_args_for_purging,
+    get_query_for_adjust_seq,
     _ROW_ID_FIELD, _JSON_FIELD, _AUDIT_VERSION_FIELD, _AUDIT_MODEL_ID_FIELD
 )
 
-from ..schema.modelcache import ModelCache
 
-
-# storage will generate pydantic object from json data.
 _logger = get_logger(__name__)
-
 
 _T = TypeVar('_T')
 
@@ -72,12 +69,15 @@ def create_table(pool:DatabaseConnectionPool, *types:Type[PersistentModelT]):
             for sql in get_sql_for_creating_table(type_):
                 cursor.execute(sql)
 
+SavedCallback = Callable[[Tuple[Any,...], PersistentModel | BaseException], None]
 
 @overload
 def upsert_objects(pool: DatabaseConnectionPool, 
                    models: PersistentModelT,
                    set_id: int,
-                   version_info:VersionInfo = VersionInfo()
+                   ignore_error:Literal[False],
+                   version_info:VersionInfo,
+                   saved_callback:SavedCallback | None = None
                    ) -> PersistentModelT:
     ...
 
@@ -85,20 +85,47 @@ def upsert_objects(pool: DatabaseConnectionPool,
 def upsert_objects(pool:DatabaseConnectionPool, 
                    models: Iterable[PersistentModelT],
                    set_id: int,
-                   version_info:VersionInfo = VersionInfo()
+                   ignore_error:Literal[False],
+                   version_info:VersionInfo,
+                   saved_callback:SavedCallback | None = None
                    ) -> Tuple[PersistentModelT, ...]:
     ...
+
+@overload
+def upsert_objects(pool: DatabaseConnectionPool, 
+                   models: PersistentModelT | Iterable[PersistentModelT],
+                   set_id: int,
+                   ignore_error:Literal[True],
+                   version_info:VersionInfo,
+                   saved_callback:SavedCallback | None = None
+                   ) -> Dict[Tuple[Any,...], PersistentModelT | BaseException]:
+    ...
+
+
+@overload
+def upsert_objects(pool: DatabaseConnectionPool, 
+                   models: PersistentModelT | Iterable[PersistentModelT],
+                   set_id: int,
+                   ignore_error:bool,
+                   version_info:VersionInfo,
+                   saved_callback:SavedCallback | None = None
+                   ) -> Dict[Tuple[Any], PersistentModelT | BaseException] | Tuple[PersistentModelT, ...] | PersistentModelT:
+    ...
+
 
 def upsert_objects(pool:DatabaseConnectionPool, 
                    models: PersistentModelT | Iterable[PersistentModelT],
                    set_id: int,
-                   version_info:VersionInfo = VersionInfo()
-                   ):
+                   ignore_error:bool,
+                   version_info:VersionInfo,
+                   saved_callback:SavedCallback | None = None
+                   ) -> Dict[Tuple[Any], PersistentModelT | BaseException] | Tuple[PersistentModelT, ...] | PersistentModelT:
     is_single = isinstance(models, PersistentModel)
 
     model_list = [models] if is_single else models
 
     mixins = tuple(filter(lambda x: isinstance(x, PartOfMixin), model_list))
+    results : Dict[Tuple[Any,...], PersistentModel | BaseException] = {}
 
     if mixins:
         _logger.fatal(f'{[type(m) for m in mixins]} can not be stored directly. it is part of mixin')
@@ -122,25 +149,51 @@ def upsert_objects(pool:DatabaseConnectionPool,
         for model in targets:
             # we will remove content of the given model. so, we copy it and remove them.
             # for not updating original model.
+            id_values = tuple(get_identifying_field_values(model).values())
+            results[id_values] = model
 
-            for sub_model in iterate_isolated_models(model):
-                sub_model._before_save()
+            try:
+                for sub_model in iterate_isolated_models(model):
+                    assign_identifying_fields_if_empty(
+                        sub_model, 
+                        next_seq=lambda f: _next_seq_for(cursor, type(sub_model), f))
 
-                cursor.execute(*get_query_and_args_for_upserting(sub_model, set_id))
+                    sub_model._before_save()
 
-                loop = True
-                while loop:
-                    fetched = cursor.fetchall()
+                    cursor.execute(*get_query_and_args_for_upserting(sub_model, set_id))
 
-                    for row in fetched:
-                        _update_audit_model(cursor, row)
-                        _upsert_parts_and_externals(cursor, row[_ROW_ID_FIELD], type(sub_model))
+                    loop = True
+                    while loop:
+                        fetched = cursor.fetchall()
 
-                    loop = cursor.nextset()
+                        for row in fetched:
+                            _update_audit_model(cursor, row)
+                            _upsert_parts_and_externals(cursor, row[_ROW_ID_FIELD], type(sub_model))
 
-            extract_shared_models(model, True)
+                        loop = cursor.nextset()
 
-    return targets[0] if is_single else targets
+                extract_shared_models(model, True)
+
+                if saved_callback:
+                    saved_callback(id_values, model)
+            except BaseException as e:
+                if not ignore_error:
+                    raise
+                else:
+                    _logger.warning('{e} is raised. but ignored by user.')
+
+                    results[id_values] = e
+
+                    if saved_callback:
+                        saved_callback(id_values, e)
+
+    if ignore_error:
+        return results
+    else:
+        if isinstance(models, PersistentModel):
+            return targets[0]
+
+        return targets
 
 
 def allocate_audit_version(cursor:DictCursor, audit:VersionInfo) -> int:
@@ -499,3 +552,11 @@ def _delete_parts_and_externals(cursor, root_deleted_ids:Tuple[int,...], type_:T
 
         _delete_parts_and_externals(cursor, root_deleted_ids, part_type)
 
+def update_sequences(pool: DatabaseConnectionPool, 
+                     types: Iterable[Type[PersistentModelT]]):
+
+    with pool.open_cursor() as cursor:
+        for type_ in types:
+            for sql in get_query_for_adjust_seq(type_):
+                cursor.execute(sql)
+ 

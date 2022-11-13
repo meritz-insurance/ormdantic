@@ -8,14 +8,13 @@ from ormdantic.schema.verinfo import VersionInfo
 from ..util import get_logger
 from ..schema.base import PersistentModelT, PersistentModel
 from ..schema.source import (
-    ModelStorage, QueryConditionType, SharedModelSource, Where, 
-    NormalizedQueryConditionType
+    ModelStorage, QueryConditionType, SharedModelSource, 
 )
 
 from .connections import DatabaseConnectionPool
 from .storage import (
-    delete_objects, purge_objects, get_current_version, query_records, squash_objects, 
-    upsert_objects, delete_objects
+    delete_objects, purge_objects, get_current_version, query_records, 
+    squash_objects, upsert_objects, delete_objects
 )
 from .queries import _ROW_ID_FIELD, _JSON_FIELD
 
@@ -27,8 +26,8 @@ class SharedModelDatabaseSource(SharedModelSource):
                  pool: DatabaseConnectionPool,
                  set_id:int,
                  cache: ModelCache | None = None):
-        self._set_id = set_id
         self._pool = pool
+        self._set_id = set_id
 
         super().__init__(cache)
 
@@ -36,17 +35,26 @@ class SharedModelDatabaseSource(SharedModelSource):
                      ) -> Iterator[Tuple[str, int]]:
         return _find_objects(self._pool, type_, {'id': ('in', ids)}, self._set_id)
 
+    def __reduce__(self) -> str | tuple[Any, ...]:
+        return (SharedModelDatabaseSource, (self._pool, self._set_id))
+
 
 class ModelDatabaseStorage(ModelStorage):
     def __init__(self, 
                  pool: DatabaseConnectionPool, shared_source: SharedModelSource,
                  set_id:int, 
-                 ref_date: date, version: int | None):
+                 ref_date: date, version: int | None,
+                 cache: ModelCache | None = None):
         
         self._pool = pool
         self._set_id = set_id
 
-        super().__init__(shared_source, ref_date, version)
+        super().__init__(shared_source, ref_date, version, 'main', cache=cache)
+
+    def __reduce__(self) -> str | tuple[Any, ...]:
+        return (ModelDatabaseStorage, (self._pool, self._shared_source, 
+                                       self._set_id, self._ref_date,
+                                       self._version))
 
     def find_record(self, type_:Type[PersistentModelT], 
                     query_condition: QueryConditionType,
@@ -79,7 +87,9 @@ class ModelDatabaseStorage(ModelStorage):
     def store(self, models:Iterable[PersistentModel] | PersistentModel, 
               version_info: VersionInfo) -> Tuple[PersistentModel] | PersistentModel:
 
-        return upsert_objects(self._pool, models, self._set_id, version_info)
+        upserted = upsert_objects(self._pool, models, self._set_id, False, version_info)
+
+        return upserted
 
     def _squash_models(self, type_: Type, identifieds: Iterator[Dict[str, Any]], 
                        version_info: VersionInfo) -> List[Dict[str, Any]]:
@@ -95,7 +105,7 @@ class ModelDatabaseStorage(ModelStorage):
         return purge_objects(self._pool, type_, list(identifieds), self._set_id, version_info=version_info) 
 
 
-def create_database_source(pool:DatabaseConnectionPool, set_id:int, ref_date:date, version:int = 0):
+def create_database_source(pool:DatabaseConnectionPool, set_id:int, ref_date:date, version:int | None = None):
     return ModelDatabaseStorage(pool, SharedModelDatabaseSource(pool, set_id), 
                                 set_id, ref_date, version)
 

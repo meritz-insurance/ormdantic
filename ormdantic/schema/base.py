@@ -218,12 +218,12 @@ class StrId(ConstrainedStr, IdentifyingMixin):
 
 class SequenceStrId(StrId):
     max_length = 16 
-    prefix = 'C'
+    prefix = 'N'
 
     def new_if_empty(self, **kwds) -> 'StrId':
         if self == '':
             next_seq = kwds['next_seq']
-            return SequenceStrId(next_seq())
+            return SequenceStrId(self.prefix + str(next_seq()))
 
         return self
 
@@ -411,11 +411,12 @@ def _replace_scalar_value_if_empty_value(field_name:str, obj:Any, inplace:bool,
 
         if new_value is not obj:
             return new_value
-    elif isinstance(obj, SchemaBaseModel):
-        replaced = assign_identifying_fields_if_empty(obj, inplace, next_seq)
+    # we do not handle nested.
+    # elif isinstance(obj, SchemaBaseModel):
+    #     replaced = assign_identifying_fields_if_empty(obj, inplace, next_seq)
 
-        if replaced is not obj:
-            return replaced
+    #     if replaced is not obj:
+    #         return replaced
 
     return None
 

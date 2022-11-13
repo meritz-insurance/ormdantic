@@ -14,6 +14,7 @@ from ormdantic.database.queries import (
     get_sql_for_upserting_parts, 
     join_line, 
     _build_namespace_types, _find_join_keys, _extract_fields,
+    get_query_for_adjust_seq,
     _ENGINE, _RELEVANCE_FIELD
 )
 from ormdantic.schema.base import (
@@ -21,7 +22,7 @@ from ormdantic.schema.base import (
     FullTextSearchedStr, PartOfMixin, StringReference, VersionMixin, 
     UniqueStringIndex, StringIndex, DecimalIndex, IntIndex, DateIndex,
     DateTimeIndex, update_forward_refs, StrId, 
-    StoredFieldDefinitions
+    StoredFieldDefinitions, SequenceStrId
 )
 
 from .tools import (
@@ -1335,3 +1336,22 @@ def test_get_query_and_args_for_deleting():
     ) == sqls[0]
     assert {'id': '@', '__set_id':0} == sqls[1]
 
+
+def test_get_query_for_adjust_seq():
+    class CodedModel(PersistentModel):
+        code: SequenceStrId
+        codes: List[SequenceStrId]
+
+    sql = '\n'.join(get_query_for_adjust_seq(CodedModel))
+
+    assert join_line(
+        "SET @MAX_VALUE = (SELECT",
+        "    CAST(REPLACE(MAX(`code`), 'N', '') as INTEGER)",
+        "FROM md_CodedModel);",
+        "EXECUTE IMMEDIATE CONCAT('SELECT SETVAL(`sq_CodedModel_code`, ', @MAX_VALUE, ')')",
+        "SET @MAX_VALUE = (SELECT",
+        "    CAST(REPLACE(MAX(`codes`), 'N', '') as INTEGER)",
+        "FROM md_CodedModel);",
+        "EXECUTE IMMEDIATE CONCAT('SELECT SETVAL(`sq_CodedModel_codes`, ', @MAX_VALUE, ')')",
+    ) == sql
+ 

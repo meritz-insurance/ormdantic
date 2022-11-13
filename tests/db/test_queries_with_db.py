@@ -766,9 +766,9 @@ def test_seq_id():
         cursor.execute(*query_and_args)
 
         assert [
-            {'name': 'first', 'seq_1': 'C1', 'seq_2': 'QQ1'},
-            {'name': 'second', 'seq_1': 'C2', 'seq_2': 'Q1'},
-            {'name': 'third', 'seq_1': 'C3', 'seq_2': 'Q2'},
+            {'name': 'first', 'seq_1': 'N1', 'seq_2': 'QQ1'},
+            {'name': 'second', 'seq_1': 'N2', 'seq_2': 'Q1'},
+            {'name': 'third', 'seq_1': 'N3', 'seq_2': 'Q2'},
         ] == cursor.fetchall()
         
 

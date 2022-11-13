@@ -1,5 +1,6 @@
 from codecs import unicode_escape_decode
 import pytest
+import pickle
 
 from typing import List, Type
 
@@ -335,3 +336,25 @@ def test_test_id_values():
     assert ('hello',) == extract_id_values(ClassWithId, {'id':('=', 'hello')})
 
     assert None is extract_id_values(ClassWithId, {'id':('!=', 'hello')})
+
+
+def test_reduce(chained_source: ModelSource):
+    source = MemoryModelSource([first_shared, found_1])
+
+    data = pickle.loads(pickle.dumps(source))
+    assert type(data) == type(source)
+
+    assert found_1 == data.find(MyProduct, {'code':'found-1'})
+
+    data = pickle.loads(pickle.dumps(chained_source))
+    assert type(data) == type(chained_source)
+
+    assert found_1 == data.find(MyProduct, {'code':'found-1'})
+
+    chained_shared_source = ChainedSharedModelSource(
+        MemorySharedModelSource([]), MemorySharedModelSource([first_shared]))
+
+    data = pickle.loads(pickle.dumps(chained_shared_source))
+    assert type(data) == type(chained_shared_source)
+
+    assert first_shared == data.find(MySharedContent, first_shared.id)
