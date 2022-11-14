@@ -494,7 +494,7 @@ def _get_view_fields(fields:Dict[str, Tuple[str, ...]]) -> Iterator[str]:
 def _get_table_indexes(type_:Type, stored_fields:StoredFieldDefinitions) -> Iterator[str]:
     identified_fields = [field_name 
                         for field_name, (_, field_type) in stored_fields.items()
-                        if is_derived_from(field_type, AutoAllocatedMixin)]
+                        if has_metadata(field_type, MetaIdentifyingField)]
 
     if _is_version_type(type_):
         identified_fields.append(_VALID_START_FIELD)
@@ -505,7 +505,7 @@ def _get_table_indexes(type_:Type, stored_fields:StoredFieldDefinitions) -> Iter
     
 
     for field_name, (_, field_type) in stored_fields.items():
-        if is_derived_from(field_type, AutoAllocatedMixin):
+        if has_metadata(field_type, MetaIdentifyingField):
             continue
 
         key_def = _generate_key_definition(field_type)

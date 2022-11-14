@@ -334,7 +334,7 @@ def get_part_types(type_:Type) -> Tuple[Type]:
 
 def get_identifer_of(model:SchemaBaseModel) -> Iterator[Tuple[str, Any]]:
     for field_name, model_field in type(model).__fields__.items(): 
-        if is_derived_from(model_field.outer_type_, AutoAllocatedMixin):
+        if has_metadata(model_field.outer_type_, MetaIdentifyingField):
             yield (field_name, getattr(model, field_name))
 
 
