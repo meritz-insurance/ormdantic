@@ -10,7 +10,7 @@ from ormdantic.schema import (
 from ormdantic.schema.base import (
     is_derived_from,
     AutoAllocatedMixin, PersistentModel, PartOfMixin, UseBaseClassTableMixin, 
-    assign_identifying_fields_if_empty, get_container_type, 
+    allocate_fields_if_empty, get_container_type, 
     get_field_name_and_type, get_identifer_of, get_field_names_for, StrId, DateId, 
     get_type_for_table, is_field_list_or_tuple_of, get_field_type,
     get_root_container_type, get_field_name_and_type_for_annotated,
@@ -173,26 +173,26 @@ def test_is_fields_collection_type():
     assert is_field_list_or_tuple_of(SimpleModel, 'tuple_id', str)
 
 
-def test_assign_identified_if_empty():
+def test_allocate_fields_if_empty():
     class SimpleModel(IdentifiedModel):
         pass
 
     model = SimpleModel(id=StrId(''), version='')
 
-    replaced = assign_identifying_fields_if_empty(model)
+    replaced = allocate_fields_if_empty(model)
 
     assert replaced is not model
     assert model.id == ''
     assert replaced.id
 
-    replaced = assign_identifying_fields_if_empty(model, True)
+    replaced = allocate_fields_if_empty(model, True)
 
     assert replaced is model
     assert model.id != ''
     assert replaced.id
   
 
-def test_assign_identified_if_empty_for_vector():
+def test_allocate_fields_if_empty_for_vector():
     class SimpleModel(PersistentModel):
         list_ids : List[StrId] 
         tuple_ids : Tuple[StrId,...]
@@ -204,7 +204,7 @@ def test_assign_identified_if_empty_for_vector():
         empty_ids=[]
     )
 
-    replaced = assign_identifying_fields_if_empty(model)
+    replaced = allocate_fields_if_empty(model)
 
     assert replaced.list_ids != model.list_ids
     assert replaced.tuple_ids != model.tuple_ids

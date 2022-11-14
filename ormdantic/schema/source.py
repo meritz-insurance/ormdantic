@@ -12,7 +12,7 @@ from ..util import get_logger, is_derived_from
 
 from .typed import parse_object_for_model
 from .base import (
-    PersistentModelT, PersistentModel, assign_identifying_fields_if_empty, 
+    PersistentModelT, PersistentModel, allocate_fields_if_empty, 
     get_identifying_fields, get_stored_fields, ScalarType
 )
 from .shareds import (
@@ -502,7 +502,7 @@ class MemoryModelStorage(ModelStorage):
         saved = []
 
         for model in models:
-            model = assign_identifying_fields_if_empty(model)
+            model = allocate_fields_if_empty(model)
 
             model._before_save()
 
@@ -609,7 +609,7 @@ def _build_model_map_key(model_type:Type, model_dict:Dict[str, Any]) -> FrozenSe
         if len(items) == 1:
             field_value = items[0]
         else:
-            field_value = tuple(items) if isinstance(items, (list, tuple)) else items
+            field_value = tuple(items) if isinstance(items, list) else items
 
         key.append((field, field_value))
 

@@ -345,16 +345,16 @@ def get_identifer_of(model:SchemaBaseModel) -> Iterator[Tuple[str, Any]]:
             yield (field_name, getattr(model, field_name))
 
 
-def assign_identifying_fields_if_empty(model:ModelT, inplace:bool=False, 
-                                       next_seq: Callable[[str], Any] | None = None) -> ModelT:
+def allocate_fields_if_empty(model:ModelT, inplace:bool=False, 
+                             next_seq: Callable[[str], Any] | None = None) -> ModelT:
     to_be_updated = None
 
     for field_name in type(model).__fields__.keys(): 
         field_value = getattr(model, field_name)
 
         updated_value = (
-            _replace_scalar_value_if_empty_value(field_name, field_value, inplace, next_seq) 
-            or _replace_vector_if_empty_value(field_name, field_value, inplace, next_seq)
+            _allocate_scalar_value_if_empty_value(field_name, field_value, inplace, next_seq) 
+            or _allocate_vector_if_empty_value(field_name, field_value, inplace, next_seq)
         )
 
         if updated_value is not None:
@@ -379,8 +379,8 @@ def get_type_for_table(type_:Type) -> Type:
 
 
 
-def _replace_scalar_value_if_empty_value(field_name:str, obj:Any, inplace:bool, 
-                                         next_seq: Callable[[str], Any] | None = None) -> Any:
+def _allocate_scalar_value_if_empty_value(field_name:str, obj:Any, inplace:bool, 
+                                          next_seq: Callable[[str], Any] | None = None) -> Any:
     if isinstance(obj, AutoAllocatedMixin):
         if next_seq:
             kwds = {'next_seq': lambda: next_seq(field_name)}
@@ -401,7 +401,7 @@ def _replace_scalar_value_if_empty_value(field_name:str, obj:Any, inplace:bool,
     return None
 
 
-def _replace_vector_if_empty_value(field_name:str, obj:Any, inplace:bool, 
+def _allocate_vector_if_empty_value(field_name:str, obj:Any, inplace:bool, 
                                    next_seq: Callable[[str], Any] | None = None) -> Any:
     if isinstance(obj, (list, tuple)):
         if not obj:
@@ -410,7 +410,7 @@ def _replace_vector_if_empty_value(field_name:str, obj:Any, inplace:bool,
         to_be_updated = None
 
         for index, item in enumerate(obj):
-            replaced = _replace_scalar_value_if_empty_value(field_name, item, inplace, next_seq)
+            replaced = _allocate_scalar_value_if_empty_value(field_name, item, inplace, next_seq)
 
             if not to_be_updated and replaced is not None:
                 to_be_updated = list(obj[:index])

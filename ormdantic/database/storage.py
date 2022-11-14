@@ -15,7 +15,7 @@ from .connections import DatabaseConnectionPool
 from ..util import get_logger, is_derived_from
 from ..schema import ModelT, PersistentModel, get_container_type
 from ..schema.base import (
-    PartOfMixin, PersistentModel, assign_identifying_fields_if_empty, 
+    PartOfMixin, PersistentModel, allocate_fields_if_empty, 
     get_part_types, PersistentModelT,
     get_identifying_fields, get_identifying_field_values
 )
@@ -140,7 +140,7 @@ def upsert_objects(pool:DatabaseConnectionPool,
     with pool.open_cursor(True) as cursor:
         # we get next seq in current db transaction.
         targets = tuple(
-            assign_identifying_fields_if_empty(
+            allocate_fields_if_empty(
                 m, next_seq=lambda f: _next_seq_for(cursor, type(m), f))
             for m in model_list
         )
@@ -164,7 +164,7 @@ def upsert_objects(pool:DatabaseConnectionPool,
 
             try:
                 for sub_model in iterate_isolated_models(model):
-                    assign_identifying_fields_if_empty(
+                    allocate_fields_if_empty(
                         sub_model, 
                         next_seq=lambda f: _next_seq_for(cursor, type(sub_model), f))
 

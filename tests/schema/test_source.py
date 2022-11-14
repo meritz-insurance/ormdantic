@@ -41,7 +41,7 @@ class MyComplexContent(PersistentModel):
 class MyProduct(PersistentModel):
     code: Annotated[StrId, MetaIdentifyingField()]
     name: Annotated[str, MetaFullTextSearchedField()]
-    tags: Annotated[List[str], MetaIndexField]
+    tags: Annotated[List[str], MetaIndexField()]
     nested: NestedContentReferenceModel
 
 first_shared = MySharedContent(name=StringIndex('first'))
