@@ -38,11 +38,9 @@ class TypedIdentifiedModel(IdentifiedModel, TypeNamedModel):
         title = 'base object which can be saved or retreived by id and type'
 
 
-
 def _fill_type_name_field(class_type:Type):
     name = class_type.__name__
         
-
     model_field = copy.copy(class_type.__fields__[_TYPE_NAME_FIELD])
     model_field.default = name
 

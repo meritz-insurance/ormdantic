@@ -1,3 +1,4 @@
+from .verinfo import VersionInfo
 from .base import (
     SchemaBaseModel,
     ModelT, PersistentModelT, PersistentModel,
@@ -10,7 +11,7 @@ from .base import (
     UuidStr, IntegerArrayIndex, update_forward_refs,
     StoredFieldDefinitions, PersistentModel, 
     MetaFullTextSearchedField, MetaIdentifyingField, MetaIndexField, MetaUniqueIndexField, 
-    MetaReferenceField
+    MetaReferenceField, SequenceStr,
 )
 
 from .shareds import (
@@ -56,6 +57,7 @@ __all__ = [
     "MetaIndexField", 
     "MetaUniqueIndexField", 
     "MetaReferenceField",
+    "SequenceStr",
     "update_forward_refs",
     "StoredFieldDefinitions",
     "SharedContentModel",

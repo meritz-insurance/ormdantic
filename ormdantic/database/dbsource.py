@@ -1,4 +1,4 @@
-from typing import Type, Tuple, Iterator, Any, Dict, Iterable, List
+from typing import Type, Tuple, Iterator, Any, Dict, Iterable, List, overload
 
 from datetime import date
 from ormdantic.schema.modelcache import ModelCache
@@ -84,8 +84,19 @@ class ModelDatabaseStorage(ModelStorage):
     def get_latest_version(self) -> int:
         return get_current_version(self._pool)
 
+    @overload
+    def store(self, models:PersistentModelT, 
+              version_info: VersionInfo) -> PersistentModelT:
+        ...
+
+    @overload
+    def store(self, models:Iterable[PersistentModelT],
+              version_info: VersionInfo) -> Tuple[PersistentModelT,...]:
+        ...
+
+
     def store(self, models:Iterable[PersistentModelT] | PersistentModelT, 
-              version_info: VersionInfo) -> Tuple[PersistentModelT] | PersistentModelT:
+              version_info: VersionInfo) -> Tuple[PersistentModelT,...] | PersistentModelT:
 
         upserted = upsert_objects(self._pool, models, self._set_id, False, version_info)
 

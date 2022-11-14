@@ -1,4 +1,5 @@
 from .schema import (
+    VersionInfo,
     SchemaBaseModel,
     ModelT, PersistentModelT, IdentifiedModelT, PersistentModel, IdentifiedModel,
     MetaStoredField, StringIndex, StringArrayIndex, UniqueStringIndex,
@@ -14,13 +15,16 @@ from .schema import (
     ChainedSharedModelSource, ChainedModelSource
 )
 
+
 from .database import (
     DatabaseConnectionPool, 
     SharedModelDatabaseSource, ModelDatabaseStorage,
+    create_database_source
 )
 
 
 __all__ = [
+    "VersionInfo",
     "update_forward_refs",
     "SchemaBaseModel",
     "ModelT",
@@ -60,4 +64,5 @@ __all__ = [
     "DatabaseConnectionPool",
     "SharedModelDatabaseSource",
     "ModelDatabaseStorage",
+    "create_database_source",
 ]

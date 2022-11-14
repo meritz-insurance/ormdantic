@@ -13,6 +13,7 @@ from typing import List, ClassVar
 from datetime import date
 
 import ormdantic as od
+from ormdantic.database.storage import create_table
 
 class Person(od.PersistentModel, od.PartOfMixin['Company']):
     _stored_fields: ClassVar[od.StoredFieldDefinitions] = {
@@ -38,7 +39,9 @@ pool = od.DatabaseConnectionPool({
     'port':3306
 })
 
-od.create_table(pool, Company)
+create_table(pool, Company)
+
+storage = od.create_database_source(pool, 0, date.today())
 
 apple_company = Company.parse_obj({
     'address':'California', 
@@ -48,16 +51,15 @@ apple_company = Company.parse_obj({
     ]
 })
 
-apple_company = od.upsert_objects(pool, apple_company)
-
+apple_company = storage.store(apple_company, od.VersionInfo())
 apple_company.members[1].birth = date(1950, 8, 11)
 
-od.upsert_objects(pool, apple_company)
+storage.store(apple_company, od.VersionInfo())
 
-companies_in_california = od.find_objects(
-    pool, Company, (('address', 'match', '+California'),))
+companies_in_california = storage.find(
+    Company, {'address': ('match', '+California')})
 
-persons = od.find_objects(
-    pool, Person, (('name', 'like', '%Steve%'),))
+persons = storage.query(
+    Person, {'name': ('like', '%Steve%')})
 
 ```

@@ -245,17 +245,17 @@ def _is_op_equals(item:Tuple[str, Any] | ScalarType) -> bool:
 
 class ModelStorage(ModelSource):
     @overload
-    def store(self, objs:PersistentModel, version_info:VersionInfo) -> PersistentModel:
+    def store(self, objs:PersistentModelT, version_info:VersionInfo) -> PersistentModelT:
         ...
 
     @overload
     def store(self, 
-              objs: Iterable[PersistentModel], version_info: VersionInfo
-              ) -> Iterable[PersistentModel]:
+              objs: Iterable[PersistentModelT], version_info: VersionInfo
+              ) -> Tuple[PersistentModelT,...]:
         ...
 
-    def store(self, objs:Iterable[PersistentModel] | PersistentModel, 
-              version_info: VersionInfo) -> Iterable[PersistentModel] | PersistentModel:
+    def store(self, objs:Iterable[PersistentModelT] | PersistentModelT, 
+              version_info: VersionInfo) -> Tuple[PersistentModelT,...] | PersistentModelT:
         raise NotImplementedError('store should be implemented')
 
     def squash(self, type_:Type, query_condition:QueryConditionType,
