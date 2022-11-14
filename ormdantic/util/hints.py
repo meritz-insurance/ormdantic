@@ -2,18 +2,23 @@ from types import UnionType
 from typing import (
     TypeGuard, get_args, Type, get_origin, Tuple, Any, Generic, Protocol,
     ForwardRef, Dict, Generic, Union, TypeVar, List, Tuple, overload,
+    Annotated
 )
 from typing_extensions import _collect_type_vars # type: ignore
 from inspect import getmro
 import sys
 import copy
 import functools
+import inspect
 
 from .tools import convert_tuple
 
 #@functools.cache
 def get_base_generic_alias_of(type_:Type, *generic_types:Type) -> Type | None:
     generic_types = convert_tuple(generic_types)
+
+    if get_origin(type_) == Annotated:
+        type_ = type_.__origin__
 
     for base_type in get_mro_with_generic(type_):
         if any(base_type is t or get_origin(base_type) is t for t in generic_types):
@@ -132,9 +137,12 @@ def is_derived_from(type_:Type, base_type:Type[_T] | Tuple[Type,...]) -> TypeGua
         return True
 
     if hasattr(type_, "__origin__"):
-        type_ = get_origin(type_)
+        origin_type = get_origin(type_)
 
-        if type_ in base_types:
+        if origin_type == Annotated:
+            return is_derived_from(type_.__origin__, base_type)
+
+        if origin_type in base_types:
             return True
 
     if hasattr(type_, '__mro__'):
@@ -142,6 +150,23 @@ def is_derived_from(type_:Type, base_type:Type[_T] | Tuple[Type,...]) -> TypeGua
         return any(t in base_types for t in getmro(type_))
 
     return False
+
+
+def has_metadata(type:Type, meta_type:Type) -> bool:
+    if hasattr(type, '__metadata__'):
+        return any(isinstance(o, meta_type) for o in type.__metadata__)
+    
+    return False
+
+
+def get_metadata_for(type:Type, meta_type:Type[_T]) -> _T | None:
+    if hasattr(type, '__metadata__'):
+        for o in type.__metadata__:
+            if isinstance(o, meta_type):
+                return o
+    
+    return None
+
 
 
 def get_union_type_arguments(type_:Type, target_type:Type | None = None) -> Tuple[Type,...] | None:

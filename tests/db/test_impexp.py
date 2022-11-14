@@ -72,7 +72,7 @@ model = ContainerModel(id=StrId('@'),
                                 parts=(
                                     SubPartModel(
                                         name=FullTextSearchedStringIndex('part1-sub1'),
-                                        codes=StringArrayIndex(['part1-sub1-code1'])
+                                        codes=['part1-sub1-code1']
                                     ),
                                 ),
                                 codes = ['part1-code1', 'part1-code2']
@@ -82,11 +82,11 @@ model = ContainerModel(id=StrId('@'),
                                 parts=(
                                     SubPartModel(
                                         name=FullTextSearchedStringIndex('part2-sub1'),
-                                        codes=StringArrayIndex(['part2-sub1-code1', 'part2-sub1-code2'])
+                                        codes=['part2-sub1-code1', 'part2-sub1-code2']
                                     ),
                                     SubPartModel(
                                         name=FullTextSearchedStringIndex('part2-sub2'),
-                                        codes=StringArrayIndex([])
+                                        codes=[]
                                     )
                                 ),
                                 codes = ['part2-code1', 'part2-code2']

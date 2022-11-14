@@ -1,9 +1,11 @@
 from typing import (
     Any, ForwardRef, Tuple, Dict, Type, Generic, TypeVar, Iterator, Callable, 
-    List, ClassVar, cast 
+    List, ClassVar, cast, Annotated
 )
 import datetime
 import inspect
+import functools
+import operator
 from uuid import uuid4
 
 import orjson
@@ -21,7 +23,7 @@ from ..util import (
     update_forward_refs_in_generic_base,
     is_derived_from, resolve_forward_ref, is_list_or_tuple_of,
     resolve_forward_ref_in_args, is_derived_or_collection_of_derived,
-    unique, convert_tuple
+    unique, convert_tuple, has_metadata
 )
 
 JsonPathAndType = Tuple[Tuple[str,...], Type[Any]]
@@ -101,20 +103,40 @@ PersistentModelT = TypeVar('PersistentModelT', bound=PersistentModel)
 
 _logger = get_logger(__name__)
 
-class StoredMixin():
+class MetaField():
+    _fields = tuple()
+    def __eq__(self, other):
+        return (
+            type(self) == type(other) and 
+            all(getattr(self, f) == getattr(other, f) for f in self._fields)
+        )
+
+    def __hash__(self):
+        if self._fields:
+            return functools.reduce(operator.xor, [hash(getattr(self, f)) for f in self._fields ])
+        return 0
+
+class MetaStoredField(MetaField):
     ''' the json value will be saved as table fields. '''
     pass
 
 
-class ReferenceMixin(Generic[ModelT], StoredMixin):
+class MetaReferenceField(MetaStoredField):
     ''' refenence key which indicate other row in other table like database's foreign key 
         ModelT will describe the type which is referenced.
     '''
-    _target_field: ClassVar[str] = ''
+    _fields = ('target_type', 'target_field',)
+
+    def __init__(self, target_type:Type, target_field:str):
+        self.target_type = target_type
+        self.target_field = target_field
+
+
+class MetaIdentifyingField(MetaStoredField):
     pass
 
 
-class IdentifyingMixin(StoredMixin):
+class AutoAllocatedMixin():
     ''' the json value will be used for identifing the object. 
     The value of this type will be update through the sql param 
     so, this field of database will not use stored feature.
@@ -125,28 +147,21 @@ class IdentifyingMixin(StoredMixin):
         raise NotImplementedError('fill if exist should be implemented.')
 
 
-class IndexMixin(StoredMixin):
+class MetaIndexField(MetaStoredField):
     ''' the json value will be indexed as table fields. '''
-    pass
+    def __init__(self, max_length:int | None = None):
+        self.max_length = max_length
 
 
-class UniqueIndexMixin(IndexMixin):
+class MetaUniqueIndexField(MetaIndexField):
     ''' the json value will be indexed as unique. '''
     pass
 
 
-class FullTextSearchedMixin(StoredMixin):
+class MetaFullTextSearchedField(MetaStoredField):
     ''' the json value will be used by full text searching.'''
-    pass
-
-
-# Array Index Mixin will contain the several data which are indexed.
-# where parameter use the field of this type. if the value is array,
-# it should be all matched. but the value is scalar, 
-# one of value of this type is matched.
-class ArrayIndexMixin(IndexMixin, List[T]):
-    ''' the json value will be indexed as table fields. '''
-    pass 
+    def __init__(self, max_length:int | None = None):
+        self.max_length = max_length
 
 
 class PartOfMixin(Generic[ModelT]):
@@ -159,53 +174,27 @@ class UseBaseClassTableMixin():
     pass
 
 
-class StringIndex(ConstrainedStr, IndexMixin):
-    ''' string index '''
-    pass
+StringIndex = Annotated[str, MetaIndexField()]
+FullTextSearchedString = Annotated[str, MetaFullTextSearchedField()]
+FullTextSearchedStringIndex = Annotated[str, MetaFullTextSearchedField(), MetaIndexField()]
+UniqueStringIndex = Annotated[ConstrainedStr, MetaUniqueIndexField()]
+DecimalIndex = Annotated[ConstrainedDecimal, MetaIndexField()]
+IntIndex = Annotated[ConstrainedInt, MetaIndexField()]
+DateIndex = Annotated[datetime.date, MetaIndexField()]
+DateTimeIndex = Annotated[datetime.datetime, MetaIndexField()]
+
+StringArrayIndex = Annotated[List[str], MetaIndexField()]
+IntegerArrayIndex = Annotated[List[int], MetaIndexField()]
 
 
-class StringReference(ConstrainedStr, ReferenceMixin[ModelT]):
-    ''' string referenece '''
-    pass
-
-
-class DecimalIndex(ConstrainedDecimal, IndexMixin):
-    ''' decimal index'''
-    pass
-
-
-class IntIndex(ConstrainedInt, IndexMixin):
-    ''' decimal index'''
-    pass
-
-
-class IntReference(ConstrainedStr, ReferenceMixin[ModelT]):
-    ''' int referenece '''
-    pass
-
-
-class DateIndex(datetime.date, IndexMixin):
-    ''' date index '''
-    pass
-
-class DateId(datetime.date, IdentifyingMixin):
+class DateId(datetime.date, AutoAllocatedMixin):
     ''' identified date index '''
 
     def new_if_empty(self, **kwds) -> 'DateId':
         return self
 
 
-class DateTimeIndex(datetime.datetime, IndexMixin):
-    ''' date time index '''
-    pass
-
-
-class UniqueStringIndex(ConstrainedStr, UniqueIndexMixin):
-    ''' Unique Index string '''
-    pass
-
-
-class StrId(ConstrainedStr, IdentifyingMixin):
+class StrId(ConstrainedStr, AutoAllocatedMixin):
     max_length = 64 # sha256 return 64 char
     ''' identified id string sha256 or uuid'''
 
@@ -228,28 +217,9 @@ class SequenceStrId(StrId):
         return self
 
 
-class FullTextSearchedStr(ConstrainedStr, FullTextSearchedMixin):
-    ''' String for full text searching '''
-    pass
-
-
-class FullTextSearchedStringIndex(FullTextSearchedStr, IndexMixin):
-    ''' string for full text searching and indexing'''
-    pass
-
-
-class StringArrayIndex(ArrayIndexMixin[str]):
-    ''' Array of string '''
-    pass
-
-
-class IntegerArrayIndex(ArrayIndexMixin[int]):
-    ''' Array of string '''
-    pass
-
-
 class IdentifiedMixin(SchemaBaseModel):
-    id: StrId = Field(default=StrId(''), title='identifier for retreiving')
+    id: Annotated[StrId, MetaIdentifyingField()] = Field(
+        default=StrId(''), title='identifier for retreiving')
 
 
 class VersionMixin(SchemaBaseModel):
@@ -259,7 +229,7 @@ class VersionMixin(SchemaBaseModel):
 
 class DatedMixin(SchemaBaseModel):
     ''' has applied at field '''
-    applied_at: DateId = Field(title='applied at')
+    applied_at: Annotated[DateId, MetaIdentifyingField()] = Field(title='applied at')
     pass
 
 
@@ -310,6 +280,27 @@ def get_field_name_and_type(type_:Type,
     return tuple(name_and_types)
 
 
+def get_field_name_and_type_for_annotated(type_:Type, 
+                            *target_types: Type,
+                            ) -> Tuple[Tuple[str, Type]]:
+    if not is_derived_from(type_, BaseModel):
+        _logger.fatal(f'type_ {type_=}should be subclass of BaseModel. '
+                      f'check the mro {inspect.getmro(type_)}')
+        raise RuntimeError(f'Invalid type {type_}.')
+
+    target_types = convert_tuple(target_types) 
+
+    name_and_types = []
+
+    for field_name, model_field in type_.__fields__.items():
+        field_type = model_field.outer_type_ 
+
+        if not target_types or any(has_metadata(field_type, t) for t in target_types):
+            name_and_types.append((field_name, model_field.outer_type_))
+
+    return tuple(name_and_types)
+
+
 def get_field_type(type_:Type[ModelT], field_name:str) -> type:
     if not is_derived_from(type_, BaseModel):
         _logger.fatal(f'type_ {type_=} should be the subclass of BaseModel. '
@@ -350,7 +341,7 @@ def get_part_types(type_:Type) -> Tuple[Type]:
 
 def get_identifer_of(model:SchemaBaseModel) -> Iterator[Tuple[str, Any]]:
     for field_name, model_field in type(model).__fields__.items(): 
-        if is_derived_from(model_field.outer_type_, IdentifyingMixin):
+        if is_derived_from(model_field.outer_type_, AutoAllocatedMixin):
             yield (field_name, getattr(model, field_name))
 
 
@@ -390,7 +381,7 @@ def get_type_for_table(type_:Type) -> Type:
 
 def _replace_scalar_value_if_empty_value(field_name:str, obj:Any, inplace:bool, 
                                          next_seq: Callable[[str], Any] | None = None) -> Any:
-    if isinstance(obj, IdentifyingMixin):
+    if isinstance(obj, AutoAllocatedMixin):
         if next_seq:
             kwds = {'next_seq': lambda: next_seq(field_name)}
         else:
@@ -436,27 +427,26 @@ def _replace_vector_if_empty_value(field_name:str, obj:Any, inplace:bool,
 
 
 def get_stored_fields_for(type_:Type,
-                          type_or_predicate: Type[T] | Callable[[Tuple[str, ...], Type], bool]
+                          metadata_or_predicate: Type[T] | Callable[[Tuple[str, ...], Type], bool]
                           ) -> Dict[str, Tuple[Tuple[str, ...], Type[T]]]:
     stored = get_stored_fields(type_)
 
-    if inspect.isfunction(type_or_predicate):
+    if inspect.isfunction(metadata_or_predicate):
         return {
             k: (paths, cast(Type[T], type_)) for k, (paths, type_) in stored.items()
-            if type_or_predicate(paths, type_)
+            if metadata_or_predicate(paths, type_)
         }
     else:
         return {
             k: (paths, cast(Type[T], type_)) for k, (paths, type_) in stored.items()
-            if is_derived_from(type_, cast(Type, type_or_predicate))
-                or is_list_or_tuple_of(type_, type_or_predicate)
+            if has_metadata(type_, cast(Type, metadata_or_predicate))
         }
 
 
 def get_stored_fields(type_:Type):
     stored_fields : StoredFieldDefinitions = {
         field_name:(_get_json_paths(field_name, field_type), field_type)
-        for field_name, field_type in get_field_name_and_type(type_, StoredMixin)
+        for field_name, field_type in get_field_name_and_type_for_annotated(type_, MetaStoredField)
     }
 
     for fields in reversed(
@@ -480,7 +470,7 @@ def get_stored_fields(type_:Type):
         
 
 def get_identifying_fields(model_type:Type[PersistentModelT]) -> Tuple[str,...]:
-    stored_fields = get_stored_fields_for(model_type, IdentifyingMixin)
+    stored_fields = get_stored_fields_for(model_type, MetaIdentifyingField)
 
     return tuple(field_name for field_name, _ in stored_fields.items())
 
@@ -492,7 +482,7 @@ def get_identifying_field_values(model:PersistentModel) -> Dict[str, Any]:
 def _get_json_paths(field_name, field_type) -> Tuple[str,...]:
     paths: List[str] = []
 
-    if is_derived_from(field_type, ArrayIndexMixin):
+    if is_derived_from(field_type, (list, tuple)):
         paths.extend([f'$.{field_name}[*]', '$'])
     else:
         paths.append(f'$.{field_name}')
@@ -509,10 +499,3 @@ def _validate_json_paths(paths:Tuple[str]):
     #     _logger.fatal(f'{paths} should end with $ for collection type')
     #     raise RuntimeError('Invalid path expression. collection type should end with $.')
 
-
-
-# def has_type_mixin(type_:Type, mixin:Type) -> bool:
-#     return is_derived_from(type_, mixin) or (
-#         hasattr(type_, '__metadata__') and 
-#         is_derived_from(getattr(type_, '__metadata__')[0], mixin)
-#     )

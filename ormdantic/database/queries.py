@@ -14,17 +14,17 @@ from pydantic import ConstrainedStr, ConstrainedDecimal
 from ormdantic.util import is_derived_from, convert_tuple
 from ormdantic.util.hints import get_args_of_base_generic_alias
 
-from ..util import get_logger
+from ..util import get_logger, has_metadata, get_metadata_for
 from ..schema.base import (
-    ArrayIndexMixin, DatedMixin, PersistentModelT, ReferenceMixin, 
-    FullTextSearchedMixin, IdentifyingMixin, IndexMixin, SequenceStrId, 
-    StoredFieldDefinitions, PersistentModelT, StoredMixin, PartOfMixin, 
+    DatedMixin, PersistentModelT, MetaReferenceField, 
+    MetaFullTextSearchedField, AutoAllocatedMixin, MetaIndexField, SequenceStrId, 
+    StoredFieldDefinitions, PersistentModelT, PartOfMixin, 
     UseBaseClassTableMixin, VersionMixin, 
-    UniqueIndexMixin, get_container_type, get_root_container_type,
+    MetaUniqueIndexField, get_container_type, get_root_container_type,
     get_field_names_for, get_part_types, is_field_list_or_tuple_of,
     PersistentModel, is_list_or_tuple_of, get_stored_fields,
     get_stored_fields_for, get_type_for_table, get_identifying_field_values,
-    get_identifying_fields
+    get_identifying_fields, MetaStoredField, MetaIdentifyingField
 )
 from ..schema.shareds import PersistentSharedContentModel
 from ..schema.verinfo import VersionInfo
@@ -345,15 +345,14 @@ def get_sql_for_creating_table(type_:Type[PersistentModelT]):
 
 
 def get_stored_fields_for_full_text_search(type_:Type[PersistentModelT]):
-    return get_stored_fields_for(type_, FullTextSearchedMixin)
+    return get_stored_fields_for(type_, MetaFullTextSearchedField)
 
 
 def get_stored_fields_for_part_of(type_:Type[PersistentModelT]):
     return get_stored_fields_for(type_, 
         lambda paths, type_: 
             not _is_come_from_container_field(paths) 
-            or is_derived_from(type_, FullTextSearchedMixin)
-            or is_list_or_tuple_of(type_, FullTextSearchedMixin)
+            or has_metadata(type_, MetaFullTextSearchedField)
     )
 
 
@@ -362,7 +361,11 @@ def _is_come_from_container_field(paths:Tuple[str,...]) -> bool:
 
 
 def get_stored_fields_for_external_index(type_:Type[PersistentModelT]):
-    return get_stored_fields_for(type_, ArrayIndexMixin)
+    return {name:(path, field_type)
+        for name, (path, field_type) 
+        in get_stored_fields_for(type_, MetaIndexField).items()
+        if is_derived_from(field_type, (tuple, list))
+    }
 
 
 def _build_model_table_statement(table_name:str, 
@@ -462,7 +465,7 @@ def _get_table_version_fields(type_:Type) -> Iterator[str]:
 
 def _get_external_index_table_fields(field_name:str, field_type:Type) -> Iterator[str]:
     # we don't need primary key, because there is no field which is for full text searching.
-    param_type = get_args_of_base_generic_alias(field_type, ArrayIndexMixin)[0]
+    param_type = get_args_of_base_generic_alias(field_type, list, tuple)[0]
 
     yield f'{field_exprs(_ORG_ROW_ID_FIELD)} BIGINT'
     yield f'{field_exprs(_ROOT_ROW_ID_FIELD)} BIGINT'
@@ -491,7 +494,7 @@ def _get_view_fields(fields:Dict[str, Tuple[str, ...]]) -> Iterator[str]:
 def _get_table_indexes(type_:Type, stored_fields:StoredFieldDefinitions) -> Iterator[str]:
     identified_fields = [field_name 
                         for field_name, (_, field_type) in stored_fields.items()
-                        if is_derived_from(field_type, IdentifyingMixin)]
+                        if is_derived_from(field_type, AutoAllocatedMixin)]
 
     if _is_version_type(type_):
         identified_fields.append(_VALID_START_FIELD)
@@ -502,7 +505,7 @@ def _get_table_indexes(type_:Type, stored_fields:StoredFieldDefinitions) -> Iter
     
 
     for field_name, (_, field_type) in stored_fields.items():
-        if is_derived_from(field_type, IdentifyingMixin):
+        if is_derived_from(field_type, AutoAllocatedMixin):
             continue
 
         key_def = _generate_key_definition(field_type)
@@ -513,7 +516,7 @@ def _get_table_indexes(type_:Type, stored_fields:StoredFieldDefinitions) -> Iter
 
     full_text_searched_fields = set(
         field_name for field_name, (_, field_type) in stored_fields.items()
-        if is_derived_from(field_type, FullTextSearchedMixin)
+        if has_metadata(field_type, MetaFullTextSearchedField)
     )
 
     if full_text_searched_fields:
@@ -548,26 +551,34 @@ def _get_field_db_type(type_:Type) -> str:
     # if type_ is float:
     #     return 'FLOAT'
 
-    if issubclass(type_, Decimal):
-        if issubclass(type_, ConstrainedDecimal):
+    if is_derived_from(type_, Decimal):
+        if is_derived_from(type_, ConstrainedDecimal):
             max_digits = min(type_.max_digits or _MAX_DECIMAL_DIGITS, _MAX_DECIMAL_DIGITS)
 
             return f'DECIMAL({max_digits})'
 
         return 'DECIMAL(65)'
 
-    if issubclass(type_, datetime):
+    if is_derived_from(type_, datetime):
         return 'DATETIME(6)'
 
-    if issubclass(type_, date):
+    if is_derived_from(type_, date):
         return 'DATE'
 
-    if issubclass(type_, (str, StoredMixin)):
-        if issubclass(type_, ConstrainedStr):
+    if is_derived_from(type_, str):
+        if is_derived_from(type_, ConstrainedStr):
             max_length = min(type_.max_length or _MAX_VAR_CHAR_LENGTH, _MAX_VAR_CHAR_LENGTH)
-
             return f'VARCHAR({max_length})'
 
+        meta = get_metadata_for(type_, MetaIndexField) or get_metadata_for(type_, MetaFullTextSearchedField)
+
+        if meta:
+            max_length = min(meta.max_length or _MAX_VAR_CHAR_LENGTH, _MAX_VAR_CHAR_LENGTH)
+            return f'VARCHAR({max_length})'
+
+        return 'TEXT'
+
+    if get_metadata_for(type_, MetaStoredField):
         return 'TEXT'
 
     _logger.fatal(f'unsupported type: {type_}')
@@ -590,22 +601,22 @@ def _f(field:str) -> str:
 
 
 def _generate_stored_for_json_path(json_paths: Tuple[str, ...], field_type:Type) -> str:
-    if is_derived_from(field_type, IdentifyingMixin):
+    if has_metadata(field_type, MetaIdentifyingField):
         # this value will be update by sql params.
         return ''
 
     json_path = '$.' + '.'.join([path.replace('$.', '') for path in json_paths if path != '$'])
 
-    if is_derived_from(field_type, ArrayIndexMixin):
+    if is_derived_from(field_type, (list, tuple)):
         return f" AS (JSON_EXTRACT(`{_JSON_FIELD}`, '{json_path}')) STORED"
     else:
         return f" AS (JSON_VALUE(`{_JSON_FIELD}`, '{json_path}')) STORED"
 
 
 def _generate_key_definition(type_:Type) -> str:
-    if issubclass(type_, (UniqueIndexMixin, IdentifyingMixin)):
+    if has_metadata(type_, MetaUniqueIndexField):
         return 'UNIQUE KEY'
-    elif issubclass(type_, IndexMixin):
+    elif has_metadata(type_, MetaIndexField):
         return 'KEY'
 
     return ''
@@ -1943,15 +1954,15 @@ def _build_namespace_types(base_type:Type, join:Dict[str, Type],
 
 def _build_join_from_refs(current_type:Type, current_ns:str, 
                           namespaces: Set[str]) -> Iterator[Tuple[str, Type]]:
-    refs = get_stored_fields_for(current_type, ReferenceMixin)
+    refs = get_stored_fields_for(current_type, MetaReferenceField)
 
     for field_name, (_, field_type) in refs.items():
         if any(field_name in ns for ns in namespaces):
-            ref_type = get_args_of_base_generic_alias(field_type, ReferenceMixin)[0]
+            metadata = get_metadata_for(field_type, MetaReferenceField)
 
-            yield current_ns + field_name, ref_type
-
-            yield from _build_join_from_refs(ref_type, current_ns + field_name + '.', namespaces)
+            if metadata:
+                yield current_ns + field_name, metadata.target_type
+                yield from _build_join_from_refs(metadata.target_type, current_ns + field_name + '.', namespaces)
 
 
 def _find_join_keys(join:Tuple[Tuple[str, Type],...]
@@ -1981,13 +1992,13 @@ def _find_join_keys(join:Tuple[Tuple[str, Type],...]
 
 
 def _find_join_key(base_type:Type, target_type:Type, reversed:bool = False) -> Tuple[str, str] | None:
-    refs = get_stored_fields_for(base_type, ReferenceMixin)
+    refs = get_stored_fields_for(base_type, MetaReferenceField)
 
     for field_name, (_, field_type) in refs.items():
-        args = get_args_of_base_generic_alias(field_type, ReferenceMixin)
+        ref_field = get_metadata_for(field_type, MetaReferenceField)
 
-        if args[0] == target_type:
-            target_field = field_type._target_field
+        if ref_field and ref_field.target_type == target_type:
+            target_field = ref_field.target_field
 
             if reversed:
                 return (target_field,  field_name)

@@ -1,12 +1,9 @@
-from hashlib import new
-from pydoc import describe
-from telnetlib import SE
-from typing import List, ClassVar
+from typing import List, ClassVar, Annotated
 
 from pydantic import Field
 
 import pytest
-from ormdantic.database.storage import allocate_audit_version, fetch_multiple_set
+from ormdantic.database.storage import allocate_audit_version
 
 from ormdantic.schema import PersistentModel, IdentifiedModel
 from ormdantic.database.queries import (
@@ -15,10 +12,10 @@ from ormdantic.database.queries import (
 )
 from ormdantic.schema.base import (
     PersistentModel, SequenceStrId, StringArrayIndex, FullTextSearchedStringIndex, 
-    PartOfMixin, StringReference, 
+    PartOfMixin,
     StringIndex, UseBaseClassTableMixin, 
     update_forward_refs, StrId, 
-    StoredFieldDefinitions
+    StoredFieldDefinitions, MetaReferenceField, MetaIndexField
 )
 from ormdantic.schema.verinfo import VersionInfo
 
@@ -224,8 +221,8 @@ def test_get_query_and_args_for_reading_for_nested_parts():
                            part=PartModel(
                                 name=FullTextSearchedStringIndex('part1'),
                                 members=[
-                                    MemberModel(descriptions=StringArrayIndex(['desc1'])),
-                                    MemberModel(descriptions=StringArrayIndex(['desc1', 'desc2']))
+                                    MemberModel(descriptions=['desc1']),
+                                    MemberModel(descriptions=['desc1', 'desc2'])
                                 ]
                            ))
 
@@ -266,12 +263,12 @@ def test_get_query_and_args_for_reading_for_external_index():
 
     model = PartModel(
         name=FullTextSearchedStringIndex('part1'),
-        codes= StringArrayIndex(['code1', 'code2'])
+        codes=['code1', 'code2']
     )
 
     emptry_codes_model = PartModel(
         name=FullTextSearchedStringIndex('empty code'),
-        codes= StringArrayIndex([])
+        codes=[]
     )
     with use_temp_database_cursor_with_model(model, emptry_codes_model,
                                              keep_database_when_except=False) as cursor:
@@ -324,9 +321,8 @@ def test_get_query_and_args_for_reading_for_stored_fields():
         name=FullTextSearchedStringIndex('part1'),
         members=[
             MemberModel(
-                descriptions=StringArrayIndex(['desc1'])),
-            MemberModel(descriptions=StringArrayIndex(
-                ['desc1', 'desc2']))
+                descriptions=['desc1']),
+            MemberModel(descriptions=['desc1', 'desc2'])
         ]
     )
 
@@ -363,7 +359,7 @@ def test_get_query_and_args_for_reading_for_explicit_external_index():
     update_forward_refs(PartModel, locals())
      
     model = ContainerModel(
-        codes=StringArrayIndex(['code1', 'code2']),
+        codes=['code1', 'code2'],
         parts=[
            PartModel(
              name=FullTextSearchedStringIndex('part1'), 
@@ -441,8 +437,7 @@ def test_get_query_and_args_for_reading_for_reference():
         name: StringIndex
         description: StringIndex
 
-    class PartReference(StringReference[PartModel]):
-        _target_field: ClassVar[str] = 'name'
+    PartReference = Annotated[str, MetaReferenceField(target_type=PartModel, target_field='name')]
 
     class PartInfoModel(PersistentModel):
         name: StringIndex
@@ -457,13 +452,13 @@ def test_get_query_and_args_for_reading_for_reference():
      
     model = ContainerModel(
         name=StringIndex('container'),
-        part=PartReference('part1')
+        part='part1'
     )
 
     part_info = PartInfoModel(
-        name=StringIndex('part info'),
-        part=PartReference('part1'),
-        codes=StringArrayIndex(['code-1', 'code-2'])
+        name='part info',
+        part='part1',
+        codes=['code-1', 'code-2']
     )
 
     part = PartModel(
@@ -537,8 +532,7 @@ def test_get_query_and_args_for_reading_for_reference_with_base_type():
         name: StringIndex
         description: str
 
-    class PartReference(StringReference[PartModel]):
-        _target_field: ClassVar[str] = 'name'
+    PartReference = Annotated[str, MetaReferenceField(target_type=PartModel, target_field='name')]
 
     class PartInfoModel(PersistentModel):
         name: StringIndex
@@ -551,12 +545,12 @@ def test_get_query_and_args_for_reading_for_reference_with_base_type():
     update_forward_refs(PartModel, locals())
      
     models = [
-        PartModel(name=StringIndex('part-1'), description='part 1 description'),
-        PartModel(name=StringIndex('part-3'), description='part 4 description'),
-        PartInfoModel(name=StringIndex('part-1 info'), part=PartReference('part-1')),
-        PartInfoModel(name=StringIndex('part-2 info'), part=PartReference('part-2')),
-        PartAttrModel(name=StringIndex('part-1 attr'), part=PartReference('part-1')),
-        PartAttrModel(name=StringIndex('part-3 attr'), part=PartReference('part-3')),
+        PartModel(name='part-1', description='part 1 description'),
+        PartModel(name='part-3', description='part 4 description'),
+        PartInfoModel(name='part-1 info', part='part-1'),
+        PartInfoModel(name='part-2 info', part='part-2'),
+        PartAttrModel(name='part-1 attr', part='part-1'),
+        PartAttrModel(name='part-3 attr', part='part-3'),
     ]
 
     with use_temp_database_cursor_with_model(*models,
@@ -628,8 +622,7 @@ def test_get_query_and_args_for_reading_for_where_is_null():
         name: StringIndex
         description: str
 
-    class PartReference(StringReference[PartModel]):
-        _target_field: ClassVar[str] = 'name'
+    PartReference = Annotated[str, MetaReferenceField(target_type=PartModel, target_field='name')]
 
     class PartInfoModel(PersistentModel):
         name: StringIndex
@@ -743,8 +736,8 @@ def test_seq_id():
         prefix = 'Q'
 
     class Model(PersistentModel):
-        seq_1: SequenceStrId = Field(default=SequenceStrId(''))
-        seq_2: RiskIdStr = Field(default=RiskIdStr(''))
+        seq_1: Annotated[SequenceStrId, MetaIndexField()] = Field(default=SequenceStrId(''))
+        seq_2: Annotated[RiskIdStr, MetaIndexField()] = Field(default=RiskIdStr(''))
         name: StringIndex
 
 

@@ -1,6 +1,5 @@
-from ast import Store
 from tabnanny import verbose
-from typing import  List
+from typing import  List, Annotated
 import pytest
 from pydantic import Field
 from datetime import date
@@ -20,7 +19,7 @@ from ormdantic.schema import (
     update_forward_refs, IdentifiedModel, StrId
 )
 from ormdantic.schema.paths import get_paths_for
-from ormdantic.schema.base import ( StringIndex, VersionMixin,)
+from ormdantic.schema.base import ( StringIndex, VersionMixin, MetaIdentifyingField)
 from ormdantic.schema.shareds import (
     ContentReferenceModel, PersistentSharedContentModel,
     extract_shared_models
@@ -38,7 +37,7 @@ class SharedNameModel(PersistentSharedContentModel):
 
 
 class ProductModel(PersistentModel, VersionMixin):
-    code: StrId
+    code: Annotated[StrId, MetaIdentifyingField()]
     description: StringIndex 
 
 
@@ -111,11 +110,11 @@ models = [
         contents=[
             NameSharedReferenceModel(content=
                 SharedNameModel(name=FullTextSearchedStringIndex('name_1'), 
-                                codes=StringArrayIndex(['code_1', 'code_2']))
+                                codes=['code_1', 'code_2'])
             ),
             NameSharedReferenceModel(content=
                 SharedNameModel(name=FullTextSearchedStringIndex('name_2'), 
-                            codes=StringArrayIndex(['code_3', 'code_4']))
+                            codes=['code_3', 'code_4'])
             )
         ]
     ),
@@ -124,11 +123,11 @@ models = [
         contents=[
             NameSharedReferenceModel(content=
                 SharedNameModel(name=FullTextSearchedStringIndex('name_1'), 
-                                codes=StringArrayIndex(['code_1', 'code_2']))
+                                codes=['code_1', 'code_2'])
             ),
             NameSharedReferenceModel(content=
                 SharedNameModel(name=FullTextSearchedStringIndex('name_2'), 
-                            codes=StringArrayIndex(['code_3', 'code_4']))
+                            codes=['code_3', 'code_4'])
             )
         ]
     ),
@@ -149,7 +148,7 @@ models = [
         ref_model = CodedDescriptionReferenceModel(
             content = CodedDescriptionModel(
                 description='coded reference description',
-                codes=StringArrayIndex(['code_a', 'code_b'])
+                codes=['code_a', 'code_b']
             )
         )
     ),

@@ -6,7 +6,7 @@ from .hints import (
     get_mro_with_generic, update_forward_refs_in_generic_base,
     is_derived_from, is_list_or_tuple_of, resolve_forward_ref,
     resolve_forward_ref_in_args, is_derived_or_collection_of_derived,
-    get_union_type_arguments
+    get_union_type_arguments, has_metadata, get_metadata_for
 )
 
 __all__ = [
@@ -27,4 +27,6 @@ __all__ = [
     'is_derived_or_collection_of_derived',
     'resolve_forward_ref',
     "resolve_forward_ref_in_args",
+    "has_metadata",
+    "get_metadata_for"
 ]

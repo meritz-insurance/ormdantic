@@ -609,7 +609,7 @@ def _build_model_map_key(model_type:Type, model_dict:Dict[str, Any]) -> FrozenSe
         if len(items) == 1:
             field_value = items[0]
         else:
-            field_value = tuple(items) if isinstance(items, list) else items
+            field_value = tuple(items) if isinstance(items, (list, tuple)) else items
 
         key.append((field, field_value))
 

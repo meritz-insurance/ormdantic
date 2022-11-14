@@ -1,4 +1,6 @@
-from typing import ForwardRef, Generic, List, TypeVar, Tuple, get_args, Union
+from typing import (
+    ForwardRef, Generic, List, TypeVar, Tuple, get_args, Union, Annotated
+)
 
 import pytest
 
@@ -124,6 +126,18 @@ def test_is_derived_from():
     assert not is_derived_from(Base, Derived)
 
     assert not is_derived_from(Item | None, Item)
+
+
+def test_is_derived_from_for_annotated():
+    class Item():
+        pass
+
+    class MyStr(str):
+        pass
+
+    assert is_derived_from(Annotated[Item, 0], Item)
+    assert is_derived_from(Annotated[MyStr, 0], str)
+    assert is_derived_from(Annotated[int, 0], int)
 
 
 def test_is_collection_type_of():

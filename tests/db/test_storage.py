@@ -1,7 +1,7 @@
 # for clearing testing database.
 #
 from datetime import date
-from typing import  List, Tuple, cast, Type, Any
+from typing import  List, Tuple, cast, Type, Any, Annotated
 import pytest
 import pymysql
 
@@ -12,7 +12,7 @@ from ormdantic.schema.base import (
     StringArrayIndex, VersionMixin, get_identifer_of, update_forward_refs, 
     StrId, DateId, SequenceStrId, 
     StoredFieldDefinitions, SchemaBaseModel, get_identifying_field_values,
-    UniqueStringIndex
+    UniqueStringIndex, MetaIdentifyingField
 )
 from ormdantic.schema.shareds import (
     PersistentSharedContentModel
@@ -60,28 +60,28 @@ update_forward_refs(PartModel, locals())
 
 model = ContainerModel(id=StrId('@'), 
                         version='0.1.0',
-                        name=FullTextSearchedStringIndex('sample'),
+                        name='sample',
                         parts=[
                             PartModel(
-                                name=FullTextSearchedStringIndex('part1'), 
+                                name='part1', 
                                 parts=(
                                     SubPartModel(
-                                        name=FullTextSearchedStringIndex('part1-sub1'),
-                                        codes=StringArrayIndex(['part1-sub1-code1'])
+                                        name='part1-sub1',
+                                        codes=['part1-sub1-code1']
                                     ),
                                 ),
                                 codes = ['part1-code1', 'part1-code2']
                             ),
                             PartModel(
-                                name=FullTextSearchedStringIndex('part2'), 
+                                name='part2', 
                                 parts=(
                                     SubPartModel(
-                                        name=FullTextSearchedStringIndex('part2-sub1'),
-                                        codes=StringArrayIndex(['part2-sub1-code1', 'part2-sub1-code2'])
+                                        name='part2-sub1',
+                                        codes=['part2-sub1-code1', 'part2-sub1-code2']
                                     ),
                                     SubPartModel(
-                                        name=FullTextSearchedStringIndex('part2-sub2'),
-                                        codes=StringArrayIndex([])
+                                        name='part2-sub2',
+                                        codes=[]
                                     )
                                 ),
                                 codes = ['part2-code1', 'part2-code2']
@@ -341,7 +341,7 @@ def test_query_records_raise(pool_and_model):
 
 def test_upsert_objects_makes_entry_in_audit_models():
     class VersionModel(PersistentModel, VersionMixin):
-        id:StrId
+        id: Annotated[StrId, MetaIdentifyingField()]
         message:str
 
     with use_temp_database_pool_with_model(VersionModel) as pool:
@@ -368,7 +368,7 @@ def test_upsert_objects_makes_entry_in_audit_models():
 
 def test_upsert_objects_for_versioning():
     class VersionModel(PersistentModel, VersionMixin):
-        id:StrId
+        id: Annotated[StrId, MetaIdentifyingField()]
         message:str
 
     with use_temp_database_pool_with_model(VersionModel) as pool:
@@ -387,7 +387,7 @@ def test_upsert_objects_for_versioning():
 
 def test_upsert_objects_for_dated():
     class DatedModel(PersistentModel, DatedMixin, VersionMixin):
-        id:StrId
+        id: Annotated[StrId, MetaIdentifyingField()]
         message:str
 
     with use_temp_database_pool_with_model(DatedModel) as pool:
@@ -420,7 +420,7 @@ def test_upsert_objects_for_dated():
 
 def test_get_version():
     class SimpleModel(PersistentModel):
-        id:StrId
+        id: Annotated[StrId, MetaIdentifyingField()]
         message:str
 
     with use_temp_database_pool_with_model(SimpleModel) as pool:
@@ -445,7 +445,7 @@ def test_get_version():
 
 def test_squash_objects():
     class VersionModel(PersistentModel, VersionMixin):
-        id:StrId
+        id: Annotated[StrId, MetaIdentifyingField()]
         message:str
 
     with use_temp_database_pool_with_model(VersionModel) as pool:
@@ -491,7 +491,7 @@ def test_squash_objects():
 
 def test_squash_objects_raises():
     class NonVersionModel(PersistentModel):
-        id:StrId
+        id: Annotated[StrId, MetaIdentifyingField()]
         message:str
 
     with pytest.raises(RuntimeError, match='to squash is not supported for non version type.'):
@@ -504,7 +504,7 @@ def test_squash_objects_raises():
  
 def test_update_sequences():
     class CodedModel(PersistentModel):
-        code:SequenceStrId
+        code:Annotated[SequenceStrId, MetaIdentifyingField()]
 
     with use_temp_database_pool_with_model(CodedModel) as pool:
         first = CodedModel(code=SequenceStrId('N33'))

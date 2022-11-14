@@ -1,4 +1,4 @@
-from typing import Any, cast, List, Tuple, Type
+from typing import Any, cast, List, Tuple, Type, Annotated
 import uuid
 
 import pytest
@@ -8,11 +8,14 @@ from ormdantic.schema import (
     IdentifiedModel
 )
 from ormdantic.schema.base import (
-    IdentifyingMixin, PersistentModel, PartOfMixin, UseBaseClassTableMixin, 
+    is_derived_from,
+    AutoAllocatedMixin, PersistentModel, PartOfMixin, UseBaseClassTableMixin, 
     assign_identifying_fields_if_empty, get_container_type, 
-    get_field_name_and_type, get_identifer_of, get_field_names_for, StrId, DateId, get_type_for_table,
-    is_field_list_or_tuple_of, get_field_type,
-    get_root_container_type
+    get_field_name_and_type, get_identifer_of, get_field_names_for, StrId, DateId, 
+    get_type_for_table, is_field_list_or_tuple_of, get_field_type,
+    get_root_container_type, get_field_name_and_type_for_annotated,
+    MetaStoredField, MetaIndexField, MetaIdentifyingField,
+    get_stored_fields_for
 )
 
 def test_identified_model():
@@ -51,7 +54,22 @@ def test_get_root_container_type():
     assert None is get_container_type(Container)
     
 
-   
+def test_get_stored_fields_for():
+    class Container(PersistentModel):
+        stored:Annotated[str, MetaStoredField()]
+        index:Annotated[str, MetaIndexField()]
+        identifying:Annotated[str, MetaIdentifyingField()]
+
+    assert {
+        'stored':(('$.stored',), Annotated[str, MetaStoredField()]),
+        'index':(('$.index',), Annotated[str, MetaIndexField()]),
+        'identifying':(('$.identifying',), Annotated[str, MetaIdentifyingField()]),
+        } == get_stored_fields_for(Container, MetaStoredField)
+
+    with pytest.raises(RuntimeError, match='.*Invalid*'):
+        get_field_type(cast(Type[Container], str), 'name')
+
+  
 
 def test_get_field_type():
     class Container(PersistentModel):
@@ -101,13 +119,35 @@ def test_get_field_name_and_type():
     with pytest.raises(RuntimeError):
         list(get_field_name_and_type(cast(Any, WrongType)))
 
+
+def test_get_field_name_and_type_for_annotated():
+    class Part(PersistentModel, PartOfMixin['Container']):
+        pass
+
+    class Container(PersistentModel):
+        parts: Annotated[List[Part], MetaStoredField()]
+        part: Part
+        number: Annotated[int, MetaIndexField()]
+
+    assert [
+        ('parts', Annotated[List[Part], MetaStoredField()]), 
+        ('number', Annotated[int, MetaIndexField()])
+    ] == list(get_field_name_and_type_for_annotated(Container, MetaStoredField))
+
+    class WrongType():
+        pass
+
+    with pytest.raises(RuntimeError):
+        list(get_field_name_and_type_for_annotated(cast(Any, WrongType)))
+
+
 def test_new_if_empty():
     date = DateId(2020, 1, 1)
 
     assert date == date.new_if_empty() 
 
 def test_new_if_empty_raise_exception():
-    class NotImplementedStr(ConstrainedStr, IdentifyingMixin):
+    class NotImplementedStr(ConstrainedStr, AutoAllocatedMixin):
         pass
 
     with pytest.raises(NotImplementedError):
