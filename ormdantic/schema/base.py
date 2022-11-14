@@ -223,7 +223,8 @@ class VersionMixin(SchemaBaseModel):
 
 class DatedMixin(SchemaBaseModel):
     ''' has applied at field '''
-    applied_at: Annotated[datetime.date, MetaIdentifyingField()] = Field(title='applied at')
+    applied_at: Annotated[datetime.date, MetaIdentifyingField()] = Field(
+        default_factory=datetime.date.today, title='applied at')
     pass
 
 

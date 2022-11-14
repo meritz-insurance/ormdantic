@@ -9,6 +9,8 @@ from .base import (
     FullTextSearchedString, FullTextSearchedStringIndex,
     UuidStr, IntegerArrayIndex, update_forward_refs,
     StoredFieldDefinitions, PersistentModel, 
+    MetaFullTextSearchedField, MetaIdentifyingField, MetaIndexField, MetaUniqueIndexField, 
+    MetaReferenceField
 )
 
 from .shareds import (
@@ -49,6 +51,11 @@ __all__ = [
     "FullTextSearchedStringIndex",
     "UuidStr",
     "IntegerArrayIndex",
+    "MetaFullTextSearchedField", 
+    "MetaIdentifyingField", 
+    "MetaIndexField", 
+    "MetaUniqueIndexField", 
+    "MetaReferenceField",
     "update_forward_refs",
     "StoredFieldDefinitions",
     "SharedContentModel",

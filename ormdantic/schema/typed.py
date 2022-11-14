@@ -51,8 +51,8 @@ def _fill_type_name_field(class_type:Type):
     if name in _all_type_named_models:
         previous = _all_type_named_models[name]
         if (previous is not class_type
-            and inspect.getsourcefile(previous) != inspect.getsourcefile(class_type)
-            and inspect.getsourcelines(previous) != inspect.getsourcelines(class_type)
+            and (inspect.getsourcefile(previous) != inspect.getsourcefile(class_type)
+            or inspect.getsourcelines(previous) != inspect.getsourcelines(class_type))
         ):
             _logger.fatal(f'duplicated type name class {name=}. '
                 f'previous {inspect.getsourcefile(previous)=}, {inspect.getsourcelines(previous)=}'
