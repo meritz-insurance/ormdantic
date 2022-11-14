@@ -763,12 +763,12 @@ def _get_sql_for_upserting(model_type:Type):
     table_name = get_table_name(model_type)
     id_fields = get_identifying_fields(model_type)
 
+    for_id_fields = []
+    for_id_fields.append(f'{field_exprs(_SET_ID_FIELD)} = %({_SET_ID_FIELD})s')
+    for_id_fields.extend([f'{field_exprs(f)} = %({f})s' for f in id_fields])
+
     if _is_version_type(model_type):
         assert id_fields
-
-        for_id_fields = []
-        for_id_fields.append(f'{field_exprs(_SET_ID_FIELD)} = %({_SET_ID_FIELD})s')
-        for_id_fields.extend([f'{field_exprs(f)} = %({f})s' for f in id_fields])
 
         where_cond = tab_each_line(
             '\nAND '.join(
@@ -834,10 +834,91 @@ def _get_sql_for_upserting(model_type:Type):
                         itertools.chain(id_fields, [_VALID_START_FIELD])
                     ), use_comma=True, new_line=False)
                 }) as {_AUDIT_MODEL_ID_FIELD}""",
-                "'UPSERTED' as op",
+                "'INSERTED' as op",
                 f"'{table_name}' as table_name",
                 use_comma=True
             )
+        )
+    elif id_fields:        
+        where_cond = tab_each_line(
+            '\nAND '.join(
+                for_id_fields,
+            )
+        )
+
+        return join_line(
+            f'IF ( SELECT 1 = 1 FROM {table_name} WHERE {where_cond}) THEN',
+            # update record
+            tab_each_line(
+                f'UPDATE {table_name}', 
+                f'SET',
+                tab_each_line(
+                    f'{field_exprs(_JSON_FIELD)} = %({_JSON_FIELD})s',
+                    f'{field_exprs(_VALID_START_FIELD)} = @VERSION',
+                    use_comma=True
+                ),
+                f'WHERE',
+                tab_each_line(
+                    where_cond, 
+                ),
+                f';',
+                f'SELECT',
+                tab_each_line(
+                    field_exprs([_SET_ID_FIELD, _ROW_ID_FIELD]),
+                    "'INSERTED' as op",
+                    f"'{table_name}' as table_name",
+                    f"""CONCAT_WS(',', {
+                        join_line(field_exprs(id_fields), use_comma=True, new_line=False) 
+                        if id_fields
+                        else 
+                        "''"
+                    }) as {_AUDIT_MODEL_ID_FIELD}""",
+                    use_comma=True
+                ),
+                f'FROM {table_name}',
+                f'WHERE',
+                tab_each_line(
+                    where_cond, 
+                ),
+                f';',
+            ),
+            f'ELSE', 
+            # insert record
+            tab_each_line(
+                f'INSERT INTO {table_name}', 
+                '(',
+                tab_each_line(
+                    field_exprs([_JSON_FIELD, _SET_ID_FIELD, *id_fields, _VALID_START_FIELD]),
+                    use_comma=True
+                ),
+                ')',
+                f'VALUES',
+                '(',
+                tab_each_line(
+                    f'%({_JSON_FIELD})s',
+                    f'%({_SET_ID_FIELD})s',
+                    [f'%({f})s' for f in id_fields],
+                    '@VERSION',
+                    use_comma=True
+                ),
+                ')',
+                f'RETURNING',
+                tab_each_line(
+                    field_exprs(_SET_ID_FIELD),
+                    field_exprs(_ROW_ID_FIELD),
+                    "'INSERTED' as op",
+                    f"'{table_name}' as table_name",
+                    f"""CONCAT_WS(',', {
+                        join_line(field_exprs(id_fields), use_comma=True, new_line=False) 
+                        if id_fields
+                        else 
+                        "''"
+                    }) as {_AUDIT_MODEL_ID_FIELD}""",
+                    use_comma=True
+                ),
+                f';',
+            ),
+            f'END IF', 
         )
     else:
         return join_line(
@@ -858,12 +939,6 @@ def _get_sql_for_upserting(model_type:Type):
                 use_comma=True
             ),
             ')',
-            f'ON DUPLICATE KEY UPDATE',
-            tab_each_line(
-                f'{field_exprs(_JSON_FIELD)} = %({_JSON_FIELD})s',
-                f'{field_exprs(_VALID_START_FIELD)} = @VERSION',
-                use_comma=True
-            ),
             f'RETURNING',
             tab_each_line(
                 field_exprs(_SET_ID_FIELD),
@@ -879,6 +954,8 @@ def _get_sql_for_upserting(model_type:Type):
                 use_comma=True
             )
         ) 
+
+
 
 
 # At first, I would use the JSON_TABLE function in mariadb. 

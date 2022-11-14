@@ -1,4 +1,4 @@
-from typing import Type, List, ClassVar, cast, Any
+from typing import Type, List, ClassVar, cast, Any, Annotated
 import pytest
 from decimal import Decimal
 from datetime import date, datetime
@@ -22,7 +22,7 @@ from ormdantic.schema.base import (
     FullTextSearchedStr, PartOfMixin, StringReference, VersionMixin, 
     UniqueStringIndex, StringIndex, DecimalIndex, IntIndex, DateIndex,
     DateTimeIndex, update_forward_refs, StrId, 
-    StoredFieldDefinitions, SequenceStrId
+    StoredFieldDefinitions, SequenceStrId, IndexMixin
 )
 
 from .tools import (
@@ -527,9 +527,6 @@ def test_get_sql_for_upserting():
         "  %(__set_id)s,",
         "  @VERSION",
         ")",
-        "ON DUPLICATE KEY UPDATE",  
-        "  `__json` = %(__json)s,",
-        "  `__valid_start` = @VERSION",
         "RETURNING",
         "  `__set_id`,",
         "  `__row_id`,",
@@ -584,7 +581,7 @@ def test_get_sql_for_upserting_versioning():
         "  `__set_id`,",
         "  `__row_id`,",
         "  CONCAT_WS(',', `id`,`__valid_start`) as model_id,",
-        "  'UPSERTED' as op,",
+        "  'INSERTED' as op,",
         "  'md_VersionModel' as table_name"
     ) == sql
 
@@ -596,31 +593,55 @@ def test_get_sql_for_upserting_dated():
     sql = _get_sql_for_upserting(cast(Any, DatedModel))
 
     assert join_line(
-        "INSERT INTO md_DatedModel",
-        "(",
-        "  `__json`,",
-        "  `__set_id`,",
-        "  `applied_at`,",
-        "  `id`,",
-        "  `__valid_start`",
-        ")",
-        "VALUES",
-        "(",
-        "  %(__json)s,",
-        "  %(__set_id)s,",
-        "  %(applied_at)s,",
-        "  %(id)s,",
-        "  @VERSION",
-        ")",
-        "ON DUPLICATE KEY UPDATE",
-        "  `__json` = %(__json)s,",
-        "  `__valid_start` = @VERSION",
-        "RETURNING",
-        "  `__set_id`,",
-        "  `__row_id`,",
-        "  'UPSERTED' as op,",
-        "  'md_DatedModel' as table_name,",
-        "  CONCAT_WS(',', `applied_at`,`id`) as model_id"
+        "IF ( SELECT 1 = 1 FROM md_DatedModel WHERE   `__set_id` = %(__set_id)s",
+        "  AND `applied_at` = %(applied_at)s",
+        "  AND `id` = %(id)s) THEN",
+        "  UPDATE md_DatedModel",
+        "  SET",
+        "    `__json` = %(__json)s,",
+        "    `__valid_start` = @VERSION",
+        "  WHERE",
+        "      `__set_id` = %(__set_id)s",
+        "      AND `applied_at` = %(applied_at)s",
+        "      AND `id` = %(id)s",
+        "  ;",
+        "  SELECT",
+        "    `__set_id`,",
+        "    `__row_id`,",
+        "    'INSERTED' as op,",
+        "    'md_DatedModel' as table_name,",
+        "    CONCAT_WS(',', `applied_at`,`id`) as model_id",
+        "  FROM md_DatedModel",
+        "  WHERE",
+        "      `__set_id` = %(__set_id)s",
+        "      AND `applied_at` = %(applied_at)s",
+        "      AND `id` = %(id)s",
+        "  ;",
+        "ELSE",
+        "  INSERT INTO md_DatedModel",
+        "  (",
+        "    `__json`,",
+        "    `__set_id`,",
+        "    `applied_at`,",
+        "    `id`,",
+        "    `__valid_start`",
+        "  )",
+        "  VALUES",
+        "  (",
+        "    %(__json)s,",
+        "    %(__set_id)s,",
+        "    %(applied_at)s,",
+        "    %(id)s,",
+        "    @VERSION",
+        "  )",
+        "  RETURNING",
+        "    `__set_id`,",
+        "    `__row_id`,",
+        "    'INSERTED' as op,",
+        "    'md_DatedModel' as table_name,",
+        "    CONCAT_WS(',', `applied_at`,`id`) as model_id",
+        "  ;",
+        "END IF"
     ) == sql
 
 
@@ -672,7 +693,7 @@ def test_get_sql_for_upserting_versioned_dated():
         "  `__set_id`,",
         "  `__row_id`,",
         "  CONCAT_WS(',', `applied_at`,`id`,`__valid_start`) as model_id,",
-        "  'UPSERTED' as op,",
+        "  'INSERTED' as op,",
         "  'md_VersionDateModel' as table_name"
 
    ) == sql

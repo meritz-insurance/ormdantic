@@ -263,17 +263,6 @@ class DatedMixin(SchemaBaseModel):
     pass
 
 
-class IdentifiedModel(PersistentModel, IdentifiedMixin):
-    ''' identified by uuid '''
-    version:str = Field(default='0.1.0')
-
-    class Config:
-        title = 'base object which can be saved or retreived by id'
-
-
-IdentifiedModelT = TypeVar('IdentifiedModelT', bound=IdentifiedModel)
-
-
 def get_container_type(type_:Type[ModelT]) -> Type[ModelT] | None:
     ''' get the type of container '''
     part_type = get_base_generic_alias_of(cast(Type, type_), PartOfMixin)
@@ -520,3 +509,10 @@ def _validate_json_paths(paths:Tuple[str]):
     #     _logger.fatal(f'{paths} should end with $ for collection type')
     #     raise RuntimeError('Invalid path expression. collection type should end with $.')
 
+
+
+# def has_type_mixin(type_:Type, mixin:Type) -> bool:
+#     return is_derived_from(type_, mixin) or (
+#         hasattr(type_, '__metadata__') and 
+#         is_derived_from(getattr(type_, '__metadata__')[0], mixin)
+#     )

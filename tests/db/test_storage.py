@@ -3,15 +3,16 @@
 from datetime import date
 from typing import  List, Tuple, cast, Type, Any
 import pytest
+import pymysql
 
-from ormdantic.schema import PersistentModel
-from ormdantic.schema import verinfo
+from ormdantic.schema import PersistentModel, IdentifiedModel
 from ormdantic.schema.verinfo import VersionInfo
 from ormdantic.schema.base import (
     DatedMixin, FullTextSearchedStringIndex, PartOfMixin, PersistentModel, 
     StringArrayIndex, VersionMixin, get_identifer_of, update_forward_refs, 
-    IdentifiedModel, StrId, DateId, SequenceStrId, ArrayIndexMixin,
-    StoredFieldDefinitions, SchemaBaseModel, get_identifying_field_values
+    StrId, DateId, SequenceStrId, 
+    StoredFieldDefinitions, SchemaBaseModel, get_identifying_field_values,
+    UniqueStringIndex
 )
 from ormdantic.schema.shareds import (
     PersistentSharedContentModel
@@ -154,6 +155,20 @@ def test_upsert_objects_callback(monkeypatch, pool_and_model):
 
     assert called
 
+def test_upsert_objects_duplicate_key():
+    class MyModel(IdentifiedModel):
+        code: UniqueStringIndex 
+
+    models = [
+        MyModel(id=StrId('first'), code=UniqueStringIndex('c1')),
+        MyModel(id=StrId('second'), code=UniqueStringIndex('c1'))
+    ]
+
+    with use_temp_database_pool_with_model(MyModel) as pool:
+        with pytest.raises(pymysql.DatabaseError):
+            upserted = upsert_objects(pool, models, 0, False, VersionInfo())
+
+        upserted = upsert_objects(pool, models, 0, True, VersionInfo())
 
 def test_purge_objects():
     with use_temp_database_pool_with_model(ContainerModel) as pool:
@@ -346,7 +361,7 @@ def test_upsert_objects_makes_entry_in_audit_models():
         model_changes = get_model_changes_of_version(pool, 1)
 
         assert [
-            {'version':1, 'op':'UPSERTED', 'table_name':'md_VersionModel', 
+            {'version':1, 'op':'INSERTED', 'table_name':'md_VersionModel', 
             '__row_id':1, '__set_id':0, 'model_id':'test,1'}
         ] == list(model_changes)
 
@@ -451,7 +466,7 @@ def test_squash_objects():
         assert third == load_object(pool, VersionModel, {'id':'test'}, 0, version=4)
 
         assert [
-            {'__row_id': 1, 'op': 'UPSERTED', 'table_name': 'md_VersionModel', 
+            {'__row_id': 1, 'op': 'INSERTED', 'table_name': 'md_VersionModel', 
             'version': 1, '__set_id':0, 'model_id': 'test,1'}
         ] == list(get_model_changes_of_version(pool, 1))
 

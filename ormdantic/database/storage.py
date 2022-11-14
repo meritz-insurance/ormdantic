@@ -135,12 +135,7 @@ def upsert_objects(pool:DatabaseConnectionPool,
 
     model_list = [models] if is_single else models
 
-    mixins = tuple(filter(lambda x: isinstance(x, PartOfMixin), model_list))
     results : Dict[Tuple[Any,...], PersistentModelT | BaseException] = {}
-
-    if mixins:
-        _logger.fatal(f'{[type(m) for m in mixins]} can not be stored directly. it is part of mixin')
-        raise RuntimeError(f'PartOfMixin could not be saved directly.')
 
     with pool.open_cursor(True) as cursor:
         # we get next seq in current db transaction.
@@ -158,6 +153,10 @@ def upsert_objects(pool:DatabaseConnectionPool,
         allocate_audit_version(cursor, version_info)
 
         for model in targets:
+            if isinstance(model, PartOfMixin):
+                _logger.fatal(f'{type(model)} can not be stored directly. it is part of mixin')
+                raise RuntimeError(f'PartOfMixin could not be saved directly.')
+
             # we will remove content of the given model. so, we copy it and remove them.
             # for not updating original model.
             id_values = tuple(get_identifying_field_values(model).values())
@@ -173,15 +172,9 @@ def upsert_objects(pool:DatabaseConnectionPool,
 
                     cursor.execute(*get_query_and_args_for_upserting(sub_model, set_id))
 
-                    loop = True
-                    while loop:
-                        fetched = cursor.fetchall()
-
-                        for row in fetched:
-                            _update_audit_model(cursor, row)
-                            _upsert_parts_and_externals(cursor, row[_ROW_ID_FIELD], type(sub_model))
-
-                        loop = cursor.nextset()
+                    for row in fetch_multiple_set(cursor):
+                        _update_audit_model(cursor, row)
+                        _upsert_parts_and_externals(cursor, row[_ROW_ID_FIELD], type(sub_model))
 
                 extract_shared_models(model, True)
 
@@ -198,13 +191,24 @@ def upsert_objects(pool:DatabaseConnectionPool,
                     if saved_callback:
                         saved_callback(id_values, e)
 
-    if isinstance(results, dict):
+    if ignore_error:
         return results
     else:
         if isinstance(models, PersistentModel):
             return targets[0]
 
         return targets
+
+
+def fetch_multiple_set(cursor:DictCursor) -> Iterator[Dict[str, Any]]:
+    loop = True
+    while loop:
+        fetched = cursor.fetchall()
+
+        yield from fetched
+
+        loop = cursor.nextset()
+
 
 
 def allocate_audit_version(cursor:DictCursor, audit:VersionInfo) -> int:
@@ -255,18 +259,16 @@ def squash_objects(pool: DatabaseConnectionPool,
                     squasheds.append(result)
                     cursor.execute(*get_query_and_args_for_squashing(type_, result, set_id=set_id))
                                                                     
-                    loop = True
-                    while loop:
-                        row_ids = []
 
-                        for row in cursor.fetchall():
-                            _update_audit_model(cursor, row)
-                            row_ids.append(row[_ROW_ID_FIELD])
+                    row_ids = []
 
-                        if row_ids:
-                            _delete_parts_and_externals(cursor, tuple(row_ids), type_)
+                    for row in fetch_multiple_set(cursor):
+                        _update_audit_model(cursor, row)
+                        row_ids.append(row[_ROW_ID_FIELD])
 
-                        loop = cursor.nextset()
+                    if row_ids:
+                        _delete_parts_and_externals(cursor, tuple(row_ids), type_)
+
     return squasheds
 
 
@@ -301,13 +303,9 @@ def delete_objects(pool: DatabaseConnectionPool,
                 *get_query_and_args_for_deleting(
                     type_, to_normalize_query_condition(where), set_id=set_id))
 
-            loop = True
-            while loop:
-                for row in cursor.fetchall():
-                    _update_audit_model(cursor, row)
-                    deleted.append(row[_AUDIT_MODEL_ID_FIELD])
-
-                loop = cursor.nextset()
+            for row in fetch_multiple_set(cursor):
+                _update_audit_model(cursor, row)
+                deleted.append(row[_AUDIT_MODEL_ID_FIELD])
 
     return deleted
 
@@ -342,20 +340,17 @@ def purge_objects(pool: DatabaseConnectionPool,
             cursor.execute(*get_query_and_args_for_purging(type_, 
                 to_normalize_query_condition(where), set_id=set_id))
 
-            loop = True
-            while loop:
-                row_ids = []
+            row_ids = []
 
-                for row in cursor.fetchall():
-                    _update_audit_model(cursor, row)
-                    deleted.append(row[_AUDIT_MODEL_ID_FIELD])
+            for row in fetch_multiple_set(cursor):
+                _update_audit_model(cursor, row)
+                deleted.append(row[_AUDIT_MODEL_ID_FIELD])
 
-                    row_ids.append(row[_ROW_ID_FIELD])
+                row_ids.append(row[_ROW_ID_FIELD])
 
-                if row_ids:
-                    _delete_parts_and_externals(cursor, tuple(row_ids), type_)
+            if row_ids:
+                _delete_parts_and_externals(cursor, tuple(row_ids), type_)
 
-                loop = cursor.nextset()
 
     return deleted
 
@@ -479,13 +474,16 @@ def query_records(pool: DatabaseConnectionPool,
                   offset: int | None = None,
                   unwind: Tuple[str,...] | str = tuple(),
                   joined: Dict[str, Type[PersistentModelT]] | None = None,
-                  version: int = 0,
+                  version: int | None = None,
                   ref_date: date | None = None,
                   ) -> Iterator[Dict[str, Any]]:
 
     if not fields:
         _logger.fatal('empty fields for query_records. it makes an invalid query.')
         raise RuntimeError('empty fields for querying')
+
+    if version is None:
+        version = get_current_version(pool)
 
     query_and_param = get_query_and_args_for_reading(
         type_, fields, to_normalize_query_condition(where), 

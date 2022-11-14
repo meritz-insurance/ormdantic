@@ -1,6 +1,6 @@
 from .base import (
     SchemaBaseModel,
-    ModelT, PersistentModelT, IdentifiedModelT, PersistentModel, IdentifiedModel,
+    ModelT, PersistentModelT, PersistentModel,
     get_base_generic_alias_of, get_container_type, get_field_name_and_type,
     StoredMixin, StringIndex, StringArrayIndex, UniqueStringIndex,
     PartOfMixin, StringReference, DecimalIndex, IntIndex, IntReference,
@@ -14,7 +14,10 @@ from .shareds import (
     SharedContentModel, ContentReferenceModel, PersistentSharedContentModel
 )
 
-from .typed import TypeNamedModel, get_type_named_model_type, parse_object_for_model
+from .typed import (
+    TypeNamedModel, get_type_named_model_type, parse_object_for_model,
+    IdentifiedModel, IdentifiedModelT
+)
 from .source import (
     SharedModelSource, ModelSource, MemoryModelStorage, MemorySharedModelSource,
     ChainedModelSource, ChainedSharedModelSource

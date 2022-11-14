@@ -6,18 +6,18 @@ from typing import List, ClassVar
 from pydantic import Field
 
 import pytest
-from ormdantic.database.storage import allocate_audit_version
+from ormdantic.database.storage import allocate_audit_version, fetch_multiple_set
 
-from ormdantic.schema import PersistentModel
+from ormdantic.schema import PersistentModel, IdentifiedModel
 from ormdantic.database.queries import (
     get_query_and_args_for_deleting, get_query_and_args_for_upserting, get_query_and_args_for_reading,
-    get_query_and_args_for_purging, 
+    get_query_and_args_for_purging,
 )
 from ormdantic.schema.base import (
     PersistentModel, SequenceStrId, StringArrayIndex, FullTextSearchedStringIndex, 
     PartOfMixin, StringReference, 
     StringIndex, UseBaseClassTableMixin, 
-    update_forward_refs, IdentifiedModel, StrId, 
+    update_forward_refs, StrId, 
     StoredFieldDefinitions
 )
 from ormdantic.schema.verinfo import VersionInfo
@@ -268,7 +268,6 @@ def test_get_query_and_args_for_reading_for_external_index():
         name=FullTextSearchedStringIndex('part1'),
         codes= StringArrayIndex(['code1', 'code2'])
     )
-
 
     emptry_codes_model = PartModel(
         name=FullTextSearchedStringIndex('empty code'),

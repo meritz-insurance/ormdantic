@@ -1,0 +1,1 @@
+{"type_name":"ContainerModel","id":"second","version":"0.1.0","name":"sample","parts":[{"name":"part1","parts":[{"name":"part1-sub1","codes":["part1-sub1-code1"]}],"codes":["part1-code1","part1-code2"]},{"name":"part2","parts":[{"name":"part2-sub1","codes":["part2-sub1-code1","part2-sub1-code2"]},{"name":"part2-sub2","codes":[]}],"codes":["part2-code1","part2-code2"]}]}
