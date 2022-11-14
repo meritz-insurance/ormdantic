@@ -18,7 +18,7 @@ from ..util import (
 )
 
 from .base import (
-    IdentifiedMixin, StrId, PersistentModel,  PersistentModelT, 
+    IdentifiedMixin, UuidStr, PersistentModel,  PersistentModelT, 
     register_class_preprocessor, orjson_dumps, SchemaBaseModel,
     MetaIdentifyingField
 )
@@ -40,9 +40,9 @@ class SharedContentMixin(IdentifiedMixin):
         self.normalize()
 
         if self._id_attr:
-            id = StrId(getattr(self, self._id_attr))
+            id = UuidStr(getattr(self, self._id_attr))
         else:
-            id = StrId(_get_content_id(self.dict()))
+            id = UuidStr(_get_content_id(self.dict()))
 
         self.id = id
         return id

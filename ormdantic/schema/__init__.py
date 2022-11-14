@@ -7,7 +7,7 @@ from .base import (
     DatedMixin, VersionMixin,
     DateIndex, DateTimeIndex, 
     FullTextSearchedString, FullTextSearchedStringIndex,
-    StrId, IntegerArrayIndex, update_forward_refs,
+    UuidStr, IntegerArrayIndex, update_forward_refs,
     StoredFieldDefinitions, PersistentModel, 
 )
 
@@ -47,7 +47,7 @@ __all__ = [
     "DateTimeIndex",
     "FullTextSearchedString",
     "FullTextSearchedStringIndex",
-    "StrId",
+    "UuidStr",
     "IntegerArrayIndex",
     "update_forward_refs",
     "StoredFieldDefinitions",

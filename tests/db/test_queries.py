@@ -21,8 +21,8 @@ from ormdantic.schema.base import (
     DatedMixin, IntegerArrayIndex, StringArrayIndex, FullTextSearchedStringIndex, 
     FullTextSearchedString, PartOfMixin, VersionMixin, 
     UniqueStringIndex, StringIndex, DecimalIndex, IntIndex, DateIndex,
-    DateTimeIndex, update_forward_refs, StrId, 
-    StoredFieldDefinitions, SequenceStrId, MetaIndexField,
+    DateTimeIndex, update_forward_refs, UuidStr, 
+    StoredFieldDefinitions, SequenceStr, MetaIndexField,
     MetaReferenceField, MetaIdentifyingField
 )
 
@@ -60,7 +60,7 @@ def test_get_sql_for_create_table():
 
 def test_get_sql_for_create_table_for_version():
     class SimpleBaseModel(PersistentModel, VersionMixin):
-        id: Annotated[StrId, MetaIdentifyingField()]
+        id: Annotated[UuidStr, MetaIdentifyingField()]
 
     assert (
         'CREATE TABLE IF NOT EXISTS `md_SimpleBaseModel` (\n'
@@ -79,7 +79,7 @@ def test_get_sql_for_create_table_for_version():
         order: StringIndex
 
     class RootModel(PersistentModel, VersionMixin):
-        id: Annotated[StrId, MetaIdentifyingField()]
+        id: Annotated[UuidStr, MetaIdentifyingField()]
 
     update_forward_refs(PartModel, locals())
 
@@ -111,7 +111,7 @@ def test_get_sql_for_create_table_for_version():
 
 def test_get_sql_for_create_table_for_version_date():
     class VersionDateModel(PersistentModel, DatedMixin, VersionMixin):
-        id: Annotated[StrId, MetaIdentifyingField()]
+        id: Annotated[UuidStr, MetaIdentifyingField()]
 
     assert (
         'CREATE TABLE IF NOT EXISTS `md_VersionDateModel` (\n'
@@ -139,7 +139,7 @@ def test_get_sql_for_create_table_with_index():
         i7: IntIndex
         i8: DateIndex
         i9: DateTimeIndex
-        i10: Annotated[StrId, MetaIdentifyingField()]
+        i10: Annotated[UuidStr, MetaIdentifyingField()]
 
     assert (
 f"""CREATE TABLE IF NOT EXISTS `md_SampleModel` (
@@ -539,7 +539,7 @@ def test_get_sql_for_upserting():
 
 def test_get_sql_for_upserting_versioning():
     class VersionModel(PersistentModel, VersionMixin):
-        id: Annotated[StrId, MetaIdentifyingField()]
+        id: Annotated[UuidStr, MetaIdentifyingField()]
         order: StringIndex
         
     sql = _get_sql_for_upserting(cast(Any, VersionModel))
@@ -589,7 +589,7 @@ def test_get_sql_for_upserting_versioning():
 
 def test_get_sql_for_upserting_dated():
     class DatedModel(PersistentModel, DatedMixin):
-        id: Annotated[StrId, MetaIdentifyingField()]
+        id: Annotated[UuidStr, MetaIdentifyingField()]
         
     sql = _get_sql_for_upserting(cast(Any, DatedModel))
 
@@ -648,7 +648,7 @@ def test_get_sql_for_upserting_dated():
 
 def test_get_sql_for_upserting_versioned_dated():
     class VersionDateModel(PersistentModel, VersionMixin, DatedMixin):
-        id: Annotated[StrId, MetaIdentifyingField()]
+        id: Annotated[UuidStr, MetaIdentifyingField()]
         
     sql = _get_sql_for_upserting(cast(Any, VersionDateModel))
 
@@ -1042,7 +1042,7 @@ def test_get_query_and_args_for_reading_for_order_by():
 
 def test_get_query_and_args_for_reading_for_dated():
     class MyModel(PersistentModel, DatedMixin):
-        id: Annotated[StrId, MetaIdentifyingField()]
+        id: Annotated[UuidStr, MetaIdentifyingField()]
         order: FullTextSearchedString
         name: FullTextSearchedString
 
@@ -1314,7 +1314,7 @@ def test_find_join_keys():
 
 def test_get_query_and_args_for_purging():    
     class SimpleBaseModel(PersistentModel):
-        id: Annotated[StrId, MetaIdentifyingField()]
+        id: Annotated[UuidStr, MetaIdentifyingField()]
 
     sqls = get_query_and_args_for_purging(
         SimpleBaseModel, {'id':('=', '@')}, 0)
@@ -1337,7 +1337,7 @@ def test_get_query_and_args_for_purging():
 
 def test_get_query_and_args_for_deleting():    
     class SimpleBaseModel(PersistentModel):
-        id: Annotated[StrId, MetaIdentifyingField()]
+        id: Annotated[UuidStr, MetaIdentifyingField()]
 
     sqls = get_query_and_args_for_deleting(
         SimpleBaseModel, {'id': ('=', '@')}, 0)
@@ -1366,8 +1366,8 @@ def test_get_query_and_args_for_deleting():
 
 def test_get_query_for_adjust_seq():
     class CodedModel(PersistentModel):
-        code: SequenceStrId
-        codes: List[SequenceStrId]
+        code: SequenceStr
+        codes: List[SequenceStr]
 
     sql = '\n'.join(get_query_for_adjust_seq(CodedModel))
 

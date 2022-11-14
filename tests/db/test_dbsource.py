@@ -16,7 +16,7 @@ from ormdantic.database.dbsource import (
 
 from ormdantic.schema import (
     PersistentModel, FullTextSearchedStringIndex, PartOfMixin, StringArrayIndex, 
-    update_forward_refs, IdentifiedModel, StrId
+    update_forward_refs, IdentifiedModel, UuidStr
 )
 from ormdantic.schema.paths import get_paths_for
 from ormdantic.schema.base import ( StringIndex, VersionMixin, MetaIdentifyingField)
@@ -37,7 +37,7 @@ class SharedNameModel(PersistentSharedContentModel):
 
 
 class ProductModel(PersistentModel, VersionMixin):
-    code: Annotated[StrId, MetaIdentifyingField()]
+    code: Annotated[UuidStr, MetaIdentifyingField()]
     description: StringIndex 
 
 
@@ -99,14 +99,14 @@ class ReferenceWithPartsModel(IdentifiedModel):
 container_content= ContainerModel(
     name=StringIndex('container'),
     parts=[
-        PartModel(id=StrId(uuid4().hex), name=StringIndex('part_1')),
-        PartModel(id=StrId(uuid4().hex), name=StringIndex('part_2')),
+        PartModel(id=UuidStr(uuid4().hex), name=StringIndex('part_1')),
+        PartModel(id=UuidStr(uuid4().hex), name=StringIndex('part_2')),
     ]
 )
 
 models = [
     SimpleContentModel(
-        id=StrId('first'),
+        id=UuidStr('first'),
         contents=[
             NameSharedReferenceModel(content=
                 SharedNameModel(name=FullTextSearchedStringIndex('name_1'), 
@@ -119,7 +119,7 @@ models = [
         ]
     ),
     SimpleContentModel(
-        id=StrId('second'),
+        id=UuidStr('second'),
         contents=[
             NameSharedReferenceModel(content=
                 SharedNameModel(name=FullTextSearchedStringIndex('name_1'), 
@@ -132,7 +132,7 @@ models = [
         ]
     ),
     NestedContentModel(
-        id=StrId('nested'),
+        id=UuidStr('nested'),
         nested = NestedSharedReferenceModel(
             content=NestedSharedModel(
                 description_model= DescriptionSharedReferenceModel(
@@ -144,7 +144,7 @@ models = [
         )
     ),
     DescriptionWithExternalModel(
-        id=StrId('external'),
+        id=UuidStr('external'),
         ref_model = CodedDescriptionReferenceModel(
             content = CodedDescriptionModel(
                 description='coded reference description',
@@ -153,7 +153,7 @@ models = [
         )
     ),
     ReferenceWithPartsModel(
-        id=StrId('part'),
+        id=UuidStr('part'),
         ref_model= ContainerContentReferenceModel(
             content=container_content
         )
@@ -180,8 +180,8 @@ def chained_source():
         storage_0 = create_database_source(pool, 0, date.today(), None)
         storage_1 = create_database_source(pool, 1, date.today(), None)
 
-        storage_0.store(ProductModel(code=StrId('0'), description=StringIndex('first')), VersionInfo())
-        storage_1.store(ProductModel(code=StrId('1'), description=StringIndex('second')), VersionInfo())
+        storage_0.store(ProductModel(code=UuidStr('0'), description=StringIndex('first')), VersionInfo())
+        storage_1.store(ProductModel(code=UuidStr('1'), description=StringIndex('second')), VersionInfo())
 
         source = ChainedModelSource(storage_1, storage_0)
         source.update_version()
@@ -225,7 +225,7 @@ def test_load_with_nested_shared(storage:ModelDatabaseStorage):
     assert not isinstance(nested_model.nested.content.description_model.content, str)
 
     created = NestedContentModel(
-        id=StrId('created'),
+        id=UuidStr('created'),
         nested = NestedSharedReferenceModel(
             content=nested_model.nested.content.id
         )
@@ -277,7 +277,7 @@ def test_clone_with(storage:ModelDatabaseStorage):
 
 def test_store_delete_purge(storage:ModelDatabaseStorage):
     to_be_stored = NestedContentModel(
-        id=StrId('to_be_stored'),
+        id=UuidStr('to_be_stored'),
         nested = NestedSharedReferenceModel(
             content=NestedSharedModel(
                 description_model= DescriptionSharedReferenceModel(
@@ -321,7 +321,7 @@ def test_store_delete_purge(storage:ModelDatabaseStorage):
 
 
 def test_squash(storage:ModelDatabaseStorage):
-    product = ProductModel(code=StrId('squashed'), description=StringIndex('first'))
+    product = ProductModel(code=UuidStr('squashed'), description=StringIndex('first'))
     storage.store(product, VersionInfo())
     first_version = storage.get_latest_version()
 

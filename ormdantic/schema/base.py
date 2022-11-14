@@ -187,39 +187,32 @@ StringArrayIndex = Annotated[List[str], MetaIndexField()]
 IntegerArrayIndex = Annotated[List[int], MetaIndexField()]
 
 
-class DateId(datetime.date, AutoAllocatedMixin):
-    ''' identified date index '''
-
-    def new_if_empty(self, **kwds) -> 'DateId':
-        return self
-
-
-class StrId(ConstrainedStr, AutoAllocatedMixin):
+class UuidStr(ConstrainedStr, AutoAllocatedMixin):
     max_length = 64 # sha256 return 64 char
     ''' identified id string sha256 or uuid'''
 
-    def new_if_empty(self, **kwds) -> 'StrId':
+    def new_if_empty(self, **kwds) -> 'UuidStr':
         if self == '':
-            return StrId(uuid4().hex)
+            return UuidStr(uuid4().hex)
 
         return self
 
 
-class SequenceStrId(StrId):
+class SequenceStr(ConstrainedStr, AutoAllocatedMixin):
     max_length = 16 
     prefix = 'N'
 
-    def new_if_empty(self, **kwds) -> 'StrId':
+    def new_if_empty(self, **kwds) -> 'SequenceStr':
         if self == '':
             next_seq = kwds['next_seq']
-            return SequenceStrId(self.prefix + str(next_seq()))
+            return SequenceStr(self.prefix + str(next_seq()))
 
         return self
 
 
 class IdentifiedMixin(SchemaBaseModel):
-    id: Annotated[StrId, MetaIdentifyingField()] = Field(
-        default=StrId(''), title='identifier for retreiving')
+    id: Annotated[UuidStr, MetaIdentifyingField()] = Field(
+        default=UuidStr(''), title='identifier for retreiving')
 
 
 class VersionMixin(SchemaBaseModel):
@@ -229,7 +222,7 @@ class VersionMixin(SchemaBaseModel):
 
 class DatedMixin(SchemaBaseModel):
     ''' has applied at field '''
-    applied_at: Annotated[DateId, MetaIdentifyingField()] = Field(title='applied at')
+    applied_at: Annotated[datetime.date, MetaIdentifyingField()] = Field(title='applied at')
     pass
 
 

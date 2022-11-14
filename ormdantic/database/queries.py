@@ -17,7 +17,7 @@ from ormdantic.util.hints import get_args_of_base_generic_alias
 from ..util import get_logger, has_metadata, get_metadata_for
 from ..schema.base import (
     DatedMixin, PersistentModelT, MetaReferenceField, 
-    MetaFullTextSearchedField, AutoAllocatedMixin, MetaIndexField, SequenceStrId, 
+    MetaFullTextSearchedField, AutoAllocatedMixin, MetaIndexField, SequenceStr, 
     StoredFieldDefinitions, PersistentModelT, PartOfMixin, 
     UseBaseClassTableMixin, VersionMixin, 
     MetaUniqueIndexField, get_container_type, get_root_container_type,
@@ -383,7 +383,7 @@ def _build_code_seq_statement(type_:Type[PersistentModel]) -> Iterator[str]:
     for name, modle_field in type_.__fields__.items():
         field_element_type = modle_field.type_
 
-        if is_derived_from(field_element_type, SequenceStrId):
+        if is_derived_from(field_element_type, SequenceStr):
             prefix = field_element_type.prefix
 
             yield join_line(
@@ -399,7 +399,7 @@ def get_query_for_adjust_seq(type_:Type[PersistentModel]) -> Iterator[str]:
     for name, modle_field in type_.__fields__.items():
         field_element_type = modle_field.type_
 
-        if is_derived_from(field_element_type, SequenceStrId):
+        if is_derived_from(field_element_type, SequenceStr):
             prefix = field_element_type.prefix
 
             yield ';\n'.join([

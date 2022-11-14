@@ -11,10 +11,10 @@ from ormdantic.database.queries import (
     get_query_and_args_for_purging,
 )
 from ormdantic.schema.base import (
-    PersistentModel, SequenceStrId, StringArrayIndex, FullTextSearchedStringIndex, 
+    PersistentModel, SequenceStr, StringArrayIndex, FullTextSearchedStringIndex, 
     PartOfMixin,
     StringIndex, UseBaseClassTableMixin, 
-    update_forward_refs, StrId, 
+    update_forward_refs, UuidStr, 
     StoredFieldDefinitions, MetaReferenceField, MetaIndexField
 )
 from ormdantic.schema.verinfo import VersionInfo
@@ -27,17 +27,17 @@ class SimpleBaseModel(IdentifiedModel):
     pass
 
 def test_get_query_and_args_for_reading():
-    model = SimpleBaseModel(id=StrId('@'))
+    model = SimpleBaseModel(id=UuidStr('@'))
 
     with use_temp_database_cursor_with_model(model, model_created=False) as cursor:
         new_version = allocate_audit_version(cursor, VersionInfo())
 
-        model.id = StrId("0")
+        model.id = UuidStr("0")
         query_and_args = get_query_and_args_for_upserting(model, set_id=0)
 
         cursor.execute(*query_and_args)
 
-        model.id = StrId("1")
+        model.id = UuidStr("1")
         query_and_args = get_query_and_args_for_upserting(model, set_id=0)
 
         cursor.execute(*query_and_args)
@@ -62,7 +62,7 @@ def test_get_query_and_args_for_reading():
 
 
 def test_get_query_and_args_for_purging():
-    model = SimpleBaseModel(id=StrId('@'), version='0.1.0')
+    model = SimpleBaseModel(id=UuidStr('@'), version='0.1.0')
 
     with use_temp_database_cursor_with_model(model) as cursor:
         query_and_args = get_query_and_args_for_purging(
@@ -83,7 +83,7 @@ def test_get_query_and_args_for_purging():
         assert tuple() == cursor.fetchall()
 
 def test_get_query_and_args_for_deleting():
-    model = SimpleBaseModel(id=StrId('@'), version='0.1.0')
+    model = SimpleBaseModel(id=UuidStr('@'), version='0.1.0')
 
     with use_temp_database_cursor_with_model(model) as cursor:
         allocate_audit_version(cursor, VersionInfo())
@@ -125,7 +125,7 @@ def test_get_query_and_args_for_reading_for_parts():
 
     update_forward_refs(ContainerModel, locals())
 
-    model = ContainerModel(id=StrId('@'), 
+    model = ContainerModel(id=UuidStr('@'), 
                            version='0.1.0',
                            name=FullTextSearchedStringIndex('sample'),
                            parts=[
@@ -138,7 +138,7 @@ def test_get_query_and_args_for_reading_for_parts():
 
         new_version = allocate_audit_version(cursor, VersionInfo())
 
-        model.id = StrId("@")
+        model.id = UuidStr("@")
         query_and_args = get_query_and_args_for_reading(
             ContainerModel, ('id', 'name'), {'name': ('match', 'sample')}, 0,
             version=new_version)
@@ -171,7 +171,7 @@ def test_get_query_and_args_for_reading_for_multiple_parts():
 
     update_forward_refs(ContainerModel, locals())
 
-    model = ContainerModel(id=StrId('@'), 
+    model = ContainerModel(id=UuidStr('@'), 
                            version='0.1.0',
                            name=FullTextSearchedStringIndex('sample'),
                            parts=[
@@ -215,7 +215,7 @@ def test_get_query_and_args_for_reading_for_nested_parts():
     update_forward_refs(ContainerModel, locals())
     update_forward_refs(PartModel, locals())
 
-    model = ContainerModel(id=StrId('@'), 
+    model = ContainerModel(id=UuidStr('@'), 
                            version='0.1.0',
                            name=FullTextSearchedStringIndex('sample'),
                            part=PartModel(
@@ -228,7 +228,7 @@ def test_get_query_and_args_for_reading_for_nested_parts():
 
     with use_temp_database_cursor_with_model(model, 
                                              keep_database_when_except=False) as cursor:
-        model.id = StrId("@")
+        model.id = UuidStr("@")
         query_and_args = get_query_and_args_for_reading(
             ContainerModel, ('id', 'name'), {'name': ('=', 'sample')}, 0, version=2)
 
@@ -670,7 +670,7 @@ def test_get_query_and_args_for_counting():
 
     update_forward_refs(ContainerModel, locals())
 
-    model = ContainerModel(id=StrId('@'), 
+    model = ContainerModel(id=UuidStr('@'), 
                            version='0.1.0',
                            name=FullTextSearchedStringIndex('sample'),
                            parts=[
@@ -732,11 +732,11 @@ def test_get_query_and_args_for_reading_with_limit():
         
 
 def test_seq_id():
-    class RiskIdStr(SequenceStrId):
+    class RiskIdStr(SequenceStr):
         prefix = 'Q'
 
     class Model(PersistentModel):
-        seq_1: Annotated[SequenceStrId, MetaIndexField()] = Field(default=SequenceStrId(''))
+        seq_1: Annotated[SequenceStr, MetaIndexField()] = Field(default=SequenceStr(''))
         seq_2: Annotated[RiskIdStr, MetaIndexField()] = Field(default=RiskIdStr(''))
         name: StringIndex
 

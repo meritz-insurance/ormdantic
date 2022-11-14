@@ -12,7 +12,7 @@ from ormdantic.schema.verinfo import VersionInfo
 from ormdantic.schema.base import (
     UniqueStringIndex, FullTextSearchedStringIndex, PartOfMixin, PersistentModel, 
     StringArrayIndex, update_forward_refs, 
-    StrId, 
+    UuidStr, 
     StoredFieldDefinitions, 
 )
 from ormdantic.schema.typed import (
@@ -63,7 +63,7 @@ update_forward_refs(ContainerModel, locals())
 update_forward_refs(PartModel, locals())
 
 
-model = ContainerModel(id=StrId('@'), 
+model = ContainerModel(id=UuidStr('@'), 
                         version='0.1.0',
                         name=FullTextSearchedStringIndex('sample'),
                         parts=[

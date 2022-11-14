@@ -11,7 +11,7 @@ from ormdantic.schema.base import (
     is_derived_from,
     AutoAllocatedMixin, PersistentModel, PartOfMixin, UseBaseClassTableMixin, 
     allocate_fields_if_empty, get_container_type, 
-    get_field_name_and_type, get_identifer_of, get_field_names_for, StrId, DateId, 
+    get_field_name_and_type, get_identifer_of, get_field_names_for, UuidStr,
     get_type_for_table, is_field_list_or_tuple_of, get_field_type,
     get_root_container_type, get_field_name_and_type_for_annotated,
     MetaStoredField, MetaIndexField, MetaIdentifyingField,
@@ -19,7 +19,7 @@ from ormdantic.schema.base import (
 )
 
 def test_identified_model():
-    model = IdentifiedModel(id=StrId(uuid.UUID(int=0).hex), version='0.0.0')
+    model = IdentifiedModel(id=UuidStr(uuid.UUID(int=0).hex), version='0.0.0')
 
     data = model.json()
 
@@ -141,11 +141,6 @@ def test_get_field_name_and_type_for_annotated():
         list(get_field_name_and_type_for_annotated(cast(Any, WrongType)))
 
 
-def test_new_if_empty():
-    date = DateId(2020, 1, 1)
-
-    assert date == date.new_if_empty() 
-
 def test_new_if_empty_raise_exception():
     class NotImplementedStr(ConstrainedStr, AutoAllocatedMixin):
         pass
@@ -156,7 +151,7 @@ def test_new_if_empty_raise_exception():
 
 def test_get_identifier_of():
     class SimpleModel(PersistentModel):
-        id: StrId = StrId(uuid.UUID(int=0).hex)
+        id: UuidStr = UuidStr(uuid.UUID(int=0).hex)
 
     model = SimpleModel()
 
@@ -177,7 +172,7 @@ def test_allocate_fields_if_empty():
     class SimpleModel(IdentifiedModel):
         pass
 
-    model = SimpleModel(id=StrId(''), version='')
+    model = SimpleModel(id=UuidStr(''), version='')
 
     replaced = allocate_fields_if_empty(model)
 
@@ -194,13 +189,13 @@ def test_allocate_fields_if_empty():
 
 def test_allocate_fields_if_empty_for_vector():
     class SimpleModel(PersistentModel):
-        list_ids : List[StrId] 
-        tuple_ids : Tuple[StrId,...]
-        empty_ids : List[StrId]
+        list_ids : List[UuidStr] 
+        tuple_ids : Tuple[UuidStr,...]
+        empty_ids : List[UuidStr]
 
     model = SimpleModel(
-        list_ids=[StrId('')], 
-        tuple_ids=(StrId(''), ),
+        list_ids=[UuidStr('')], 
+        tuple_ids=(UuidStr(''), ),
         empty_ids=[]
     )
 
