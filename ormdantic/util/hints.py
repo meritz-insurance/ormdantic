@@ -11,7 +11,12 @@ import copy
 import functools
 import inspect
 
+
+from .log import get_logger
 from .tools import convert_tuple
+
+
+_logger = get_logger(__name__)
 
 #@functools.cache
 def get_base_generic_alias_of(type_:Type, *generic_types:Type) -> Type | None:
@@ -152,20 +157,32 @@ def is_derived_from(type_:Type, base_type:Type[_T] | Tuple[Type,...]) -> TypeGua
     return False
 
 
-def has_metadata(type:Type, meta_type:Type) -> bool:
-    if hasattr(type, '__metadata__'):
-        return any(isinstance(o, meta_type) for o in type.__metadata__)
+def has_metadata(type_:Type, meta_type:Type) -> bool:
+
+    if hasattr(type_, '__metadata__'):
+        if __debug__:
+            _validate_metadata(type_)
+        return any(isinstance(o, meta_type) for o in type_.__metadata__)
     
     return False
 
 
-def get_metadata_for(type:Type, meta_type:Type[_T]) -> _T | None:
-    if hasattr(type, '__metadata__'):
-        for o in type.__metadata__:
+def get_metadata_for(type_:Type, meta_type:Type[_T]) -> _T | None:
+    if hasattr(type_, '__metadata__'):
+        if __debug__:
+            _validate_metadata(type_)
+
+        for o in type_.__metadata__:
             if isinstance(o, meta_type):
                 return o
     
     return None
+
+
+def _validate_metadata(type_:Type):
+    if any(inspect.isclass(o)  for o in type_.__metadata__):
+        _logger.fatal(f'{type_.__metadata__=} contains class.')
+        raise RuntimeError('metadata should be instance not class.')
 
 
 

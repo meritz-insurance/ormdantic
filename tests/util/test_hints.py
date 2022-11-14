@@ -9,8 +9,14 @@ from ormdantic.util import (
     resolve_forward_ref, update_forward_refs_in_generic_base, is_derived_from, 
     is_list_or_tuple_of
 )
-from ormdantic.schema.base import PartOfMixin, PersistentModel, StringIndex
-from ormdantic.util.hints import get_args_of_base_generic_alias, get_args_of_list_or_tuple, get_union_type_arguments, is_derived_or_collection_of_derived, resolve_forward_ref_in_args
+from ormdantic.schema.base import (
+    PartOfMixin, PersistentModel, StringIndex, MetaStoredField
+)
+from ormdantic.util.hints import (
+    get_args_of_base_generic_alias, get_args_of_list_or_tuple, 
+    get_union_type_arguments, is_derived_or_collection_of_derived, 
+    resolve_forward_ref_in_args, get_metadata_for
+)
 
 T = TypeVar('T')
 
@@ -189,5 +195,12 @@ def test_get_union_type_arguments():
     assert get_union_type_arguments(Union[str, int]) == (str, int)
     assert get_union_type_arguments(str | int) == (str, int)
     assert get_union_type_arguments(str) is None
+
+
+def test_get_metadata_for():
+    assert MetaStoredField() == get_metadata_for(Annotated[str, MetaStoredField()], MetaStoredField)
+
+    with pytest.raises(RuntimeError):
+        get_metadata_for(Annotated[str, MetaStoredField], MetaStoredField)
 
     

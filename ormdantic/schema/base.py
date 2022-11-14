@@ -136,16 +136,6 @@ class MetaIdentifyingField(MetaStoredField):
     pass
 
 
-class AutoAllocatedMixin():
-    ''' the json value will be used for identifing the object. 
-    The value of this type will be update through the sql param 
-    so, this field of database will not use stored feature.
-    If multiple fields was declared as IdentifyingMixin in a class, 
-    the all fields will be an unique key. '''
-    
-    def new_if_empty(self:T, **kwds) -> T:
-        raise NotImplementedError('fill if exist should be implemented.')
-
 
 class MetaIndexField(MetaStoredField):
     ''' the json value will be indexed as table fields. '''
@@ -185,6 +175,17 @@ DateTimeIndex = Annotated[datetime.datetime, MetaIndexField()]
 
 StringArrayIndex = Annotated[List[str], MetaIndexField()]
 IntegerArrayIndex = Annotated[List[int], MetaIndexField()]
+
+class AutoAllocatedMixin():
+    ''' the json value will be used for identifing the object. 
+    The value of this type will be update through the sql param 
+    so, this field of database will not use stored feature.
+    If multiple fields was declared as IdentifyingMixin in a class, 
+    the all fields will be an unique key. '''
+    
+    def new_if_empty(self:T, **kwds) -> T:
+        raise NotImplementedError('fill if exist should be implemented.')
+
 
 
 class UuidStr(ConstrainedStr, AutoAllocatedMixin):

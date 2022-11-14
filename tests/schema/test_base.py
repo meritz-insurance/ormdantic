@@ -151,7 +151,7 @@ def test_new_if_empty_raise_exception():
 
 def test_get_identifier_of():
     class SimpleModel(PersistentModel):
-        id: UuidStr = UuidStr(uuid.UUID(int=0).hex)
+        id: Annotated[UuidStr, MetaIdentifyingField()] = UuidStr(uuid.UUID(int=0).hex)
 
     model = SimpleModel()
 
