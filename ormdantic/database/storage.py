@@ -1,6 +1,6 @@
 from typing import (
     Optional, Iterable, Type, Iterator, Dict, Any, Tuple, 
-    overload, cast, TypeVar, List
+    overload, cast, TypeVar, List, Callable, Literal
 )
 from collections import deque
 import itertools
@@ -15,9 +15,9 @@ from .connections import DatabaseConnectionPool
 from ..util import get_logger, is_derived_from
 from ..schema import ModelT, PersistentModel, get_container_type
 from ..schema.base import (
-    PartOfMixin, PersistentModel, assign_identifying_fields_if_empty, 
+    PartOfMixin, PersistentModel, allocate_fields_if_empty, 
     get_part_types, PersistentModelT,
-    get_identifying_fields,
+    get_identifying_fields, get_identifying_field_values
 )
 from ..schema.verinfo import VersionInfo
 from ..schema.source import QueryConditionType, to_normalize_query_condition
@@ -45,15 +45,12 @@ from .queries import (
     get_sql_for_upserting_external_index, 
     get_sql_for_upserting_parts,
     get_query_and_args_for_purging,
+    get_query_for_adjust_seq,
     _ROW_ID_FIELD, _JSON_FIELD, _AUDIT_VERSION_FIELD, _AUDIT_MODEL_ID_FIELD
 )
 
-from ..schema.modelcache import ModelCache
 
-
-# storage will generate pydantic object from json data.
 _logger = get_logger(__name__)
-
 
 _T = TypeVar('_T')
 
@@ -72,12 +69,15 @@ def create_table(pool:DatabaseConnectionPool, *types:Type[PersistentModelT]):
             for sql in get_sql_for_creating_table(type_):
                 cursor.execute(sql)
 
+SavedCallback = Callable[[Tuple[Any,...], PersistentModel | BaseException], None]
 
 @overload
 def upsert_objects(pool: DatabaseConnectionPool, 
                    models: PersistentModelT,
                    set_id: int,
-                   version_info:VersionInfo = VersionInfo()
+                   ignore_error:Literal[False],
+                   version_info:VersionInfo,
+                   saved_callback:SavedCallback | None = None
                    ) -> PersistentModelT:
     ...
 
@@ -85,29 +85,62 @@ def upsert_objects(pool: DatabaseConnectionPool,
 def upsert_objects(pool:DatabaseConnectionPool, 
                    models: Iterable[PersistentModelT],
                    set_id: int,
-                   version_info:VersionInfo = VersionInfo()
+                   ignore_error:Literal[False],
+                   version_info:VersionInfo,
+                   saved_callback:SavedCallback | None = None
                    ) -> Tuple[PersistentModelT, ...]:
     ...
+
+@overload
+def upsert_objects(pool:DatabaseConnectionPool, 
+                   models: PersistentModelT | Iterable[PersistentModelT],
+                   set_id: int,
+                   ignore_error:Literal[False],
+                   version_info:VersionInfo,
+                   saved_callback:SavedCallback | None = None
+                   ) -> PersistentModelT | Tuple[PersistentModelT, ...]:
+    ...
+
+
+@overload
+def upsert_objects(pool: DatabaseConnectionPool, 
+                   models: PersistentModelT | Iterable[PersistentModelT],
+                   set_id: int,
+                   ignore_error:Literal[True],
+                   version_info:VersionInfo,
+                   saved_callback:SavedCallback | None = None
+                   ) -> Dict[Tuple[Any,...], PersistentModelT | BaseException]:
+    ...
+
+
+@overload
+def upsert_objects(pool: DatabaseConnectionPool, 
+                   models: PersistentModelT | Iterable[PersistentModelT],
+                   set_id: int,
+                   ignore_error:bool,
+                   version_info:VersionInfo,
+                   saved_callback:SavedCallback | None = None
+                   ) -> Dict[Tuple[Any], PersistentModelT | BaseException] | Tuple[PersistentModelT, ...] | PersistentModelT:
+    ...
+
 
 def upsert_objects(pool:DatabaseConnectionPool, 
                    models: PersistentModelT | Iterable[PersistentModelT],
                    set_id: int,
-                   version_info:VersionInfo = VersionInfo()
-                   ):
+                   ignore_error:bool,
+                   version_info:VersionInfo,
+                   saved_callback:SavedCallback | None = None
+                   ) -> Dict[Tuple[Any], PersistentModelT | BaseException] | Tuple[PersistentModelT, ...] | PersistentModelT:
     is_single = isinstance(models, PersistentModel)
 
     model_list = [models] if is_single else models
 
-    mixins = tuple(filter(lambda x: isinstance(x, PartOfMixin), model_list))
-
-    if mixins:
-        _logger.fatal(f'{[type(m) for m in mixins]} can not be stored directly. it is part of mixin')
-        raise RuntimeError(f'PartOfMixin could not be saved directly.')
+    results : Dict[Tuple[Any,...], PersistentModelT | BaseException] = {}
 
     with pool.open_cursor(True) as cursor:
         # we get next seq in current db transaction.
         targets = tuple(
-            assign_identifying_fields_if_empty(
+            allocate_fields_if_empty(
                 m, next_seq=lambda f: _next_seq_for(cursor, type(m), f))
             for m in model_list
         )
@@ -120,27 +153,62 @@ def upsert_objects(pool:DatabaseConnectionPool,
         allocate_audit_version(cursor, version_info)
 
         for model in targets:
+            if isinstance(model, PartOfMixin):
+                _logger.fatal(f'{type(model)} can not be stored directly. it is part of mixin')
+                raise RuntimeError(f'PartOfMixin could not be saved directly.')
+
             # we will remove content of the given model. so, we copy it and remove them.
             # for not updating original model.
+            id_values = tuple(get_identifying_field_values(model).values())
+            results[id_values] = model
 
-            for sub_model in iterate_isolated_models(model):
-                sub_model._before_save()
+            try:
+                for sub_model in iterate_isolated_models(model):
+                    allocate_fields_if_empty(
+                        sub_model, 
+                        next_seq=lambda f: _next_seq_for(cursor, type(sub_model), f))
 
-                cursor.execute(*get_query_and_args_for_upserting(sub_model, set_id))
+                    sub_model._before_save()
 
-                loop = True
-                while loop:
-                    fetched = cursor.fetchall()
+                    cursor.execute(*get_query_and_args_for_upserting(sub_model, set_id))
 
-                    for row in fetched:
+                    for row in fetch_multiple_set(cursor):
                         _update_audit_model(cursor, row)
                         _upsert_parts_and_externals(cursor, row[_ROW_ID_FIELD], type(sub_model))
 
-                    loop = cursor.nextset()
+                extract_shared_models(model, True)
 
-            extract_shared_models(model, True)
+                if saved_callback:
+                    saved_callback(id_values, model)
+            except BaseException as e:
+                if not ignore_error:
+                    raise
+                else:
+                    _logger.warning('{e} is raised. but ignored by user.')
 
-    return targets[0] if is_single else targets
+                    results[id_values] = e
+
+                    if saved_callback:
+                        saved_callback(id_values, e)
+
+    if ignore_error:
+        return results
+    else:
+        if isinstance(models, PersistentModel):
+            return targets[0]
+
+        return targets
+
+
+def fetch_multiple_set(cursor:DictCursor) -> Iterator[Dict[str, Any]]:
+    loop = True
+    while loop:
+        fetched = cursor.fetchall()
+
+        yield from fetched
+
+        loop = cursor.nextset()
+
 
 
 def allocate_audit_version(cursor:DictCursor, audit:VersionInfo) -> int:
@@ -191,18 +259,16 @@ def squash_objects(pool: DatabaseConnectionPool,
                     squasheds.append(result)
                     cursor.execute(*get_query_and_args_for_squashing(type_, result, set_id=set_id))
                                                                     
-                    loop = True
-                    while loop:
-                        row_ids = []
 
-                        for row in cursor.fetchall():
-                            _update_audit_model(cursor, row)
-                            row_ids.append(row[_ROW_ID_FIELD])
+                    row_ids = []
 
-                        if row_ids:
-                            _delete_parts_and_externals(cursor, tuple(row_ids), type_)
+                    for row in fetch_multiple_set(cursor):
+                        _update_audit_model(cursor, row)
+                        row_ids.append(row[_ROW_ID_FIELD])
 
-                        loop = cursor.nextset()
+                    if row_ids:
+                        _delete_parts_and_externals(cursor, tuple(row_ids), type_)
+
     return squasheds
 
 
@@ -237,13 +303,9 @@ def delete_objects(pool: DatabaseConnectionPool,
                 *get_query_and_args_for_deleting(
                     type_, to_normalize_query_condition(where), set_id=set_id))
 
-            loop = True
-            while loop:
-                for row in cursor.fetchall():
-                    _update_audit_model(cursor, row)
-                    deleted.append(row[_AUDIT_MODEL_ID_FIELD])
-
-                loop = cursor.nextset()
+            for row in fetch_multiple_set(cursor):
+                _update_audit_model(cursor, row)
+                deleted.append(row[_AUDIT_MODEL_ID_FIELD])
 
     return deleted
 
@@ -278,20 +340,17 @@ def purge_objects(pool: DatabaseConnectionPool,
             cursor.execute(*get_query_and_args_for_purging(type_, 
                 to_normalize_query_condition(where), set_id=set_id))
 
-            loop = True
-            while loop:
-                row_ids = []
+            row_ids = []
 
-                for row in cursor.fetchall():
-                    _update_audit_model(cursor, row)
-                    deleted.append(row[_AUDIT_MODEL_ID_FIELD])
+            for row in fetch_multiple_set(cursor):
+                _update_audit_model(cursor, row)
+                deleted.append(row[_AUDIT_MODEL_ID_FIELD])
 
-                    row_ids.append(row[_ROW_ID_FIELD])
+                row_ids.append(row[_ROW_ID_FIELD])
 
-                if row_ids:
-                    _delete_parts_and_externals(cursor, tuple(row_ids), type_)
+            if row_ids:
+                _delete_parts_and_externals(cursor, tuple(row_ids), type_)
 
-                loop = cursor.nextset()
 
     return deleted
 
@@ -415,13 +474,16 @@ def query_records(pool: DatabaseConnectionPool,
                   offset: int | None = None,
                   unwind: Tuple[str,...] | str = tuple(),
                   joined: Dict[str, Type[PersistentModelT]] | None = None,
-                  version: int = 0,
+                  version: int | None = None,
                   ref_date: date | None = None,
                   ) -> Iterator[Dict[str, Any]]:
 
     if not fields:
         _logger.fatal('empty fields for query_records. it makes an invalid query.')
         raise RuntimeError('empty fields for querying')
+
+    if version is None:
+        version = get_current_version(pool)
 
     query_and_param = get_query_and_args_for_reading(
         type_, fields, to_normalize_query_condition(where), 
@@ -499,3 +561,11 @@ def _delete_parts_and_externals(cursor, root_deleted_ids:Tuple[int,...], type_:T
 
         _delete_parts_and_externals(cursor, root_deleted_ids, part_type)
 
+def update_sequences(pool: DatabaseConnectionPool, 
+                     types: Iterable[Type[PersistentModelT]]):
+
+    with pool.open_cursor() as cursor:
+        for type_ in types:
+            for sql in get_query_for_adjust_seq(type_):
+                cursor.execute(sql)
+ 

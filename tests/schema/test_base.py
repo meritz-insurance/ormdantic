@@ -1,19 +1,25 @@
-from typing import Any, cast, List, Tuple, Type
+from typing import Any, cast, List, Tuple, Type, Annotated
 import uuid
 
 import pytest
 from pydantic import ConstrainedStr, parse_raw_as
 
+from ormdantic.schema import (
+    IdentifiedModel
+)
 from ormdantic.schema.base import (
-    IdentifiedModel, IdentifyingMixin, PersistentModel, PartOfMixin, UseBaseClassTableMixin, 
-    assign_identifying_fields_if_empty, get_container_type, 
-    get_field_name_and_type, get_identifer_of, get_field_names_for, StrId, DateId, get_type_for_table,
-    update_forward_refs, is_field_list_or_tuple_of, get_field_type,
-    get_root_container_type
+    is_derived_from,
+    AutoAllocatedMixin, PersistentModel, PartOfMixin, UseBaseClassTableMixin, 
+    allocate_fields_if_empty, get_container_type, 
+    get_field_name_and_type, get_identifer_of, get_field_names_for, UuidStr,
+    get_type_for_table, is_field_list_or_tuple_of, get_field_type,
+    get_root_container_type, get_field_name_and_type_for_annotated,
+    MetaStoredField, MetaIndexField, MetaIdentifyingField,
+    get_stored_fields_for
 )
 
 def test_identified_model():
-    model = IdentifiedModel(id=StrId(uuid.UUID(int=0).hex), version='0.0.0')
+    model = IdentifiedModel(id=UuidStr(uuid.UUID(int=0).hex), version='0.0.0')
 
     data = model.json()
 
@@ -48,7 +54,22 @@ def test_get_root_container_type():
     assert None is get_container_type(Container)
     
 
-   
+def test_get_stored_fields_for():
+    class Container(PersistentModel):
+        stored:Annotated[str, MetaStoredField()]
+        index:Annotated[str, MetaIndexField()]
+        identifying:Annotated[str, MetaIdentifyingField()]
+
+    assert {
+        'stored':(('$.stored',), Annotated[str, MetaStoredField()]),
+        'index':(('$.index',), Annotated[str, MetaIndexField()]),
+        'identifying':(('$.identifying',), Annotated[str, MetaIdentifyingField()]),
+        } == get_stored_fields_for(Container, MetaStoredField)
+
+    with pytest.raises(RuntimeError, match='.*Invalid*'):
+        get_field_type(cast(Type[Container], str), 'name')
+
+  
 
 def test_get_field_type():
     class Container(PersistentModel):
@@ -98,13 +119,30 @@ def test_get_field_name_and_type():
     with pytest.raises(RuntimeError):
         list(get_field_name_and_type(cast(Any, WrongType)))
 
-def test_new_if_empty():
-    date = DateId(2020, 1, 1)
 
-    assert date == date.new_if_empty() 
+def test_get_field_name_and_type_for_annotated():
+    class Part(PersistentModel, PartOfMixin['Container']):
+        pass
+
+    class Container(PersistentModel):
+        parts: Annotated[List[Part], MetaStoredField()]
+        part: Part
+        number: Annotated[int, MetaIndexField()]
+
+    assert [
+        ('parts', Annotated[List[Part], MetaStoredField()]), 
+        ('number', Annotated[int, MetaIndexField()])
+    ] == list(get_field_name_and_type_for_annotated(Container, MetaStoredField))
+
+    class WrongType():
+        pass
+
+    with pytest.raises(RuntimeError):
+        list(get_field_name_and_type_for_annotated(cast(Any, WrongType)))
+
 
 def test_new_if_empty_raise_exception():
-    class NotImplementedStr(ConstrainedStr, IdentifyingMixin):
+    class NotImplementedStr(ConstrainedStr, AutoAllocatedMixin):
         pass
 
     with pytest.raises(NotImplementedError):
@@ -113,7 +151,7 @@ def test_new_if_empty_raise_exception():
 
 def test_get_identifier_of():
     class SimpleModel(PersistentModel):
-        id: StrId = StrId(uuid.UUID(int=0).hex)
+        id: Annotated[UuidStr, MetaIdentifyingField()] = UuidStr(uuid.UUID(int=0).hex)
 
     model = SimpleModel()
 
@@ -130,109 +168,42 @@ def test_is_fields_collection_type():
     assert is_field_list_or_tuple_of(SimpleModel, 'tuple_id', str)
 
 
-def test_assign_identified_if_empty():
+def test_allocate_fields_if_empty():
     class SimpleModel(IdentifiedModel):
         pass
 
-    model = SimpleModel(id=StrId(''), version='')
+    model = SimpleModel(id=UuidStr(''), version='')
 
-    replaced = assign_identifying_fields_if_empty(model)
+    replaced = allocate_fields_if_empty(model)
 
     assert replaced is not model
     assert model.id == ''
     assert replaced.id
 
-    replaced = assign_identifying_fields_if_empty(model, True)
+    replaced = allocate_fields_if_empty(model, True)
 
     assert replaced is model
     assert model.id != ''
     assert replaced.id
   
 
-def test_assign_identified_if_empty_for_vector():
+def test_allocate_fields_if_empty_for_vector():
     class SimpleModel(PersistentModel):
-        list_ids : List[StrId] 
-        tuple_ids : Tuple[StrId,...]
-        empty_ids : List[StrId]
+        list_ids : List[UuidStr] 
+        tuple_ids : Tuple[UuidStr,...]
+        empty_ids : List[UuidStr]
 
     model = SimpleModel(
-        list_ids=[StrId('')], 
-        tuple_ids=(StrId(''), ),
+        list_ids=[UuidStr('')], 
+        tuple_ids=(UuidStr(''), ),
         empty_ids=[]
     )
 
-    replaced = assign_identifying_fields_if_empty(model)
+    replaced = allocate_fields_if_empty(model)
 
     assert replaced.list_ids != model.list_ids
     assert replaced.tuple_ids != model.tuple_ids
     assert replaced.empty_ids is model.empty_ids
-
-
-def test_assign_identified_if_empty_for_parts():
-    class ContainerModel(IdentifiedModel):
-        parts : List['SimpleModel']
-        part : 'SimpleModel'
-
-    class SimpleModel(IdentifiedModel, PartOfMixin[ContainerModel]):
-        pass
-
-    update_forward_refs(ContainerModel, locals())
-
-    model = ContainerModel(
-        id = StrId('Container'),
-        version = '0.0.0',
-        parts = [
-            SimpleModel(id=StrId('1'), version=''),
-            SimpleModel(id=StrId('1'), version='')
-        ],
-        part = SimpleModel(id=StrId('1'), version='')
-    )
-
-    replaced = assign_identifying_fields_if_empty(model)
-
-    assert replaced is model
-    
-    model = ContainerModel(
-        id = StrId('Container'),
-        version = '0.0.0',
-        parts = [
-            SimpleModel(id=StrId('1'), version=''),
-            SimpleModel(id=StrId('1'), version='')
-        ],
-        part = SimpleModel(id=StrId(''), version='')
-    )
-
-    replaced = assign_identifying_fields_if_empty(model)
-
-    assert replaced is not model
-    assert replaced.parts is model.parts
-    assert replaced.part != model.part
-    
-    model = ContainerModel(
-        id = StrId('Container'),
-        version = '0.0.0',
-        parts = [
-            SimpleModel(id=StrId('1'), version=''),
-            SimpleModel(id=StrId(''), version='')
-        ],
-        part = SimpleModel(id=StrId('1'), version='')
-    )
-
-    replaced = assign_identifying_fields_if_empty(model)
-
-    assert replaced is not model
-    assert replaced.parts is not model.parts
-    assert replaced.parts[0] is model.parts[0]
-    assert replaced.parts[1] != model.parts[1]
-    assert replaced.part is model.part
-
-    replaced = assign_identifying_fields_if_empty(model, True)
-
-    assert replaced is model
-
-    replaced = assign_identifying_fields_if_empty(model)
-
-    assert replaced is model
 
 
 def test_get_type_for_table():

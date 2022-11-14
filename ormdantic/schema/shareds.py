@@ -1,7 +1,7 @@
 import inspect
 from typing import (
     ClassVar, Dict, Generic, Iterator, Iterator, TypeVar, get_args, Union, Type, 
-    Set, DefaultDict, Any, cast, Tuple, List, Set, Callable
+    Set, DefaultDict, Any, cast, Tuple, List, Set, Callable, Annotated
 )
 import orjson
 from pydantic import Field, PrivateAttr
@@ -17,8 +17,11 @@ from ..util import (
     is_derived_from, unique,
 )
 
-from .base import (IdentifiedMixin, StrId, PersistentModel,  PersistentModelT, 
-                   register_class_preprocessor, orjson_dumps, SchemaBaseModel)
+from .base import (
+    IdentifiedMixin, UuidStr, PersistentModel,  PersistentModelT, 
+    register_class_preprocessor, orjson_dumps, SchemaBaseModel,
+    MetaIdentifyingField
+)
 from .paths import (extract_as, get_path_and_types_for, get_paths_for)
 
 
@@ -37,9 +40,9 @@ class SharedContentMixin(IdentifiedMixin):
         self.normalize()
 
         if self._id_attr:
-            id = StrId(getattr(self, self._id_attr))
+            id = UuidStr(getattr(self, self._id_attr))
         else:
-            id = StrId(_get_content_id(self.dict()))
+            id = UuidStr(_get_content_id(self.dict()))
 
         self.id = id
         return id

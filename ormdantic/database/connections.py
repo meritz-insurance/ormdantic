@@ -37,6 +37,9 @@ class DatabaseConnectionPool():
             f"/ {self._cached=}, {self._connected=}"
         )
 
+    def __reduce__(self):
+        return (DatabaseConnectionPool, (self._connection_config,))
+
     @contextmanager
     def open_cursor(self, commit:bool = False, *, query_to_log:bool=False) -> Iterator[DictCursor]:
         with self.connect() as connection:
@@ -115,5 +118,4 @@ class DatabaseConnectionPool():
         new_one = connect(**self._connection_config, cursorclass=DictCursor)
 
         return new_one
-
 

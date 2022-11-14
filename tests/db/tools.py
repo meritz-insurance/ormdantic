@@ -3,6 +3,8 @@ from uuid import uuid4
 from pymysql import Connection, connect
 from pymysql.cursors import DictCursor
 from contextlib import contextmanager
+import pathlib as pl
+import tempfile
 
 from ormdantic.database.storage import (
     DatabaseConnectionPool, create_table, upsert_objects
@@ -10,6 +12,7 @@ from ormdantic.database.storage import (
 from ormdantic.database.connections import _DATABASE, _PASSWORD
 
 from ormdantic.schema.base import PersistentModel, get_part_types
+from ormdantic.schema.verinfo import VersionInfo
 from ormdantic.util import is_derived_from, get_logger
 
 _config = {
@@ -116,8 +119,7 @@ def use_temp_database_cursor_with_model(*models:PersistentModel,
         create_table(pool, *types)
 
         if model_created:
-            upsert_objects(pool, models, 0)
+            upsert_objects(pool, models, 0, False, VersionInfo())
 
         with pool.open_cursor(True) as cursor:
             yield cursor
- 

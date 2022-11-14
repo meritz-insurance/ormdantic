@@ -1,4 +1,4 @@
-from typing import Type, List, ClassVar, cast, Any
+from typing import Type, List, ClassVar, cast, Any, Annotated
 import pytest
 from decimal import Decimal
 from datetime import date, datetime
@@ -14,14 +14,16 @@ from ormdantic.database.queries import (
     get_sql_for_upserting_parts, 
     join_line, 
     _build_namespace_types, _find_join_keys, _extract_fields,
+    get_query_for_adjust_seq,
     _ENGINE, _RELEVANCE_FIELD
 )
 from ormdantic.schema.base import (
     DatedMixin, IntegerArrayIndex, StringArrayIndex, FullTextSearchedStringIndex, 
-    FullTextSearchedStr, PartOfMixin, StringReference, VersionMixin, 
+    FullTextSearchedString, PartOfMixin, VersionMixin, 
     UniqueStringIndex, StringIndex, DecimalIndex, IntIndex, DateIndex,
-    DateTimeIndex, update_forward_refs, StrId, 
-    StoredFieldDefinitions
+    DateTimeIndex, update_forward_refs, UuidStr, 
+    StoredFieldDefinitions, SequenceStr, MetaIndexField,
+    MetaReferenceField, MetaIdentifyingField
 )
 
 from .tools import (
@@ -58,7 +60,7 @@ def test_get_sql_for_create_table():
 
 def test_get_sql_for_create_table_for_version():
     class SimpleBaseModel(PersistentModel, VersionMixin):
-        id: StrId
+        id: Annotated[UuidStr, MetaIdentifyingField()]
 
     assert (
         'CREATE TABLE IF NOT EXISTS `md_SimpleBaseModel` (\n'
@@ -77,7 +79,7 @@ def test_get_sql_for_create_table_for_version():
         order: StringIndex
 
     class RootModel(PersistentModel, VersionMixin):
-        id: StrId
+        id: Annotated[UuidStr, MetaIdentifyingField()]
 
     update_forward_refs(PartModel, locals())
 
@@ -109,7 +111,7 @@ def test_get_sql_for_create_table_for_version():
 
 def test_get_sql_for_create_table_for_version_date():
     class VersionDateModel(PersistentModel, DatedMixin, VersionMixin):
-        id: StrId
+        id: Annotated[UuidStr, MetaIdentifyingField()]
 
     assert (
         'CREATE TABLE IF NOT EXISTS `md_VersionDateModel` (\n'
@@ -128,7 +130,7 @@ def test_get_sql_for_create_table_for_version_date():
 
 def test_get_sql_for_create_table_with_index():
     class SampleModel(PersistentModel):
-        i1: FullTextSearchedStr
+        i1: FullTextSearchedString
         i2: FullTextSearchedStringIndex
         i3: UniqueStringIndex
         i4: StringIndex
@@ -137,7 +139,7 @@ def test_get_sql_for_create_table_with_index():
         i7: IntIndex
         i8: DateIndex
         i9: DateTimeIndex
-        i10: StrId
+        i10: Annotated[UuidStr, MetaIdentifyingField()]
 
     assert (
 f"""CREATE TABLE IF NOT EXISTS `md_SampleModel` (
@@ -526,9 +528,6 @@ def test_get_sql_for_upserting():
         "  %(__set_id)s,",
         "  @VERSION",
         ")",
-        "ON DUPLICATE KEY UPDATE",  
-        "  `__json` = %(__json)s,",
-        "  `__valid_start` = @VERSION",
         "RETURNING",
         "  `__set_id`,",
         "  `__row_id`,",
@@ -540,7 +539,7 @@ def test_get_sql_for_upserting():
 
 def test_get_sql_for_upserting_versioning():
     class VersionModel(PersistentModel, VersionMixin):
-        id: StrId
+        id: Annotated[UuidStr, MetaIdentifyingField()]
         order: StringIndex
         
     sql = _get_sql_for_upserting(cast(Any, VersionModel))
@@ -583,49 +582,73 @@ def test_get_sql_for_upserting_versioning():
         "  `__set_id`,",
         "  `__row_id`,",
         "  CONCAT_WS(',', `id`,`__valid_start`) as model_id,",
-        "  'UPSERTED' as op,",
+        "  'INSERTED' as op,",
         "  'md_VersionModel' as table_name"
     ) == sql
 
 
 def test_get_sql_for_upserting_dated():
     class DatedModel(PersistentModel, DatedMixin):
-        id: StrId
+        id: Annotated[UuidStr, MetaIdentifyingField()]
         
     sql = _get_sql_for_upserting(cast(Any, DatedModel))
 
     assert join_line(
-        "INSERT INTO md_DatedModel",
-        "(",
-        "  `__json`,",
-        "  `__set_id`,",
-        "  `applied_at`,",
-        "  `id`,",
-        "  `__valid_start`",
-        ")",
-        "VALUES",
-        "(",
-        "  %(__json)s,",
-        "  %(__set_id)s,",
-        "  %(applied_at)s,",
-        "  %(id)s,",
-        "  @VERSION",
-        ")",
-        "ON DUPLICATE KEY UPDATE",
-        "  `__json` = %(__json)s,",
-        "  `__valid_start` = @VERSION",
-        "RETURNING",
-        "  `__set_id`,",
-        "  `__row_id`,",
-        "  'UPSERTED' as op,",
-        "  'md_DatedModel' as table_name,",
-        "  CONCAT_WS(',', `applied_at`,`id`) as model_id"
+        "IF ( SELECT 1 = 1 FROM md_DatedModel WHERE   `__set_id` = %(__set_id)s",
+        "  AND `applied_at` = %(applied_at)s",
+        "  AND `id` = %(id)s) THEN",
+        "  UPDATE md_DatedModel",
+        "  SET",
+        "    `__json` = %(__json)s,",
+        "    `__valid_start` = @VERSION",
+        "  WHERE",
+        "      `__set_id` = %(__set_id)s",
+        "      AND `applied_at` = %(applied_at)s",
+        "      AND `id` = %(id)s",
+        "  ;",
+        "  SELECT",
+        "    `__set_id`,",
+        "    `__row_id`,",
+        "    'INSERTED' as op,",
+        "    'md_DatedModel' as table_name,",
+        "    CONCAT_WS(',', `applied_at`,`id`) as model_id",
+        "  FROM md_DatedModel",
+        "  WHERE",
+        "      `__set_id` = %(__set_id)s",
+        "      AND `applied_at` = %(applied_at)s",
+        "      AND `id` = %(id)s",
+        "  ;",
+        "ELSE",
+        "  INSERT INTO md_DatedModel",
+        "  (",
+        "    `__json`,",
+        "    `__set_id`,",
+        "    `applied_at`,",
+        "    `id`,",
+        "    `__valid_start`",
+        "  )",
+        "  VALUES",
+        "  (",
+        "    %(__json)s,",
+        "    %(__set_id)s,",
+        "    %(applied_at)s,",
+        "    %(id)s,",
+        "    @VERSION",
+        "  )",
+        "  RETURNING",
+        "    `__set_id`,",
+        "    `__row_id`,",
+        "    'INSERTED' as op,",
+        "    'md_DatedModel' as table_name,",
+        "    CONCAT_WS(',', `applied_at`,`id`) as model_id",
+        "  ;",
+        "END IF"
     ) == sql
 
 
 def test_get_sql_for_upserting_versioned_dated():
     class VersionDateModel(PersistentModel, VersionMixin, DatedMixin):
-        id: StrId
+        id: Annotated[UuidStr, MetaIdentifyingField()]
         
     sql = _get_sql_for_upserting(cast(Any, VersionDateModel))
 
@@ -671,7 +694,7 @@ def test_get_sql_for_upserting_versioned_dated():
         "  `__set_id`,",
         "  `__row_id`,",
         "  CONCAT_WS(',', `applied_at`,`id`,`__valid_start`) as model_id,",
-        "  'UPSERTED' as op,",
+        "  'INSERTED' as op,",
         "  'md_VersionDateModel' as table_name"
 
    ) == sql
@@ -917,8 +940,8 @@ def test_get_sql_for_upserting_parts_table_throws_if_invalid_path():
 
 def test_get_query_and_args_for_reading_for_matching():
     class MyModel(PersistentModel):
-        order: FullTextSearchedStr
-        name: FullTextSearchedStr
+        order: FullTextSearchedString
+        name: FullTextSearchedString
 
     sql, args = get_query_and_args_for_reading(MyModel, ('order',), {'': ('match', '+FAST')}, set_id=1)
 
@@ -970,8 +993,8 @@ def test_get_query_and_args_for_reading_for_matching():
 
 def test_get_query_and_args_for_reading_for_order_by():
     class MyModel(PersistentModel):
-        order: FullTextSearchedStr
-        name: FullTextSearchedStr
+        order: FullTextSearchedString
+        name: FullTextSearchedString
 
     sql, _ = get_query_and_args_for_reading(MyModel, ('order',), {}, 0, order_by=('order desc', 'name'))
 
@@ -1019,9 +1042,9 @@ def test_get_query_and_args_for_reading_for_order_by():
 
 def test_get_query_and_args_for_reading_for_dated():
     class MyModel(PersistentModel, DatedMixin):
-        id: StrId
-        order: FullTextSearchedStr
-        name: FullTextSearchedStr
+        id: Annotated[UuidStr, MetaIdentifyingField()]
+        order: FullTextSearchedString
+        name: FullTextSearchedString
 
     sql, _ = get_query_and_args_for_reading(
         MyModel, ('name',), {'name': ('=', 'ab')}, 0, current=date.today())
@@ -1068,8 +1091,8 @@ def test_get_query_and_args_for_reading_for_dated():
 def test_build_query_for_core_table():
     class Model(PersistentModel):
         codes: StringArrayIndex
-        name: FullTextSearchedStr
-        description: FullTextSearchedStr
+        name: FullTextSearchedString
+        description: FullTextSearchedString
 
     query, fields = _build_query_and_fields_for_core_table('', Model, 
         ['description'], 
@@ -1098,8 +1121,8 @@ def test_build_query_for_core_table():
 def test_build_query_for_core_table_for_unwind():
     class Model(PersistentModel):
         codes: StringArrayIndex
-        name: FullTextSearchedStr
-        description: FullTextSearchedStr
+        name: FullTextSearchedString
+        description: FullTextSearchedString
 
     query, fields = _build_query_and_fields_for_core_table('ns', Model, 
         ['description'],
@@ -1130,8 +1153,8 @@ def test_build_query_for_core_table_for_unwind():
 def test_build_query_for_core_table_for_match():
     class Model(PersistentModel):
         codes: StringArrayIndex
-        name: FullTextSearchedStr
-        description: FullTextSearchedStr
+        name: FullTextSearchedString
+        description: FullTextSearchedString
     
     query, fields = _build_query_and_fields_for_core_table('ns', Model, 
         [],
@@ -1160,8 +1183,8 @@ def test_build_query_for_core_table_for_match():
 def test_build_query_for_core_table_for_multiple_match():
     class Model(PersistentModel):
         codes: StringArrayIndex
-        name: FullTextSearchedStr
-        description: FullTextSearchedStr
+        name: FullTextSearchedString
+        description: FullTextSearchedString
  
     query, fields = _build_query_and_fields_for_core_table('', Model, 
         [],
@@ -1196,21 +1219,24 @@ def test_build_join():
     class ReferencedByName(PersistentModel):
         name: StringIndex
 
-    class NameReference(StringReference[ReferencedByName]):
-        _target_field = 'name'
+    NameReference = Annotated[str, 
+                              MetaReferenceField(target_type=ReferencedByName, 
+                                                 target_field='name')]
 
     class ReferencedByCode(PersistentModel):
         code: StringIndex
         name: NameReference
 
-    class CodeReference(StringReference[ReferencedByCode]):
-        _target_field = 'code'
-
+    CodeReference = Annotated[str, 
+                              MetaReferenceField(
+                                  target_type=ReferencedByCode, target_field='code')]
     class ReferencedById(PersistentModel):
         id: IntIndex
 
-    class IdReference(StringReference[ReferencedById]):
-        _target_field = 'id'
+
+    IdReference = Annotated[str, 
+                            MetaReferenceField(
+                                target_type=ReferencedById, target_field='id')]
 
     class StartModel(PersistentModel):
         code: CodeReference
@@ -1241,21 +1267,23 @@ def test_find_join_keys():
     class ReferencedByName(PersistentModel):
         name_ref: StringIndex
 
-    class NameReference(StringReference[ReferencedByName]):
-        _target_field = 'name_ref'
-
+    NameReference = Annotated[str, 
+                              MetaReferenceField(target_type=ReferencedByName, 
+                                                 target_field='name_ref')]
     class ReferencedByCode(PersistentModel):
         code: StringIndex
         name: NameReference
 
-    class CodeReference(StringReference[ReferencedByCode]):
-        _target_field = 'code'
+    CodeReference = Annotated[str, 
+                              MetaReferenceField(
+                                  target_type=ReferencedByCode, target_field='code')]
 
     class ReferencedById(PersistentModel):
         id: IntIndex
 
-    class IdReference(StringReference[ReferencedById]):
-        _target_field = 'id'
+    IdReference = Annotated[str, 
+                            MetaReferenceField(
+                                target_type=ReferencedById, target_field='id')]
 
     class StartModel(PersistentModel):
         code: CodeReference
@@ -1286,7 +1314,7 @@ def test_find_join_keys():
 
 def test_get_query_and_args_for_purging():    
     class SimpleBaseModel(PersistentModel):
-        id: StrId
+        id: Annotated[UuidStr, MetaIdentifyingField()]
 
     sqls = get_query_and_args_for_purging(
         SimpleBaseModel, {'id':('=', '@')}, 0)
@@ -1309,7 +1337,7 @@ def test_get_query_and_args_for_purging():
 
 def test_get_query_and_args_for_deleting():    
     class SimpleBaseModel(PersistentModel):
-        id: StrId
+        id: Annotated[UuidStr, MetaIdentifyingField()]
 
     sqls = get_query_and_args_for_deleting(
         SimpleBaseModel, {'id': ('=', '@')}, 0)
@@ -1335,3 +1363,22 @@ def test_get_query_and_args_for_deleting():
     ) == sqls[0]
     assert {'id': '@', '__set_id':0} == sqls[1]
 
+
+def test_get_query_for_adjust_seq():
+    class CodedModel(PersistentModel):
+        code: SequenceStr
+        codes: List[SequenceStr]
+
+    sql = '\n'.join(get_query_for_adjust_seq(CodedModel))
+
+    assert join_line(
+        "SET @MAX_VALUE = (SELECT",
+        "    CAST(REPLACE(MAX(`code`), 'N', '') as INTEGER)",
+        "FROM md_CodedModel);",
+        "EXECUTE IMMEDIATE CONCAT('SELECT SETVAL(`sq_CodedModel_code`, ', @MAX_VALUE, ')')",
+        "SET @MAX_VALUE = (SELECT",
+        "    CAST(REPLACE(MAX(`codes`), 'N', '') as INTEGER)",
+        "FROM md_CodedModel);",
+        "EXECUTE IMMEDIATE CONCAT('SELECT SETVAL(`sq_CodedModel_codes`, ', @MAX_VALUE, ')')",
+    ) == sql
+ 

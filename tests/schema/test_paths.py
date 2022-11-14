@@ -2,9 +2,12 @@ from typing import cast, List, cast, Type
 
 import pytest
 
+from ormdantic.schema import (
+    IdentifiedModel
+)
+
 from ormdantic.schema.base import (
-    PersistentModel, StringIndex, 
-    update_forward_refs, IdentifiedModel, PartOfMixin
+    PersistentModel, StringIndex, update_forward_refs
 )
 from ormdantic.schema.shareds import (
     PersistentSharedContentModel, ContentReferenceModel

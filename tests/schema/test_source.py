@@ -1,14 +1,17 @@
-from codecs import unicode_escape_decode
 import pytest
+import pickle
 
-from typing import List, Type
+from typing import List, Type, Annotated
 
 from ormdantic.schema.base import (
-    FullTextSearchedStr, PersistentModel, 
-    StringArrayIndex, StringIndex, StrId
+    FullTextSearchedString, PersistentModel, 
+    StringArrayIndex, StringIndex, UuidStr, MetaIdentifyingField, 
+    MetaFullTextSearchedField, MetaIndexField
 )
 from ormdantic.schema.modelcache import ModelCache
-from ormdantic.schema.shareds import ContentReferenceModel, PersistentSharedContentModel
+from ormdantic.schema.shareds import (
+    ContentReferenceModel, PersistentSharedContentModel
+)
 
 from ormdantic.schema.source import (
     ChainedModelSource, ChainedSharedModelSource, SharedModelSource, ModelSource,
@@ -31,14 +34,14 @@ class NestedContentReferenceModel(ContentReferenceModel[MyNestedContent]):
     pass
 
 class MyComplexContent(PersistentModel):
-    code: StringIndex
+    code: Annotated[UuidStr, MetaIdentifyingField()]
     nested: NestedContentReferenceModel
     items: List[SharedContentReferenceModel]
 
 class MyProduct(PersistentModel):
-    code: StrId
-    name: FullTextSearchedStr
-    tags: StringArrayIndex
+    code: Annotated[UuidStr, MetaIdentifyingField()]
+    name: Annotated[str, MetaFullTextSearchedField()]
+    tags: Annotated[List[str], MetaIndexField()]
     nested: NestedContentReferenceModel
 
 first_shared = MySharedContent(name=StringIndex('first'))
@@ -55,11 +58,11 @@ nested_shared = MyNestedContent(description=StringIndex('nested'),
                          item=SharedContentReferenceModel(content=first_shared.id))
 nested_shared.refresh_id()
 
-found_1 = MyProduct(code=StrId('found-1'), name=FullTextSearchedStr('found product'), 
-                    tags=StringArrayIndex(['a', 'b']),
+found_1 = MyProduct(code=UuidStr('found-1'), name='found product', 
+                    tags=['a', 'b'],
                     nested=NestedContentReferenceModel(content=nested_shared.id))
-found_2 = MyProduct(code=StrId('found-2'), name=FullTextSearchedStr('found product'), 
-                    tags=StringArrayIndex(['b', 'c']),
+found_2 = MyProduct(code=UuidStr('found-2'), name='found product', 
+                    tags=['b', 'c'],
                     nested=NestedContentReferenceModel(content=''))
 
 def _find_records(type:Type, *id_values:str):
@@ -160,7 +163,7 @@ def test_shared_source_find_records_by_ids(shared_source : SharedModelSource):
 
 
 def test_shared_source_populate(shared_source: SharedModelSource):
-    complex_model = MyComplexContent(code=StringIndex('code1'), 
+    complex_model = MyComplexContent(code=UuidStr('code1'), 
         nested=NestedContentReferenceModel(content=nested_shared.id), 
         items=[
             SharedContentReferenceModel(content=found_1_shared.id),
@@ -252,7 +255,7 @@ def test_chained_shared_find_multiple(chained_shared_source:ChainedSharedModelSo
 
 
 def test_chained_shared_populate_share_model(chained_shared_source:ChainedSharedModelSource):
-    complex_model = MyComplexContent(code=StringIndex('code1'), 
+    complex_model = MyComplexContent(code=UuidStr('code1'), 
         nested=NestedContentReferenceModel(content=nested_shared.id), 
         items=[
             SharedContentReferenceModel(content=found_2_shared.id),
@@ -329,9 +332,31 @@ def test_test_id_values():
         extract_id_values(FieldEmpty, {'id':'hello'})
 
     class ClassWithId(PersistentModel):
-        id:StrId
+        id:Annotated[UuidStr, MetaIdentifyingField()]
 
     assert ('hello',) == extract_id_values(ClassWithId, {'id':'hello'})
     assert ('hello',) == extract_id_values(ClassWithId, {'id':('=', 'hello')})
 
     assert None is extract_id_values(ClassWithId, {'id':('!=', 'hello')})
+
+
+def test_reduce(chained_source: ModelSource):
+    source = MemoryModelStorage([first_shared, found_1])
+
+    data = pickle.loads(pickle.dumps(source))
+    assert type(data) == type(source)
+
+    assert found_1 == data.find(MyProduct, {'code':'found-1'})
+
+    data = pickle.loads(pickle.dumps(chained_source))
+    assert type(data) == type(chained_source)
+
+    assert found_1 == data.find(MyProduct, {'code':'found-1'})
+
+    chained_shared_source = ChainedSharedModelSource(
+        MemorySharedModelSource([]), MemorySharedModelSource([first_shared]))
+
+    data = pickle.loads(pickle.dumps(chained_shared_source))
+    assert type(data) == type(chained_shared_source)
+
+    assert first_shared == data.find(MySharedContent, first_shared.id)

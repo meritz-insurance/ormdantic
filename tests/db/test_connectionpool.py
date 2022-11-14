@@ -1,6 +1,8 @@
+from typing import cast
 import pytest
 from uuid import uuid4
 import logging
+import pickle
 
 from pymysql.cursors import DictCursor
 
@@ -198,4 +200,14 @@ def test_rollback_if_there_is_error():
             assert tuple() == cursor.fetchall()
         
         
-     
+def test_reduce():
+    with use_random_database_pool() as pool:
+        dumped = pickle.dumps(pool)
+
+        loaded = cast(DatabaseConnectionPool, pickle.loads(dumped))
+
+        assert pool._connection_config == loaded._connection_config
+
+
+        
+ 

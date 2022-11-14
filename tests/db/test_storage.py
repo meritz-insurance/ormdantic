@@ -1,29 +1,31 @@
 # for clearing testing database.
-# mariadb -h localhost -P 33069 -p -u root -N -B -e 'select CONCAT("drop database `", schema_name, "`;") as name from information_schema.schemata where schema_name like "TEST_%";'
 #
-from dataclasses import asdict
 from datetime import date
-from typing import  List, Tuple, cast, Type
+from typing import  List, Tuple, cast, Type, Any, Annotated
 import pytest
+import pymysql
 
-from ormdantic.database.storage import (
-    delete_objects, get_current_version, purge_objects, get_model_changes_of_version, get_version_info, query_records, 
-    squash_objects, upsert_objects, find_object, 
-    find_objects, build_where, load_object, delete_objects
-)
-
-from ormdantic.schema import PersistentModel
-from ormdantic.schema import verinfo
+from ormdantic.schema import PersistentModel, IdentifiedModel
 from ormdantic.schema.verinfo import VersionInfo
 from ormdantic.schema.base import (
     DatedMixin, FullTextSearchedStringIndex, PartOfMixin, PersistentModel, 
     StringArrayIndex, VersionMixin, get_identifer_of, update_forward_refs, 
-    IdentifiedModel, StrId, DateId,
-    StoredFieldDefinitions, SchemaBaseModel
+    UuidStr, SequenceStr, 
+    StoredFieldDefinitions, SchemaBaseModel, get_identifying_field_values,
+    UniqueStringIndex, MetaIdentifyingField
 )
 from ormdantic.schema.shareds import (
     PersistentSharedContentModel
 )
+
+from ormdantic.database.storage import (
+    delete_objects, get_current_version, purge_objects, get_model_changes_of_version, get_version_info, query_records, 
+    squash_objects, upsert_objects, find_object, 
+    find_objects, build_where, load_object, delete_objects,
+    update_sequences
+)
+
+from ormdantic.database.queries import get_query_for_next_seq
 
 from .tools import (
     use_temp_database_pool_with_model, 
@@ -56,30 +58,30 @@ update_forward_refs(ContainerModel, locals())
 update_forward_refs(PartModel, locals())
 
 
-model = ContainerModel(id=StrId('@'), 
+model = ContainerModel(id=UuidStr('@'), 
                         version='0.1.0',
-                        name=FullTextSearchedStringIndex('sample'),
+                        name='sample',
                         parts=[
                             PartModel(
-                                name=FullTextSearchedStringIndex('part1'), 
+                                name='part1', 
                                 parts=(
                                     SubPartModel(
-                                        name=FullTextSearchedStringIndex('part1-sub1'),
-                                        codes=StringArrayIndex(['part1-sub1-code1'])
+                                        name='part1-sub1',
+                                        codes=['part1-sub1-code1']
                                     ),
                                 ),
                                 codes = ['part1-code1', 'part1-code2']
                             ),
                             PartModel(
-                                name=FullTextSearchedStringIndex('part2'), 
+                                name='part2', 
                                 parts=(
                                     SubPartModel(
-                                        name=FullTextSearchedStringIndex('part2-sub1'),
-                                        codes=StringArrayIndex(['part2-sub1-code1', 'part2-sub1-code2'])
+                                        name='part2-sub1',
+                                        codes=['part2-sub1-code1', 'part2-sub1-code2']
                                     ),
                                     SubPartModel(
-                                        name=FullTextSearchedStringIndex('part2-sub2'),
-                                        codes=StringArrayIndex([])
+                                        name='part2-sub2',
+                                        codes=[]
                                     )
                                 ),
                                 codes = ['part2-code1', 'part2-code2']
@@ -90,7 +92,7 @@ model = ContainerModel(id=StrId('@'),
 @pytest.fixture(scope='module')
 def pool_and_model():
     with use_temp_database_pool_with_model(ContainerModel) as pool:
-        upserted = upsert_objects(pool, model, 0)
+        upserted = upsert_objects(pool, model, 0, False, VersionInfo())
 
         yield pool, upserted
 
@@ -99,7 +101,7 @@ def test_upsert_objects(pool_and_model):
     pool, upserted = pool_and_model
 
     # multiple same object does not affect the database.
-    upserted = upsert_objects(pool, upserted, 0)
+    upserted = upsert_objects(pool, upserted, 0, False, VersionInfo())
 
     where = build_where(get_identifer_of(upserted))
 
@@ -113,12 +115,64 @@ def test_upsert_objects_with_exception(pool_and_model):
     pool, _ = pool_and_model
 
     with pytest.raises(RuntimeError, match='PartOfMixin could not be saved directly.*'):
-        upsert_objects(pool, model.parts[0], 0)
+        upsert_objects(pool, model.parts[0], 0, False, VersionInfo())
 
+
+def test_upsert_objects_callback(monkeypatch, pool_and_model):
+    pool, upserted = pool_and_model
+    called = False
+
+    def saved(id:Tuple[Any,...], model:PersistentModel | BaseException):
+        nonlocal called
+        called = True
+
+        assert id == tuple(get_identifying_field_values(upserted).values())
+        assert model == upserted
+
+    upsert_objects(pool, upserted, 0, False, VersionInfo(), saved_callback=saved)
+
+    exception = RuntimeError()
+
+    class RaiseInSave(IdentifiedModel):
+        def _before_save(self):
+            raise exception
+
+    called = False
+
+    model = RaiseInSave(id=UuidStr('@'))
+
+    def saved_exception(id:Tuple[Any,...], model:PersistentModel | BaseException):
+        nonlocal called
+        called = True
+
+        assert id == tuple(get_identifying_field_values(upserted).values())
+        assert model == exception
+
+    with pytest.raises(RuntimeError):
+        upsert_objects(pool, model, 0, False, VersionInfo())
+    
+    upsert_objects(pool, model, 0, True, VersionInfo(), saved_exception)
+
+    assert called
+
+def test_upsert_objects_duplicate_key():
+    class MyModel(IdentifiedModel):
+        code: UniqueStringIndex 
+
+    models = [
+        MyModel(id=UuidStr('first'), code=UniqueStringIndex('c1')),
+        MyModel(id=UuidStr('second'), code=UniqueStringIndex('c1'))
+    ]
+
+    with use_temp_database_pool_with_model(MyModel) as pool:
+        with pytest.raises(pymysql.DatabaseError):
+            upserted = upsert_objects(pool, models, 0, False, VersionInfo())
+
+        upserted = upsert_objects(pool, models, 0, True, VersionInfo())
 
 def test_purge_objects():
     with use_temp_database_pool_with_model(ContainerModel) as pool:
-        upserted = upsert_objects(pool, model, 0)
+        upserted = upsert_objects(pool, model, 0, False, VersionInfo())
 
         found = find_objects(pool, PartModel, {}, 0)
         assert found 
@@ -155,7 +209,7 @@ def test_purge_objects():
 
 def test_delete_objects():
     with use_temp_database_pool_with_model(ContainerModel) as pool:
-        upserted = upsert_objects(pool, model, 0)
+        upserted = upsert_objects(pool, model, 0, False, VersionInfo())
 
         found = find_objects(pool, PartModel, {}, 0)
         assert found 
@@ -287,14 +341,14 @@ def test_query_records_raise(pool_and_model):
 
 def test_upsert_objects_makes_entry_in_audit_models():
     class VersionModel(PersistentModel, VersionMixin):
-        id:StrId
+        id: Annotated[UuidStr, MetaIdentifyingField()]
         message:str
 
     with use_temp_database_pool_with_model(VersionModel) as pool:
-        first = VersionModel(id=StrId('test'), message='first')
+        first = VersionModel(id=UuidStr('test'), message='first')
         audit_info = VersionInfo.create('who', 'why', 'where', 'tag')
 
-        upsert_objects(pool, first, 0, version_info=audit_info)
+        upsert_objects(pool, first, 0, False, audit_info)
 
         version_info = get_version_info(pool, None)
 
@@ -307,24 +361,24 @@ def test_upsert_objects_makes_entry_in_audit_models():
         model_changes = get_model_changes_of_version(pool, 1)
 
         assert [
-            {'version':1, 'op':'UPSERTED', 'table_name':'md_VersionModel', 
+            {'version':1, 'op':'INSERTED', 'table_name':'md_VersionModel', 
             '__row_id':1, '__set_id':0, 'model_id':'test,1'}
         ] == list(model_changes)
 
 
 def test_upsert_objects_for_versioning():
     class VersionModel(PersistentModel, VersionMixin):
-        id:StrId
+        id: Annotated[UuidStr, MetaIdentifyingField()]
         message:str
 
     with use_temp_database_pool_with_model(VersionModel) as pool:
-        first = VersionModel(id=StrId('test'), message='first')
-        second = VersionModel(id=StrId('test'), message='second')
-        third = VersionModel(id=StrId('test'), message='third')
+        first = VersionModel(id=UuidStr('test'), message='first')
+        second = VersionModel(id=UuidStr('test'), message='second')
+        third = VersionModel(id=UuidStr('test'), message='third')
 
-        upsert_objects(pool, first, 0)
-        upsert_objects(pool, second, 0)
-        upsert_objects(pool, third, 0)
+        upsert_objects(pool, first, 0, False, VersionInfo())
+        upsert_objects(pool, second, 0, False, VersionInfo())
+        upsert_objects(pool, third, 0, False, VersionInfo())
 
         assert first == load_object(pool, VersionModel, {'id': 'test'}, 0, version=1)
         assert second == load_object(pool, VersionModel, {'id': 'test'}, 0, version=2)
@@ -333,17 +387,17 @@ def test_upsert_objects_for_versioning():
 
 def test_upsert_objects_for_dated():
     class DatedModel(PersistentModel, DatedMixin, VersionMixin):
-        id:StrId
+        id: Annotated[UuidStr, MetaIdentifyingField()]
         message:str
 
     with use_temp_database_pool_with_model(DatedModel) as pool:
-        first = DatedModel(id=StrId('test'), applied_at=DateId(2011, 12, 1), message='first')
-        second = DatedModel(id=StrId('test'), applied_at=DateId(2012, 12, 1), message='second')
-        third = DatedModel(id=StrId('test'), applied_at=DateId(2013, 12, 1), message='third')
+        first = DatedModel(id=UuidStr('test'), applied_at=date(2011, 12, 1), message='first')
+        second = DatedModel(id=UuidStr('test'), applied_at=date(2012, 12, 1), message='second')
+        third = DatedModel(id=UuidStr('test'), applied_at=date(2013, 12, 1), message='third')
 
-        upsert_objects(pool, first, 0)
-        upsert_objects(pool, second, 0)
-        upsert_objects(pool, third, 0)
+        upsert_objects(pool, first, 0, False, VersionInfo())
+        upsert_objects(pool, second, 0, False, VersionInfo())
+        upsert_objects(pool, third, 0, False, VersionInfo())
 
         assert third == load_object(pool, DatedModel, {'id': 'test'}, 0,
                                     version=3, 
@@ -366,43 +420,43 @@ def test_upsert_objects_for_dated():
 
 def test_get_version():
     class SimpleModel(PersistentModel):
-        id:StrId
+        id: Annotated[UuidStr, MetaIdentifyingField()]
         message:str
 
     with use_temp_database_pool_with_model(SimpleModel) as pool:
-        first = SimpleModel(id=StrId('test'), message='first')
-        second = SimpleModel(id=StrId('test'), message='second')
-        third = SimpleModel(id=StrId('test'), message='third')
+        first = SimpleModel(id=UuidStr('test'), message='first')
+        second = SimpleModel(id=UuidStr('test'), message='second')
+        third = SimpleModel(id=UuidStr('test'), message='third')
 
-        upsert_objects(pool, first, 0)
+        upsert_objects(pool, first, 0, False, VersionInfo())
 
         assert 1 == get_version_info(pool).version
 
-        upsert_objects(pool, second, 0)
+        upsert_objects(pool, second, 0, False, VersionInfo())
 
         second_version = get_version_info(pool)
 
         assert second_version == get_version_info(pool, second_version.when)
 
-        upsert_objects(pool, third, 0)
+        upsert_objects(pool, third, 0, False, VersionInfo())
 
         assert 3 == get_version_info(pool).version
 
 
 def test_squash_objects():
     class VersionModel(PersistentModel, VersionMixin):
-        id:StrId
+        id: Annotated[UuidStr, MetaIdentifyingField()]
         message:str
 
     with use_temp_database_pool_with_model(VersionModel) as pool:
-        first = VersionModel(id=StrId('test'), message='first')
-        second = VersionModel(id=StrId('test'), message='second')
-        third = VersionModel(id=StrId('test'), message='third')
-        fourth = VersionModel(id=StrId('test'), message='fourth')
+        first = VersionModel(id=UuidStr('test'), message='first')
+        second = VersionModel(id=UuidStr('test'), message='second')
+        third = VersionModel(id=UuidStr('test'), message='third')
+        fourth = VersionModel(id=UuidStr('test'), message='fourth')
 
-        upsert_objects(pool, first, 0)
-        upsert_objects(pool, second, 0)
-        upsert_objects(pool, third, 0)
+        upsert_objects(pool, first, 0, False, VersionInfo())
+        upsert_objects(pool, second, 0, False, VersionInfo())
+        upsert_objects(pool, third, 0, False, VersionInfo())
 
         assert [{'id':'test'}] == squash_objects(pool, VersionModel, {'id':'test'}, 0)
 
@@ -412,7 +466,7 @@ def test_squash_objects():
         assert third == load_object(pool, VersionModel, {'id':'test'}, 0, version=4)
 
         assert [
-            {'__row_id': 1, 'op': 'UPSERTED', 'table_name': 'md_VersionModel', 
+            {'__row_id': 1, 'op': 'INSERTED', 'table_name': 'md_VersionModel', 
             'version': 1, '__set_id':0, 'model_id': 'test,1'}
         ] == list(get_model_changes_of_version(pool, 1))
 
@@ -423,7 +477,7 @@ def test_squash_objects():
             'version': 4, '__set_id':0, 'model_id': 'test,2,3'}
         ] == list(get_model_changes_of_version(pool, 4))
 
-        upsert_objects(pool, fourth, 0)
+        upsert_objects(pool, fourth, 0, False, VersionInfo())
 
         assert fourth == load_object(pool, VersionModel, {'id':'test'}, 0, 
                                      version=get_current_version(pool))
@@ -437,14 +491,29 @@ def test_squash_objects():
 
 def test_squash_objects_raises():
     class NonVersionModel(PersistentModel):
-        id:StrId
+        id: Annotated[UuidStr, MetaIdentifyingField()]
         message:str
 
     with pytest.raises(RuntimeError, match='to squash is not supported for non version type.'):
         with use_temp_database_pool_with_model(NonVersionModel) as pool:
-            first = NonVersionModel(id=StrId('test'), message='first')
-            upsert_objects(pool, first, 0)
+            first = NonVersionModel(id=UuidStr('test'), message='first')
+            upsert_objects(pool, first, 0, False, VersionInfo())
 
             squash_objects(pool, NonVersionModel, {'id': 'test'}, 0)
 
  
+def test_update_sequences():
+    class CodedModel(PersistentModel):
+        code:Annotated[SequenceStr, MetaIdentifyingField()]
+
+    with use_temp_database_pool_with_model(CodedModel) as pool:
+        first = CodedModel(code=SequenceStr('N33'))
+        upsert_objects(pool, first, 0, False, VersionInfo())
+        update_sequences(pool, [CodedModel])
+
+        second = CodedModel(code=SequenceStr(''))
+        second = upsert_objects(pool, second, 0, False, VersionInfo())
+
+        assert 'N34' == second.code
+            
+

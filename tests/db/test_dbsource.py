@@ -1,10 +1,10 @@
-from ast import Store
 from tabnanny import verbose
-from typing import  List
+from typing import  List, Annotated
 import pytest
 from pydantic import Field
 from datetime import date
 from uuid import uuid4
+import pickle
 
 from ormdantic.database.storage import (
     upsert_objects, 
@@ -16,10 +16,10 @@ from ormdantic.database.dbsource import (
 
 from ormdantic.schema import (
     PersistentModel, FullTextSearchedStringIndex, PartOfMixin, StringArrayIndex, 
-    update_forward_refs, IdentifiedModel, StrId
+    update_forward_refs, IdentifiedModel, UuidStr
 )
 from ormdantic.schema.paths import get_paths_for
-from ormdantic.schema.base import ( StringIndex, VersionMixin,)
+from ormdantic.schema.base import ( StringIndex, VersionMixin, MetaIdentifyingField)
 from ormdantic.schema.shareds import (
     ContentReferenceModel, PersistentSharedContentModel,
     extract_shared_models
@@ -37,7 +37,7 @@ class SharedNameModel(PersistentSharedContentModel):
 
 
 class ProductModel(PersistentModel, VersionMixin):
-    code: StrId
+    code: Annotated[UuidStr, MetaIdentifyingField()]
     description: StringIndex 
 
 
@@ -99,40 +99,40 @@ class ReferenceWithPartsModel(IdentifiedModel):
 container_content= ContainerModel(
     name=StringIndex('container'),
     parts=[
-        PartModel(id=StrId(uuid4().hex), name=StringIndex('part_1')),
-        PartModel(id=StrId(uuid4().hex), name=StringIndex('part_2')),
+        PartModel(id=UuidStr(uuid4().hex), name=StringIndex('part_1')),
+        PartModel(id=UuidStr(uuid4().hex), name=StringIndex('part_2')),
     ]
 )
 
 models = [
     SimpleContentModel(
-        id=StrId('first'),
+        id=UuidStr('first'),
         contents=[
             NameSharedReferenceModel(content=
                 SharedNameModel(name=FullTextSearchedStringIndex('name_1'), 
-                                codes=StringArrayIndex(['code_1', 'code_2']))
+                                codes=['code_1', 'code_2'])
             ),
             NameSharedReferenceModel(content=
                 SharedNameModel(name=FullTextSearchedStringIndex('name_2'), 
-                            codes=StringArrayIndex(['code_3', 'code_4']))
+                            codes=['code_3', 'code_4'])
             )
         ]
     ),
     SimpleContentModel(
-        id=StrId('second'),
+        id=UuidStr('second'),
         contents=[
             NameSharedReferenceModel(content=
                 SharedNameModel(name=FullTextSearchedStringIndex('name_1'), 
-                                codes=StringArrayIndex(['code_1', 'code_2']))
+                                codes=['code_1', 'code_2'])
             ),
             NameSharedReferenceModel(content=
                 SharedNameModel(name=FullTextSearchedStringIndex('name_2'), 
-                            codes=StringArrayIndex(['code_3', 'code_4']))
+                            codes=['code_3', 'code_4'])
             )
         ]
     ),
     NestedContentModel(
-        id=StrId('nested'),
+        id=UuidStr('nested'),
         nested = NestedSharedReferenceModel(
             content=NestedSharedModel(
                 description_model= DescriptionSharedReferenceModel(
@@ -144,16 +144,16 @@ models = [
         )
     ),
     DescriptionWithExternalModel(
-        id=StrId('external'),
+        id=UuidStr('external'),
         ref_model = CodedDescriptionReferenceModel(
             content = CodedDescriptionModel(
                 description='coded reference description',
-                codes=StringArrayIndex(['code_a', 'code_b'])
+                codes=['code_a', 'code_b']
             )
         )
     ),
     ReferenceWithPartsModel(
-        id=StrId('part'),
+        id=UuidStr('part'),
         ref_model= ContainerContentReferenceModel(
             content=container_content
         )
@@ -165,9 +165,9 @@ def storage():
     with use_temp_database_pool_with_model(
         SimpleContentModel, NestedContentModel, 
         DescriptionWithExternalModel, ReferenceWithPartsModel, ProductModel) as pool:
-        upsert_objects(pool, models, 0)
+        upsert_objects(pool, models, 0, False, VersionInfo())
 
-        yield create_database_source(0, date.today(), 0, None)
+        yield create_database_source(pool, 0, date.today(), 0)
 
 
 @pytest.fixture(scope='module')
@@ -175,13 +175,13 @@ def chained_source():
     with use_temp_database_pool_with_model(
         SimpleContentModel, NestedContentModel, 
         DescriptionWithExternalModel, ReferenceWithPartsModel, ProductModel) as pool:
-        upsert_objects(pool, models, 0)
+        upsert_objects(pool, models, 0, False, VersionInfo())
 
-        storage_0 = create_database_source(0, date.today(), 0, None)
-        storage_1 = create_database_source(1, date.today(), 0, None)
+        storage_0 = create_database_source(pool, 0, date.today(), None)
+        storage_1 = create_database_source(pool, 1, date.today(), None)
 
-        storage_0.store(ProductModel(code=StrId('0'), description=StringIndex('first')), VersionInfo())
-        storage_1.store(ProductModel(code=StrId('1'), description=StringIndex('second')), VersionInfo())
+        storage_0.store(ProductModel(code=UuidStr('0'), description=StringIndex('first')), VersionInfo())
+        storage_1.store(ProductModel(code=UuidStr('1'), description=StringIndex('second')), VersionInfo())
 
         source = ChainedModelSource(storage_1, storage_0)
         source.update_version()
@@ -225,7 +225,7 @@ def test_load_with_nested_shared(storage:ModelDatabaseStorage):
     assert not isinstance(nested_model.nested.content.description_model.content, str)
 
     created = NestedContentModel(
-        id=StrId('created'),
+        id=UuidStr('created'),
         nested = NestedSharedReferenceModel(
             content=nested_model.nested.content.id
         )
@@ -277,7 +277,7 @@ def test_clone_with(storage:ModelDatabaseStorage):
 
 def test_store_delete_purge(storage:ModelDatabaseStorage):
     to_be_stored = NestedContentModel(
-        id=StrId('to_be_stored'),
+        id=UuidStr('to_be_stored'),
         nested = NestedSharedReferenceModel(
             content=NestedSharedModel(
                 description_model= DescriptionSharedReferenceModel(
@@ -321,7 +321,7 @@ def test_store_delete_purge(storage:ModelDatabaseStorage):
 
 
 def test_squash(storage:ModelDatabaseStorage):
-    product = ProductModel(code=StrId('squashed'), description=StringIndex('first'))
+    product = ProductModel(code=UuidStr('squashed'), description=StringIndex('first'))
     storage.store(product, VersionInfo())
     first_version = storage.get_latest_version()
 
@@ -392,3 +392,9 @@ def test_delete_objects_with_shared(storage:ModelDatabaseStorage):
     with pytest.raises(RuntimeError, match='PersistentSharedContentModel could not be deleted. you tried to deleted ContainerModel'):
         storage.purge(ContainerModel, {'id':'f0c9920d60433b61c6aa3536e0c91697fb6d6af5'}, 
                       version_info=VersionInfo())
+
+
+def test_reduce(storage:ModelDatabaseStorage):
+    loaded = pickle.loads(pickle.dumps(storage))
+
+    assert loaded._pool._connection_config == storage._pool._connection_config
