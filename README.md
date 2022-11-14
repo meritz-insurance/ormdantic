@@ -56,6 +56,8 @@ apple_company.members[1].birth = date(1950, 8, 11)
 
 storage.store(apple_company, od.VersionInfo())
 
+storage = storage.clone_with()
+
 companies_in_california = storage.find(
     Company, {'address': ('match', '+California')})
 
