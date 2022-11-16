@@ -96,10 +96,12 @@ class SharedModelSource:
 
 class ModelSource:
     def __init__(self, 
-                 shared_source: SharedModelSource, ref_date: date,
+                 shared_source: SharedModelSource, set_id:int,
+                 ref_date: date,
                  version: int | None, name: str = '', *, 
                  cache: ModelCache | None = None):
         self._shared_source = shared_source
+        self._set_id = set_id
         self._ref_date = ref_date
         self._version = version or self.get_latest_version()
         self._name = name
@@ -190,10 +192,15 @@ class ModelSource:
             if found:
                 yield found
 
-    def clone_with(self:_SourceT, ref_date:date | None = None, 
+    def clone_with(self:_SourceT, set_id:int | None = None, 
+                   ref_date: date | None = None,
                    version: int | None = None) -> _SourceT:
         copied = copy.copy(self)
         changed = False
+
+        if set_id is not None and copied._set_id != set_id:
+            copied._set_id = set_id
+            changed = True
 
         if ref_date and copied._ref_date != ref_date:
             copied._ref_date = ref_date
@@ -404,11 +411,11 @@ class ChainedModelSource(ModelSource):
                     yield found
                     break
 
-    def clone_with(self, ref_date:date | None = None, version: int | None = None):
+    def clone_with(self, set_id:int|None = None, ref_date:date | None = None, version: int | None = None):
         if version is None:
             version = self.get_latest_version()
 
-        return ChainedModelSource(*tuple(s.clone_with(ref_date, version) for s in self._sources))
+        return ChainedModelSource(*tuple(s.clone_with(set_id, ref_date, version) for s in self._sources))
 
 
 class MemorySharedModelSource(SharedModelSource):
@@ -437,7 +444,9 @@ class MemorySharedModelSource(SharedModelSource):
 
 
 class MemoryModelStorage(ModelStorage):
-    def __init__(self, models:Iterable[PersistentModel], shared_source:SharedModelSource | None = None, name:str=''):
+    def __init__(self, models:Iterable[PersistentModel], shared_source:SharedModelSource | None = None, 
+                 set_id:int = 0,
+                 name:str=''):
         model_sets = [[], []]
 
         for model in models:
@@ -445,7 +454,7 @@ class MemoryModelStorage(ModelStorage):
 
         shared_source = shared_source or MemorySharedModelSource(model_sets[1])
 
-        super().__init__(shared_source, date.today(), 0, name=name)
+        super().__init__(shared_source, set_id, date.today(), 0, name=name)
 
         for model in model_sets[0]:
             self._cache.register(type(model), model)
