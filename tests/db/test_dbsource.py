@@ -271,6 +271,7 @@ def test_clone_with(storage:ModelDatabaseStorage):
     old_cache = storage._cache
 
     assert old_cache == storage.clone_with()._cache
+    assert old_cache != storage.clone_with(set_id=4)
     assert old_cache != storage.clone_with(version=2)
     assert old_cache != storage.clone_with(ref_date=date(2000,1,1))
 

@@ -47,9 +47,7 @@ class ModelDatabaseStorage(ModelStorage):
                  cache: ModelCache | None = None):
         
         self._pool = pool
-        self._set_id = set_id
-
-        super().__init__(shared_source, ref_date, version, 'main', cache=cache)
+        super().__init__(shared_source, set_id, ref_date, version, 'main', cache=cache)
 
     def __reduce__(self) -> str | tuple[Any, ...]:
         return (ModelDatabaseStorage, (self._pool, self._shared_source, 
