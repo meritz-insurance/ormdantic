@@ -46,7 +46,8 @@ from .queries import (
     get_sql_for_upserting_parts,
     get_query_and_args_for_purging,
     get_query_for_adjust_seq,
-    _ROW_ID_FIELD, _JSON_FIELD, _AUDIT_VERSION_FIELD, _AUDIT_MODEL_ID_FIELD
+    _ROW_ID_FIELD, _JSON_FIELD, _AUDIT_VERSION_FIELD, _AUDIT_MODEL_ID_FIELD,
+    _VALID_START_FIELD
 )
 
 
@@ -409,6 +410,8 @@ def find_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where
                 version:int = 0,
                 ref_date:date | None = None) ->Optional[PersistentModelT]:
     objs = list(query_records(pool, type_, where, set_id, 2, 
+                              fields=(_JSON_FIELD, _ROW_ID_FIELD,
+                                      _VALID_START_FIELD),
                               unwind=unwind, version=version, 
                               ref_date=ref_date))
 
@@ -417,7 +420,7 @@ def find_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where
         raise RuntimeError(f'More than one object is found of {type_} condition {where}')
 
     if len(objs) == 1: 
-        return cast(PersistentModelT, _convert_model(type_, objs[0]))
+        return cast(PersistentModelT, _convert_model(type_, objs[0], set_id))
 
     return None
 
@@ -430,17 +433,21 @@ def find_objects(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], wher
                 ref_date:date | None = None,
                 ) -> Iterator[PersistentModelT]:
     for record in query_records(pool, type_, where, set_id, fetch_size, 
-                                fields=(_JSON_FIELD, _ROW_ID_FIELD),
+                                fields=(_JSON_FIELD, _ROW_ID_FIELD,
+                                        _VALID_START_FIELD),
                                 unwind=unwind, version=version, ref_date=ref_date, 
                                 ):
-        model = _convert_model(type_, record)
+        model = _convert_model(type_, record, set_id)
 
         yield cast(PersistentModelT, model)
 
 
-def _convert_model(type_:Type[PersistentModelT], record:Dict[str, Any]) -> PersistentModelT:
+def _convert_model(type_: Type[PersistentModelT], record: Dict[str, Any], set_id) -> PersistentModelT:
     model = type_.parse_raw(record[_JSON_FIELD].encode())
+    model._set_id = set_id
+
     model._row_id = record[_ROW_ID_FIELD]
+    model._valid_start = record[_VALID_START_FIELD]
 
     model._after_load()
 

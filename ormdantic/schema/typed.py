@@ -1,12 +1,12 @@
 from types import UnionType
-from typing import Type, Any, Dict, get_origin, Union, get_args, TypeVar
+from typing import Type, Any, Dict, get_origin, Union, get_args, TypeVar, Annotated
 import copy 
 import inspect
 
 from pydantic import parse_obj_as
 from pydantic.fields import Field 
 from .base import (
-    PersistentModel, register_class_postprocessor, SchemaBaseModel, IdentifiedMixin
+    PersistentModel, register_class_postprocessor, SchemaBaseModel, UuidStr, MetaIdentifyingField
 )
 from ormdantic.util.hints import get_args_of_list_or_tuple, is_derived_from
 from ..util import get_base_generic_alias_of, get_logger
@@ -23,8 +23,10 @@ class TypeNamedModel(PersistentModel):
     type_name: str = Field(default='TypeNamedModel')
 
 
-class IdentifiedModel(PersistentModel, IdentifiedMixin):
+class IdentifiedModel(PersistentModel):
     ''' identified by uuid '''
+    id: Annotated[UuidStr, MetaIdentifyingField()] = Field(
+        default=UuidStr(''), title='identifier for retreiving')
     version:str = Field(default='0.1.0')
 
     class Config:

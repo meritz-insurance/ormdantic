@@ -18,7 +18,7 @@ from ..util import (
 )
 
 from .base import (
-    IdentifiedMixin, UuidStr, PersistentModel,  PersistentModelT, 
+    UuidStr, PersistentModel,  PersistentModelT, 
     register_class_preprocessor, orjson_dumps, SchemaBaseModel,
     MetaIdentifyingField
 )
@@ -27,7 +27,10 @@ from .paths import (extract_as, get_path_and_types_for, get_paths_for)
 
 _logger = get_logger(__name__)
 
-class SharedContentMixin(IdentifiedMixin):
+class SharedContentMixin(SchemaBaseModel):
+    id: Annotated[UuidStr, MetaIdentifyingField()] = Field(
+        default=UuidStr(''), title='identifier for retreiving')
+
     _id_attr : ClassVar[str] = ''
 
     def __init__(self, *args, **kwds):

@@ -17,7 +17,7 @@ from ormdantic.util.hints import get_args_of_base_generic_alias
 from ..util import get_logger, has_metadata, get_metadata_for
 from ..schema.base import (
     DatedMixin, PersistentModelT, MetaReferenceField, 
-    MetaFullTextSearchedField, AutoAllocatedMixin, MetaIndexField, SequenceStr, 
+    MetaFullTextSearchedField, MetaIndexField, SequenceStr, 
     StoredFieldDefinitions, PersistentModelT, PartOfMixin, 
     UseBaseClassTableMixin, VersionMixin, 
     MetaUniqueIndexField, get_container_type, get_root_container_type,

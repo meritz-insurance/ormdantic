@@ -84,7 +84,8 @@ class SchemaBaseModel(BaseModel, metaclass=SchemaBaseMetaclass):
 class PersistentModel(SchemaBaseModel):
     _stored_fields: ClassVar[StoredFieldDefinitions] = {
     }
-    _scope_id : int = PrivateAttr(0)
+    _valid_start : int = PrivateAttr(0)
+    _set_id : int = PrivateAttr(0)
     _row_id : int = PrivateAttr(0)
 
     def _after_load(self):
@@ -209,11 +210,6 @@ class SequenceStr(ConstrainedStr, AutoAllocatedMixin):
             return SequenceStr(self.prefix + str(next_seq()))
 
         return self
-
-
-class IdentifiedMixin(SchemaBaseModel):
-    id: Annotated[UuidStr, MetaIdentifyingField()] = Field(
-        default=UuidStr(''), title='identifier for retreiving')
 
 
 class VersionMixin(SchemaBaseModel):

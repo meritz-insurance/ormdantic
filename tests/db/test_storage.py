@@ -384,6 +384,11 @@ def test_upsert_objects_for_versioning():
         assert second == load_object(pool, VersionModel, {'id': 'test'}, 0, version=2)
         assert third == load_object(pool, VersionModel, {'id': 'test'}, 0, version=3)
 
+        assert 1 == load_object(pool, VersionModel, {'id': 'test'}, 0, version=1)._valid_start 
+        assert 2 == load_object(pool, VersionModel, {'id': 'test'}, 0, version=2)._row_id 
+        assert 2 == load_object(pool, VersionModel, {'id': 'test'}, 0, version=2)._valid_start 
+        assert 3 == load_object(pool, VersionModel, {'id': 'test'}, 0, version=3)._valid_start 
+        assert 3 == load_object(pool, VersionModel, {'id': 'test'}, 0, version=3)._row_id 
 
 def test_upsert_objects_for_dated():
     class DatedModel(PersistentModel, DatedMixin, VersionMixin):
