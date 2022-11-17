@@ -13,9 +13,12 @@ from ormdantic.database.queries import (
 from ormdantic.schema.base import (
     PersistentModel, SequenceStr, StringArrayIndex, FullTextSearchedStringIndex, 
     PartOfMixin,
-    StringIndex, UseBaseClassTableMixin, 
+    StringIndex, 
     update_forward_refs, UuidStr, 
     StoredFieldDefinitions, MetaReferenceField, MetaIndexField
+)
+from ormdantic.schema.typed import (
+    BaseClassTableModel
 )
 from ormdantic.schema.verinfo import VersionInfo
 
@@ -765,10 +768,10 @@ def test_seq_id():
         
 
 def test_use_base_class_table_mixin():
-    class BaseModel(PersistentModel):
+    class BaseModel(BaseClassTableModel):
         name: StringIndex
 
-    class DerivedModel(BaseModel, UseBaseClassTableMixin):
+    class DerivedModel(BaseModel):
         description: StringIndex
 
     models = [
@@ -785,9 +788,9 @@ def test_use_base_class_table_mixin():
         cursor.execute(*query_and_args)
 
         assert [
-            {'name': 'first', '__json':'{"name":"first","description":"hello"}'},
-            {'name': 'second', '__json':'{"name":"second"}'}
+            {'name': 'first', '__json':'{"type_name":"DerivedModel","name":"first","description":"hello"}'},
+            {'name': 'second', '__json':'{"type_name":"BaseModel","name":"second"}'}
         ] == cursor.fetchall()
 
-        with pytest.raises(RuntimeError, match='cannot make query for UseBaseClassTableMixin'):
+        with pytest.raises(RuntimeError, match='cannot make query for BaseClassTableMixin'):
             get_query_and_args_for_reading(DerivedModel, ('*',), {}, 0)

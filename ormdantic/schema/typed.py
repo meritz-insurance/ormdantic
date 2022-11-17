@@ -18,7 +18,7 @@ _logger = get_logger(__name__)
 _all_type_named_models : Dict[str, Type] = {}
 
 
-class TypeNamedModel(PersistentModel):
+class TypeNamedModel(SchemaBaseModel):
     # this field will be update by Metaclass. so, 
     type_name: str = Field(default='TypeNamedModel')
 
@@ -31,6 +31,12 @@ class IdentifiedModel(PersistentModel):
 
     class Config:
         title = 'base object which can be saved or retreived by id'
+
+class BaseClassTableModel(TypeNamedModel, PersistentModel):
+    '''use table of base class. if base class table mixin, 
+    type_name should be existed for saving type info.'''
+    pass
+
 
 
 IdentifiedModelT = TypeVar('IdentifiedModelT', bound=IdentifiedModel)
@@ -129,4 +135,13 @@ def _parse_obj(obj:Any, target_type:Type) -> Any:
                     obj[field_name] = _parse_obj(obj[field_name], model_field.outer_type_)
 
         return parse_obj_as(target_type, obj)
+
+
+def get_type_for_table(type_:Type) -> Type:
+    if is_derived_from(type_, BaseClassTableModel):
+        for base in inspect.getmro(type_):
+            if BaseClassTableModel in base.__bases__:
+                return base
+
+    return type_
 

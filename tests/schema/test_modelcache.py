@@ -2,7 +2,7 @@ from typing import List, Tuple, Union
 
 import pytest
 from ormdantic import TypeNamedModel
-from ormdantic.schema.base import UseBaseClassTableMixin
+from ormdantic.schema.typed import BaseClassTableModel
 from ormdantic.schema.modelcache import ModelCache
 from ormdantic.schema.shareds import PersistentSharedContentModel
 
@@ -10,10 +10,10 @@ class MyCachedBaseModel(TypeNamedModel, PersistentSharedContentModel):
     name: str
 
 
-class MyCachedDerivedModel(MyCachedBaseModel):
+class MyCachedDerivedModel(MyCachedBaseModel, BaseClassTableModel):
     pass
 
-class MyTableDerivedModel(MyCachedBaseModel, UseBaseClassTableMixin):
+class MyTableDerivedModel(MyCachedDerivedModel):
     pass
 
 

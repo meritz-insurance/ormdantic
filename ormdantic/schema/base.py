@@ -1,6 +1,6 @@
 from typing import (
     Any, ForwardRef, Tuple, Dict, Type, Generic, TypeVar, Iterator, Callable, 
-    List, ClassVar, cast, Annotated
+    List, ClassVar, cast, Annotated, get_origin
 )
 import datetime
 import inspect
@@ -163,6 +163,7 @@ class PartOfMixin(Generic[ModelT]):
 class UseBaseClassTableMixin():
     '''use table of base class.'''
     pass
+
 
 
 StringIndex = Annotated[str, MetaIndexField()]
@@ -355,19 +356,6 @@ def allocate_fields_if_empty(model:ModelT, inplace:bool=False,
             setattr(to_be_updated, field_name, updated_value)
 
     return to_be_updated or model
-
-
-def get_type_for_table(type_:Type) -> Type:
-    if is_derived_from(type_, UseBaseClassTableMixin):
-        for base in inspect.getmro(type_):
-            if (is_derived_from(base, PersistentModel) 
-                    and not is_derived_from(base, UseBaseClassTableMixin)):
-                return base
-
-        raise RuntimeError('cannot get base class for database table.')
-
-    return type_
-
 
 
 def _allocate_scalar_value_if_empty_value(field_name:str, obj:Any, inplace:bool, 

@@ -19,13 +19,14 @@ from ..schema.base import (
     DatedMixin, PersistentModelT, MetaReferenceField, 
     MetaFullTextSearchedField, MetaIndexField, SequenceStr, 
     StoredFieldDefinitions, PersistentModelT, PartOfMixin, 
-    UseBaseClassTableMixin, VersionMixin, 
+    VersionMixin, 
     MetaUniqueIndexField, get_container_type, get_root_container_type,
     get_field_names_for, get_part_types, is_field_list_or_tuple_of,
     PersistentModel, is_list_or_tuple_of, get_stored_fields,
-    get_stored_fields_for, get_type_for_table, get_identifying_field_values,
+    get_stored_fields_for, get_identifying_field_values,
     get_identifying_fields, MetaStoredField, MetaIdentifyingField
 )
+from ..schema.typed import get_type_for_table
 from ..schema.shareds import PersistentSharedContentModel
 from ..schema.verinfo import VersionInfo
 from ..schema.source import NormalizedQueryConditionType
@@ -261,8 +262,8 @@ def _get_sql_for_allocating_version():
 def get_sql_for_creating_table(type_:Type[PersistentModelT]):
     stored = get_stored_fields(type_)
 
-    if issubclass(type_, UseBaseClassTableMixin):
-        # skip create table for UseBaseClassTableMixin.
+    if get_type_for_table(type_) != type_:
+        # skip create table for BaseClassTableMixin.
         return
 
     if issubclass(type_, PartOfMixin):
@@ -1304,9 +1305,9 @@ def get_query_and_args_for_reading(type_:Type[PersistentModelT],
         *join : will indicate the some model joined.
     '''
 
-    if is_derived_from(type_, UseBaseClassTableMixin):
-        _logger.fatal(f'cannot make query for UseBaseClassTableMixin {type_=}. use base class which is not UseBaseClassTableMixin')
-        raise RuntimeError('cannot make query for UseBaseClassTableMixin.')
+    if get_type_for_table(type_) != type_:
+        _logger.fatal(f'cannot make query for BaseClassTableMixin {type_=}. use base class which is marked with BaseClassTableMixin')
+        raise RuntimeError('cannot make query for BaseClassTableMixin.')
 
     fields = convert_tuple(fields)
 

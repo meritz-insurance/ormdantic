@@ -9,14 +9,15 @@ from ormdantic.schema import (
 )
 from ormdantic.schema.base import (
     is_derived_from,
-    AutoAllocatedMixin, PersistentModel, PartOfMixin, UseBaseClassTableMixin, 
+    AutoAllocatedMixin, PersistentModel, PartOfMixin, 
     allocate_fields_if_empty, get_container_type, 
     get_field_name_and_type, get_identifer_of, get_field_names_for, UuidStr,
-    get_type_for_table, is_field_list_or_tuple_of, get_field_type,
+    is_field_list_or_tuple_of, get_field_type,
     get_root_container_type, get_field_name_and_type_for_annotated,
     MetaStoredField, MetaIndexField, MetaIdentifyingField,
     get_stored_fields_for
 )
+from ormdantic.schema.typed import (BaseClassTableModel, get_type_for_table)
 
 def test_identified_model():
     model = IdentifiedModel(id=UuidStr(uuid.UUID(int=0).hex), version='0.0.0')
@@ -207,17 +208,15 @@ def test_allocate_fields_if_empty_for_vector():
 
 
 def test_get_type_for_table():
-    class TableModel(PersistentModel):
+    class TableModel(BaseClassTableModel):
         pass
 
-    class DerivedModel(TableModel, UseBaseClassTableMixin):
+    class DerivedTableModel(TableModel):
         pass
 
-    class WrongModel(UseBaseClassTableMixin):
-        pass
+
 
     assert TableModel == get_type_for_table(TableModel)
-    assert TableModel == get_type_for_table(DerivedModel)
+    assert TableModel == get_type_for_table(DerivedTableModel)
 
-    with pytest.raises(RuntimeError):
-        get_type_for_table(WrongModel)
+    assert PersistentModel == get_type_for_table(PersistentModel)
