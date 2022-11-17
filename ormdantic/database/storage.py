@@ -12,7 +12,7 @@ from ormdantic.util.tools import convert_list
 
 from .connections import DatabaseConnectionPool
 
-from ..util import get_logger, is_derived_from
+from ..util import get_logger, is_derived_from, L
 from ..schema import ModelT, PersistentModel, get_container_type
 from ..schema.base import (
     PartOfMixin, PersistentModel, allocate_fields_if_empty, 
@@ -156,7 +156,7 @@ def upsert_objects(pool:DatabaseConnectionPool,
         for model in targets:
             if isinstance(model, PartOfMixin):
                 _logger.fatal(f'{type(model)} can not be stored directly. it is part of mixin')
-                raise RuntimeError(f'PartOfMixin could not be saved directly.')
+                raise RuntimeError(L('PartOfMixin could not be saved directly. check {0}', type(model).__name__))
 
             # we will remove content of the given model. so, we copy it and remove them.
             # for not updating original model.
@@ -282,7 +282,7 @@ def delete_objects(pool: DatabaseConnectionPool,
             f"try to delete {type_=}. it is impossible. type should be dervied "
             f"from PersistentModel. {type_.mro()=}"
         )
-        raise RuntimeError(f'{type_} could not be deleted. it should be derived from PersistentModel')
+        raise RuntimeError(L('could not be deleted. it should be derived from PersistentModel. check {0}', type_.__name__))
 
     if issubclass(type_, PersistentSharedContentModel):
         _logger.fatal(
@@ -290,7 +290,7 @@ def delete_objects(pool: DatabaseConnectionPool,
             "we don't know whether share context mixin can be referenced by "
             "other entity or not"
         )
-        raise RuntimeError(f'PersistentSharedContentModel could not be deleted. you tried to deleted {type_.__name__}')
+        raise RuntimeError(L('PersistentSharedContentModel could not be deleted. you tried to deleted {0}', type_.__name__))
 
     deleted = []
 
@@ -320,7 +320,7 @@ def purge_objects(pool: DatabaseConnectionPool,
             f"try to delete {type_=}. it is impossible. type should be dervied "
             f"from PersistentModel. {type_.mro()=}"
         )
-        raise RuntimeError(f'{type_} could not be deleted. it should be derived from PersistentModel')
+        raise RuntimeError(L('{0} could not be deleted. it should be derived from PersistentModel', type_.__name__))
 
     if issubclass(type_, PersistentSharedContentModel):
         _logger.fatal(
@@ -328,7 +328,7 @@ def purge_objects(pool: DatabaseConnectionPool,
             "we don't know whether share context mixin can be referenced by "
             "other entity or not"
         )
-        raise RuntimeError(f'PersistentSharedContentModel could not be deleted. you tried to deleted {type_.__name__}')
+        raise RuntimeError(L('PersistentSharedContentModel could not be deleted. you tried to deleted {0}', type_.__name__))
 
     deleted = []
 
@@ -398,7 +398,7 @@ def load_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where
 
     if not found:
         _logger.fatal(f'cannot found {type_=} object for {where=} in {pool=}')
-        raise RuntimeError('cannot found matched item from database.')
+        raise RuntimeError(L('no such item from database.'))
 
     return found
         
@@ -417,7 +417,7 @@ def find_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where
 
     if len(objs) >= 2:
         _logger.fatal(f'More than one object found. {type_=} {where=} in {pool=}. {[obj[_ROW_ID_FIELD] for obj in objs]}')
-        raise RuntimeError(f'More than one object is found of {type_} condition {where}')
+        raise RuntimeError(L('more than one object is found of {0} condition {1}', type_.__name__, where))
 
     if len(objs) == 1: 
         return cast(PersistentModelT, _convert_model(type_, objs[0], set_id))
@@ -487,7 +487,7 @@ def query_records(pool: DatabaseConnectionPool,
 
     if not fields:
         _logger.fatal('empty fields for query_records. it makes an invalid query.')
-        raise RuntimeError('empty fields for querying')
+        raise RuntimeError(L('empty fields for querying'))
 
     if version is None:
         version = get_current_version(pool)

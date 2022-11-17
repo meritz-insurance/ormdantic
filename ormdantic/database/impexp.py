@@ -7,7 +7,7 @@ import pathlib as pl
 import getpass as gp
 import os
 
-from ..util import get_logger, convert_tuple, is_derived_from
+from ..util import get_logger, convert_tuple, is_derived_from, L
 from ..schema.base import ( PartOfMixin, PersistentModel, get_identifying_fields )
 from ..schema.verinfo import VersionInfo
 from ..schema.typed import parse_object_for_model
@@ -87,7 +87,7 @@ def _export_objects(pool:DatabaseConnectionPool,
     for type_ in types:
         if is_derived_from(type_, PartOfMixin):
             _logger.fatal(f'{type_=} is derived from PartOfMixin. but PartOFMixin cannot be exported. it should be saved when Container saved')
-            raise RuntimeError('PartOfMixin is not supported.')
+            raise RuntimeError(L('PartOfMixin is not supported for exporting. check {0}', type_))
 
         id_fields = get_identifying_fields(type_)
 

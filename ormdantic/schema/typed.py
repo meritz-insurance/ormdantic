@@ -9,7 +9,7 @@ from .base import (
     PersistentModel, register_class_postprocessor, SchemaBaseModel, UuidStr, MetaIdentifyingField
 )
 from ormdantic.util.hints import get_args_of_list_or_tuple, is_derived_from
-from ..util import get_base_generic_alias_of, get_logger
+from ..util import get_base_generic_alias_of, get_logger, L
 
 _TYPE_NAME_FIELD = 'type_name'
 
@@ -63,7 +63,7 @@ def _fill_type_name_field(class_type:Type):
             _logger.fatal(f'duplicated type name class {name=}. '
                 f'previous {inspect.getsourcefile(previous)=}, {inspect.getsourcelines(previous)=}'
             )
-            raise RuntimeError(f'duplicated name {name}.')
+            raise RuntimeError(L('duplicated name {0}.', name))
     else:
         _all_type_named_models[name] = class_type
 
@@ -106,7 +106,7 @@ def _parse_obj(obj:Any, target_type:Type) -> Any:
         if isinstance(params, tuple):
             if len(obj) != len(params):
                 _logger.fatal(f'{target_type=} requires {params=} but {obj=}')
-                raise RuntimeError('mismatched size of array item.')
+                raise RuntimeError(L('mismatched size of array item.'))
 
             return tuple(
                 _parse_obj(item, item_type) for item, item_type 

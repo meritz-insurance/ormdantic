@@ -11,7 +11,7 @@ from ormdantic.util.tools import convert_tuple
 from .base import ( ModelT, SchemaBaseModel)
 from ..util import (
     get_logger, is_derived_from, is_list_or_tuple_of, convert_as_list_or_tuple,
-    is_derived_or_collection_of_derived, get_union_type_arguments
+    is_derived_or_collection_of_derived, get_union_type_arguments, L,
 )
 
 
@@ -37,7 +37,7 @@ def get_path_and_types_for(type_:Type[ModelT],
     if not is_derived_from(type_, SchemaBaseModel):
         _logger.fatal(f'{type_=} should be subclass of SchemaBaseModel. '
                       f'check the mro {inspect.getmro(type_)=}')
-        raise RuntimeError(f'invalid type {type_} for get path and type')
+        raise RuntimeError(L('invalid type {0} for get path and type', type_))
 
     yield from (('$.' + ('.'.join(paths)), type_) 
                 for paths, type_ in _get_path_and_type(type_, predicate))
@@ -134,5 +134,5 @@ def extract_as(model:SchemaBaseModel, path:str, target_type_:Type[T]) -> T | Tup
         return data
 
     _logger.fatal(f'{data=} cannot be converted type {target_type_=}')
-    raise RuntimeError('invalid type for casting in extract_as')
+    raise RuntimeError(L('invalid type for casting in extract_as'))
 

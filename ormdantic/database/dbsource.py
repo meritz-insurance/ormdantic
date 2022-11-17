@@ -5,7 +5,7 @@ from ormdantic.schema.modelcache import ModelCache
 
 from ormdantic.schema.verinfo import VersionInfo
 
-from ..util import get_logger
+from ..util import get_logger, L
 from ..schema.base import PersistentModelT, PersistentModel
 from ..schema.source import (
     ModelStorage, QueryConditionType, SharedModelSource, 
@@ -139,7 +139,7 @@ def _find_object(pool: DatabaseConnectionPool,
 
     if second is not None:
         _logger.fatal(f'More than one object found. {type_=} {where=} in {pool=}. {(first[1], second[1])=}')
-        raise RuntimeError(f'More than one object is found of {type_} condition {where}')
+        raise RuntimeError(L('More than one object is found of {0} condition {1}', type_, where))
 
     return first
  

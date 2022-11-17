@@ -23,7 +23,7 @@ from ..util import (
     update_forward_refs_in_generic_base,
     is_derived_from, resolve_forward_ref, is_list_or_tuple_of,
     resolve_forward_ref_in_args, is_derived_or_collection_of_derived,
-    unique, convert_tuple, has_metadata
+    unique, convert_tuple, has_metadata, L
 )
 
 JsonPathAndType = Tuple[Tuple[str,...], Type[Any]]
@@ -257,7 +257,7 @@ def get_field_name_and_type(type_:Type,
     if not is_derived_from(type_, BaseModel):
         _logger.fatal(f'type_ {type_=}should be subclass of BaseModel. '
                       f'check the mro {inspect.getmro(type_)}')
-        raise RuntimeError(f'Invalid type {type_}.')
+        raise RuntimeError(L('invalid type {0}.', type_))
 
     target_types = convert_tuple(target_types) 
 
@@ -278,7 +278,7 @@ def get_field_name_and_type_for_annotated(type_:Type,
     if not is_derived_from(type_, BaseModel):
         _logger.fatal(f'type_ {type_=}should be subclass of BaseModel. '
                       f'check the mro {inspect.getmro(type_)}')
-        raise RuntimeError(f'Invalid type {type_}.')
+        raise RuntimeError(L('invalid type {0}.', type_))
 
     target_types = convert_tuple(target_types) 
 
@@ -297,7 +297,7 @@ def get_field_type(type_:Type[ModelT], field_name:str) -> type:
     if not is_derived_from(type_, BaseModel):
         _logger.fatal(f'type_ {type_=} should be the subclass of BaseModel. '
                       f'check the mro {inspect.getmro(type_)}')
-        raise RuntimeError(f'Invalid type {type_}.')
+        raise RuntimeError(L('invalid type {0}.', type_))
 
     return type_.__fields__[field_name].outer_type_
 
@@ -472,7 +472,7 @@ def _get_json_paths(field_name, field_type) -> Tuple[str,...]:
 def _validate_json_paths(paths:Tuple[str]):
     if any(not (p == '..' or p.startswith('$.') or p == '$') for p in paths):
         _logger.fatal(f'{paths} has one item which did not starts with .. or $.')
-        raise RuntimeError('Invalid path expression. the path must start with $')
+        raise RuntimeError(L('invalid path expression. the path must start with $. check {0}', paths))
 
     # if is_collection and paths[-1] != '$':
     #     _logger.fatal(f'{paths} should end with $ for collection type')

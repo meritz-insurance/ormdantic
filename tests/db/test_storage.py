@@ -259,7 +259,7 @@ def test_delete_objects():
 def test_find_object(pool_and_model):
     pool, _ = pool_and_model
 
-    with pytest.raises(RuntimeError, match='More than one object.*'):
+    with pytest.raises(RuntimeError, match='more than one object.*'):
         find_object(pool, PartModel, {}, 0, version=get_current_version(pool))
 
     found = find_object(pool, PartModel, build_where([('name', 'part1')]), 0,
@@ -297,7 +297,7 @@ def test_find_objects_for_multiple_nested_parts(pool_and_model):
 def test_load_object(pool_and_model):
     pool, _ = pool_and_model
 
-    with pytest.raises(RuntimeError, match='cannot found matched item.*'):
+    with pytest.raises(RuntimeError, match='no such item.*'):
         load_object(pool, PartModel, {'name': 'not_existed'}, 0)
 
 

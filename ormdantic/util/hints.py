@@ -12,6 +12,8 @@ import functools
 import inspect
 
 
+from ..util import L
+
 from .log import get_logger
 from .tools import convert_tuple
 
@@ -37,7 +39,7 @@ def get_args_of_base_generic_alias(type_:Type, *generic_types:Type) -> Tuple[Any
     if generic:
         return get_args(generic)
 
-    raise RuntimeError('no generic. check type.')
+    raise RuntimeError(L('no generic. check type. {0}', type_))
 
 
 _T = TypeVar('_T')
@@ -182,7 +184,7 @@ def get_metadata_for(type_:Type, meta_type:Type[_T]) -> _T | None:
 def _validate_metadata(type_:Type):
     if any(inspect.isclass(o)  for o in type_.__metadata__):
         _logger.fatal(f'{type_.__metadata__=} contains class.')
-        raise RuntimeError('metadata should be instance not class.')
+        raise RuntimeError(L('metadata should be instance, not a class. check {0}', type_))
 
 
 

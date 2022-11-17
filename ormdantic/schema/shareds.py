@@ -3,7 +3,6 @@ from typing import (
     ClassVar, Dict, Generic, Iterator, Iterator, TypeVar, get_args, Union, Type, 
     Set, DefaultDict, Any, cast, Tuple, List, Set, Callable, Annotated
 )
-import orjson
 from pydantic import Field, PrivateAttr
 from collections import defaultdict
 from ormdantic.schema.modelcache import ModelCache
@@ -14,7 +13,7 @@ from ormdantic.util.hints import (
 
 from ..util import (
     digest, convert_as_list_or_tuple, get_logger, get_base_generic_alias_of, 
-    is_derived_from, unique,
+    is_derived_from, unique, L,
 )
 
 from .base import (
@@ -134,7 +133,7 @@ class ContentReferenceModel(SchemaBaseModel,
                 'you should declare class which derived from ContentReferenceModel. '
                 'do not use ContentReferenceModel directly. we could not know what '
                 'is the real class for content')
-            raise RuntimeError('do not use ContentReferenceModel directly.')
+            raise RuntimeError(L('do not use ContentReferenceModel directly. check {0}', content_type.__name__))
 
         return content_type
 
@@ -145,7 +144,7 @@ class ContentReferenceModel(SchemaBaseModel,
         if isinstance(self.content, str):
             if self._lazy_loader is None:
                 _logger.fatal('cannot lazy loading shared content _loader is None')
-                raise RuntimeError('cannot get the content. set lazy loader')
+                raise RuntimeError(L('cannot get the content. set lazy loader'))
             
             self.content = cast(SharedContentModelT, self._lazy_loader(self.content))
 
@@ -210,7 +209,7 @@ def extract_shared_models_for(model: PersistentModel,
             if content.id in shared_models:
                 if type(shared_models[content.id]) is not type(content):
                     _logger.fatal(f'{content=} has different type but has same {content.id=}')
-                    raise RuntimeError('cannot support the contents of different type which have same id.')
+                    raise RuntimeError(L('cannot support the contents of different type which have same id. id was {0}', content.id))
 
             shared_models[content.id] = cast(SharedContentModelT, content)
 
@@ -247,7 +246,7 @@ def populate_shared_models(model:PersistentModelT,
                     break
             else:
                 _logger.fatal(f'cannot load shared model from cache {content=}, {model_sets=}')
-                raise RuntimeError('cannot populate shared model.')
+                raise RuntimeError(L('cannot populate shared model.'))
 
     return model
 

@@ -67,7 +67,7 @@ def test_get_stored_fields_for():
         'identifying':(('$.identifying',), Annotated[str, MetaIdentifyingField()]),
         } == get_stored_fields_for(Container, MetaStoredField)
 
-    with pytest.raises(RuntimeError, match='.*Invalid*'):
+    with pytest.raises(RuntimeError, match='.*invalid*'):
         get_field_type(cast(Type[Container], str), 'name')
 
   
@@ -78,7 +78,7 @@ def test_get_field_type():
 
     assert str == get_field_type(Container, 'name')
 
-    with pytest.raises(RuntimeError, match='.*Invalid*'):
+    with pytest.raises(RuntimeError, match='.*invalid*'):
         get_field_type(cast(Type[Container], str), 'name')
 
 

@@ -11,7 +11,7 @@ import functools
 
 from pydantic import ConstrainedStr, ConstrainedDecimal
 
-from ormdantic.util import is_derived_from, convert_tuple
+from ormdantic.util import is_derived_from, convert_tuple, L
 from ormdantic.util.hints import get_args_of_base_generic_alias
 
 from ..util import get_logger, has_metadata, get_metadata_for
@@ -290,7 +290,7 @@ def get_sql_for_creating_table(type_:Type[PersistentModelT]):
             _logger.fatal(
                 f'{type_=} is versioned type. but it was PartOfMxin. '
                 'if the root container type is VersionMixin, the PartOfMixin may be handled as VersionMixin ')
-            raise RuntimeError('VersionMixin is not support for PartOfMixin.')
+            raise RuntimeError(L('VersionMixin is not support for PartOfMixin. check {0}', type_))
 
         additional_fields = (_SET_ID_FIELD, _VALID_START_FIELD, _VALID_END_FIELD)
 
@@ -322,7 +322,7 @@ def get_sql_for_creating_table(type_:Type[PersistentModelT]):
         if _is_version_type(type_):
             if not get_identifying_fields(type_):
                 _logger.fatal(f'{type_=} does not have any id field.')
-                raise RuntimeError('identifying fields need for VersionMixin type.')
+                raise RuntimeError(L('identifying fields need for VersionMixin type. check {0}', type_))
 
         if _is_dated_type(type_): 
             # check dated type has id fields except applied_at
@@ -330,7 +330,7 @@ def get_sql_for_creating_table(type_:Type[PersistentModelT]):
 
             if not id_fields:
                 _logger.fatal(f'{type_=} does not have any id field for finding MAX applied_date')
-                raise RuntimeError('identifying fields need for DatedMixin type.')
+                raise RuntimeError(L('identifying fields need for DatedMixin type. check {0}', type_))
 
         yield _build_model_table_statement(
             get_table_name(type_), 
@@ -583,7 +583,7 @@ def _get_field_db_type(type_:Type) -> str:
         return 'TEXT'
 
     _logger.fatal(f'unsupported type: {type_}')
-    raise RuntimeError(f'{type_} is not the supported type in database.')
+    raise RuntimeError(L('{0} is not the supported type in database.', type_))
 
 
 def _f(field:str) -> str:
@@ -662,7 +662,7 @@ def get_query_and_args_for_upserting(model:PersistentModel, set_id:int):
 def get_query_and_args_for_squashing(type_:Type[PersistentModelT], identifier:Dict[str, Any], set_id:int):
     if not _is_version_type(type_):
         _logger.fatal(f'{type_=} is not derived from VersinoMixin. it suppport to squash VersionMixin objects only.')
-        raise RuntimeError('to squash is not supported for non version type.')
+        raise RuntimeError(L('to squash is not supported for non version type. check {0}', type_))
 
     return _get_sql_for_squashing(cast(Type, type_)), identifier | {'__set_id': set_id}
     
@@ -1195,7 +1195,7 @@ def _generate_json_eval(field_name:str, paths_and_type:Tuple[Tuple[str,...], Typ
 
     if len(paths) != 2:
         _logger.fatal(f'{field_name=}, {paths=}, {field_type=}. check paths have 2 element.')
-        raise RuntimeError('paths should have 2 items for generating value from container.') 
+        raise RuntimeError(L('paths should have 2 items for generating value from container. check {0}', paths))
 
     if is_list_or_tuple_of(field_type):
         return f"JSON_EXTRACT({field_exprs(_JSON_FIELD, table_name)}, '{paths[1]}') as {field_exprs(field_name)}"
@@ -1307,7 +1307,7 @@ def get_query_and_args_for_reading(type_:Type[PersistentModelT],
 
     if get_type_for_table(type_) != type_:
         _logger.fatal(f'cannot make query for BaseClassTableMixin {type_=}. use base class which is marked with BaseClassTableMixin')
-        raise RuntimeError('cannot make query for BaseClassTableMixin.')
+        raise RuntimeError(L('cannot make query for BaseClassTableMixin. check {0}', type_))
 
     fields = convert_tuple(fields)
 
@@ -1985,7 +1985,7 @@ def _find_join_keys(join:Tuple[Tuple[str, Type],...]
             _logger.fatal(
                 f'{base_type=}, {joined_type=} does not have reference.\n'
                 f'{get_stored_fields(base_type)=} {get_stored_fields(joined_type)=}')
-            raise RuntimeError(f'{base_type} or {joined_type} does not have reference which links both.')
+            raise RuntimeError(L(f'{0} or {1} does not have reference which links both.', base_type, joined_type))
 
         keys[(base_type, joined_type)] = (fields[0], fields[1])
 

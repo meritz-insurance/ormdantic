@@ -8,7 +8,7 @@ import orjson
 
 from ormdantic.util.tools import convert_as_list_or_tuple
 
-from ..util import get_logger, is_derived_from
+from ..util import get_logger, is_derived_from, L
 
 from .typed import parse_object_for_model
 from .base import (
@@ -68,12 +68,12 @@ class SharedModelSource:
 
         if found is None:
             _logger.fatal(f'cannot load {type_=}:{id=} from {self=}')
-            raise RuntimeError('no such SharedModel')
+            raise RuntimeError(L('no such SharedModel {0} for {1} from {2}', id, type_, self))
 
         return found
 
     def find_records_by_ids(self, type_:Type, *ids:str | int) -> Iterator[Tuple[str, int]]:
-        raise NotImplementedError('_find_records should be implemented')
+        raise NotImplementedError(L('find_records_by_ids should be implemented'))
 
     def _build_shared_model_set(self, model:PersistentModel):
         type_and_ids = collect_shared_model_field_type_and_ids(model)
@@ -163,7 +163,7 @@ class ModelSource:
 
             if second:
                 _logger.fatal(f'multiple items for find. {query_condition=} for {type_=} in {self=}')
-                raise RuntimeError(f'multiple items for find')
+                raise RuntimeError(L('multiple items found which is for {0} of {1} in {2}', query_condition, type_, self))
 
             return first
     
@@ -177,7 +177,7 @@ class ModelSource:
 
         if fetch is None:
             _logger.fatal(f'cannot load {type_=}:{query_condition=} from {self=}')
-            raise RuntimeError(f'no such {type_.__name__}')
+            raise RuntimeError(L('no such {0}', type_.__name__))
 
         return fetch
 
@@ -561,7 +561,7 @@ def extract_id_values(type_:Type, where_condition:QueryConditionType) -> Tuple[A
 
     if not id_fields:
         _logger.fatal(f'identified field should be existed for {type_=}')
-        raise RuntimeError('no identified fields')
+        raise RuntimeError(L('no identified fields. check {0}', type_))
 
     for field in id_fields:
         if field not in where_condition:
