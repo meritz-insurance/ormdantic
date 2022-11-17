@@ -32,7 +32,7 @@ class IdentifiedModel(PersistentModel):
     class Config:
         title = 'base object which can be saved or retreived by id'
 
-class BaseClassTableModel(TypeNamedModel, PersistentModel):
+class BaseClassTableModel(TypeNamedModel):
     '''use table of base class. if base class table mixin, 
     type_name should be existed for saving type info.'''
     pass
@@ -140,7 +140,7 @@ def _parse_obj(obj:Any, target_type:Type) -> Any:
 def get_type_for_table(type_:Type) -> Type:
     if is_derived_from(type_, BaseClassTableModel):
         for base in inspect.getmro(type_):
-            if BaseClassTableModel in base.__bases__:
+            if BaseClassTableModel in base.__bases__ and is_derived_from(base, PersistentModel):
                 return base
 
     return type_

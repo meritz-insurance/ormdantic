@@ -768,7 +768,7 @@ def test_seq_id():
         
 
 def test_use_base_class_table_mixin():
-    class BaseModel(BaseClassTableModel):
+    class BaseModel(BaseClassTableModel, PersistentModel):
         name: StringIndex
 
     class DerivedModel(BaseModel):

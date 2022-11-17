@@ -208,7 +208,7 @@ def test_allocate_fields_if_empty_for_vector():
 
 
 def test_get_type_for_table():
-    class TableModel(BaseClassTableModel):
+    class TableModel(BaseClassTableModel, PersistentModel):
         pass
 
     class DerivedTableModel(TableModel):
