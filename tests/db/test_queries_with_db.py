@@ -75,7 +75,8 @@ def test_get_query_and_args_for_purging():
 
         assert [{
             '__row_id':1, '__set_id': 0, 'op':'PURGED', 
-            'table_name':'md_SimpleBaseModel', 'model_id': '@'}
+            'table_name':'md_SimpleBaseModel', 'model_id': '@',
+            'data_version': None}
         ] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(
@@ -99,7 +100,7 @@ def test_get_query_and_args_for_deleting():
 
         assert [{
             '__row_id':1, '__set_id': 0, 'op':'DELETED', 
-            'table_name':'md_SimpleBaseModel', 'model_id': '@'}
+            'table_name':'md_SimpleBaseModel', 'model_id': '@', 'data_version':None}
         ] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(

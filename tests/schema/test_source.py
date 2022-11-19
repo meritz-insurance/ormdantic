@@ -232,6 +232,18 @@ def test_source_query(source:ModelSource):
     assert [] == list(source.query(MyProduct, {'id': 'not-existed'}))
 
 
+def test_source_populate_shared_model(source:ModelSource):
+    complex_model = MyComplexContent(code=UuidStr('code1'), 
+        nested=NestedContentReferenceModel(content=nested_shared.id), 
+        items=[
+            SharedContentReferenceModel(content=found_1_shared.id),
+            SharedContentReferenceModel(content=second_shared.id),
+        ])
+
+    populated = source.populate_shared_models(complex_model)
+
+    assert nested_shared != populated.nested.content
+
 def test_chained_shared_find(chained_shared_source:ChainedSharedModelSource):
     assert found_1_shared == chained_shared_source.find(MySharedContent, found_1_shared.id) 
     assert found_2_shared == chained_shared_source.find(MySharedContent, found_2_shared.id) 

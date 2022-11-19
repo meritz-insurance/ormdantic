@@ -362,7 +362,7 @@ def test_upsert_objects_makes_entry_in_audit_models():
 
         assert [
             {'version':1, 'op':'INSERTED', 'table_name':'md_VersionModel', 
-            '__row_id':1, '__set_id':0, 'model_id':'test,1'}
+            '__row_id':1, '__set_id':0, 'model_id':'test,1', 'data_version':1}
         ] == list(model_changes)
 
 
@@ -472,14 +472,14 @@ def test_squash_objects():
 
         assert [
             {'__row_id': 1, 'op': 'INSERTED', 'table_name': 'md_VersionModel', 
-            'version': 1, '__set_id':0, 'model_id': 'test,1'}
+            'version': 1, '__set_id':0, 'model_id': 'test,1', 'data_version':1}
         ] == list(get_model_changes_of_version(pool, 1))
 
         assert [
             {'__row_id': 1, 'op': 'PURGED:SQUASHED', 'table_name': 'md_VersionModel', 
-            'version': 4, '__set_id':0, 'model_id': 'test,1,2'},
+            'version': 4, '__set_id':0, 'model_id': 'test,1,2', 'data_version':None},
             {'__row_id': 2, 'op': 'PURGED:SQUASHED', 'table_name': 'md_VersionModel', 
-            'version': 4, '__set_id':0, 'model_id': 'test,2,3'}
+            'version': 4, '__set_id':0, 'model_id': 'test,2,3', 'data_version':None}
         ] == list(get_model_changes_of_version(pool, 4))
 
         upsert_objects(pool, fourth, 0, False, VersionInfo())

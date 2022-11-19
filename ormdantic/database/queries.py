@@ -52,6 +52,7 @@ _APPLIED_START_FIELD = '__applied_start'
 _APPLIED_END_FIELD = '__applied_end'
 
 _AUDIT_VERSION_FIELD = 'version'
+_AUDIT_DATA_VERSION_FIELD = 'data_version'
 
 _AUDIT_WHO_FIELD = 'who'
 _AUDIT_WHY_FIELD = 'why'
@@ -185,6 +186,7 @@ def get_sql_for_creating_version_info_table():
         _VERSION_CHANGE_TABLE,
         iter([
             f'{field_exprs(_AUDIT_VERSION_FIELD)} BIGINT',
+            f'{field_exprs(_AUDIT_DATA_VERSION_FIELD)} BIGINT',
             f'{field_exprs(_AUDIT_OP_FIELD)} VARCHAR(32)',
             f'{field_exprs(_AUDIT_TABLE_NAME_FIELD)} VARCHAR(80)',
             f'{field_exprs(_SET_ID_FIELD)} BIGINT',
@@ -203,6 +205,7 @@ def _get_sql_for_auditing_model():
         tab_each_line(
             field_exprs([
                 _AUDIT_VERSION_FIELD, 
+                _AUDIT_DATA_VERSION_FIELD, 
                 _AUDIT_OP_FIELD, 
                 _AUDIT_TABLE_NAME_FIELD, 
                 _SET_ID_FIELD,
@@ -216,6 +219,7 @@ def _get_sql_for_auditing_model():
         '(',
         tab_each_line(
             '@VERSION',
+            f'%({_AUDIT_DATA_VERSION_FIELD})s',
             f'%({_AUDIT_OP_FIELD})s',
             f'%({_AUDIT_TABLE_NAME_FIELD})s',
             f'%({_SET_ID_FIELD})s',
@@ -741,6 +745,7 @@ def _get_sql_for_squashing(model_type:Type):
             }) as {_AUDIT_MODEL_ID_FIELD}""",
             "'PURGED:SQUASHED' as op",
             f"'{table_name}' as table_name",
+            f"NULL as data_version",
             use_comma=True
         ),
         ';',
@@ -848,6 +853,7 @@ def _get_sql_for_upserting(model_type:Type):
                 }) as {_AUDIT_MODEL_ID_FIELD}""",
                 "'INSERTED' as op",
                 f"'{table_name}' as table_name",
+                f"@VERSION as data_version",
                 use_comma=True
             )
         )
@@ -885,6 +891,7 @@ def _get_sql_for_upserting(model_type:Type):
                         else 
                         "''"
                     }) as {_AUDIT_MODEL_ID_FIELD}""",
+                    f"@VERSION as data_version",
                     use_comma=True
                 ),
                 f'FROM {table_name}',
@@ -926,6 +933,7 @@ def _get_sql_for_upserting(model_type:Type):
                         else 
                         "''"
                     }) as {_AUDIT_MODEL_ID_FIELD}""",
+                    f"@VERSION as data_version",
                     use_comma=True
                 ),
                 f';',
@@ -963,6 +971,7 @@ def _get_sql_for_upserting(model_type:Type):
                     else 
                     "''"
                 }) as {_AUDIT_MODEL_ID_FIELD}""",
+                f"@VERSION as data_version",
                 use_comma=True
             )
         ) 
@@ -1528,6 +1537,7 @@ def _get_sql_for_purging(type_:Type, field_and_value:FieldOp):
                 if id_fields else 
                 "''"
             }) as {_AUDIT_MODEL_ID_FIELD}""",
+            f"NULL as data_version",
             use_comma=True
         )
     )
@@ -1566,6 +1576,7 @@ def _get_sql_for_deleting(type_:Type, field_and_value:FieldOp):
                     if id_fields else 
                     "''"
             }) as {_AUDIT_MODEL_ID_FIELD}""",
+            "NULL as data_version",
             use_comma=True
         ),
         f"FROM {table_name}",

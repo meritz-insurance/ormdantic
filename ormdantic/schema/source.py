@@ -192,6 +192,9 @@ class ModelSource:
             if found:
                 yield found
 
+    def populate_shared_models(self, model:PersistentModelT) -> PersistentModelT:
+        return self._shared_source.populate_shared_models(model)
+
     def clone_with(self:_SourceT, set_id:int | None = None, 
                    ref_date: date | None = None,
                    version: int | None = None) -> _SourceT:

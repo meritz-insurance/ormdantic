@@ -336,6 +336,7 @@ def test_get_sql_for_creating_audit_version_table():
         join_line(
             'CREATE TABLE IF NOT EXISTS `_model_changes` (',
             '  `version` BIGINT,',
+            '  `data_version` BIGINT,',
             '  `op` VARCHAR(32),',
             '  `table_name` VARCHAR(80),',
             '  `__set_id` BIGINT,',
@@ -533,7 +534,8 @@ def test_get_sql_for_upserting():
         "  `__row_id`,",
         "  'UPSERTED' as op,",
         "  'md_SimpleModel' as table_name,",
-        "  CONCAT_WS(',', '') as model_id"
+        "  CONCAT_WS(',', '') as model_id,",
+        "  @VERSION as data_version"
     ) == sql
 
 
@@ -583,7 +585,8 @@ def test_get_sql_for_upserting_versioning():
         "  `__row_id`,",
         "  CONCAT_WS(',', `id`,`__valid_start`) as model_id,",
         "  'INSERTED' as op,",
-        "  'md_VersionModel' as table_name"
+        "  'md_VersionModel' as table_name,",
+        "  @VERSION as data_version"
     ) == sql
 
 
@@ -611,7 +614,8 @@ def test_get_sql_for_upserting_dated():
         "    `__row_id`,",
         "    'INSERTED' as op,",
         "    'md_DatedModel' as table_name,",
-        "    CONCAT_WS(',', `applied_at`,`id`) as model_id",
+        "    CONCAT_WS(',', `applied_at`,`id`) as model_id,",
+        "    @VERSION as data_version",
         "  FROM md_DatedModel",
         "  WHERE",
         "      `__set_id` = %(__set_id)s",
@@ -640,7 +644,8 @@ def test_get_sql_for_upserting_dated():
         "    `__row_id`,",
         "    'INSERTED' as op,",
         "    'md_DatedModel' as table_name,",
-        "    CONCAT_WS(',', `applied_at`,`id`) as model_id",
+        "    CONCAT_WS(',', `applied_at`,`id`) as model_id,",
+        "    @VERSION as data_version",
         "  ;",
         "END IF"
     ) == sql
@@ -695,8 +700,8 @@ def test_get_sql_for_upserting_versioned_dated():
         "  `__row_id`,",
         "  CONCAT_WS(',', `applied_at`,`id`,`__valid_start`) as model_id,",
         "  'INSERTED' as op,",
-        "  'md_VersionDateModel' as table_name"
-
+        "  'md_VersionDateModel' as table_name,",
+        "  @VERSION as data_version"
    ) == sql
 
 
@@ -1329,7 +1334,8 @@ def test_get_query_and_args_for_purging():
         "  __set_id,",
         "  'PURGED' as op,",
         "  'md_SimpleBaseModel' as table_name,",
-        "  CONCAT_WS(',', `id`) as model_id"
+        "  CONCAT_WS(',', `id`) as model_id,",
+        "  NULL as data_version"
     ) == sqls[0]
 
     assert {'id': '@', '__set_id':0} == sqls[1]
@@ -1355,7 +1361,8 @@ def test_get_query_and_args_for_deleting():
         "  __set_id,",
         "  'DELETED' as op,", 
         "  'md_SimpleBaseModel' as table_name,",
-        "  CONCAT_WS(',', `id`) as model_id",
+        "  CONCAT_WS(',', `id`) as model_id,",
+        "  NULL as data_version",
         "FROM md_SimpleBaseModel",
         "WHERE",
         "  `id` = %(id)s",

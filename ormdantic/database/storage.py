@@ -260,7 +260,6 @@ def squash_objects(pool: DatabaseConnectionPool,
                     squasheds.append(result)
                     cursor.execute(*get_query_and_args_for_squashing(type_, result, set_id=set_id))
                                                                     
-
                     row_ids = []
 
                     for row in fetch_multiple_set(cursor):
@@ -358,6 +357,7 @@ def purge_objects(pool: DatabaseConnectionPool,
 
 def get_current_version(pool:DatabaseConnectionPool)->int:
     return get_version_info(pool).version or 0
+
 
 def get_version_info(pool:DatabaseConnectionPool, 
                      version_or_datetime: datetime | None | int = None) -> VersionInfo:
