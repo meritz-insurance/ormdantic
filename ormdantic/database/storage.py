@@ -46,8 +46,9 @@ from .queries import (
     get_sql_for_upserting_parts,
     get_query_and_args_for_purging,
     get_query_for_adjust_seq,
+    get_query_for_copying_single_object,
     _ROW_ID_FIELD, _JSON_FIELD, _AUDIT_VERSION_FIELD, _AUDIT_MODEL_ID_FIELD,
-    _VALID_START_FIELD
+    _VALID_START_FIELD, _AUDIT_DATA_VERSION_FIELD
 )
 
 
@@ -407,8 +408,11 @@ def find_object(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], where
                 set_id:int,
                 *, 
                 unwind:Tuple[str,...] | str = tuple(),
-                version:int = 0,
+                version:int | None = None,
                 ref_date:date | None = None) ->Optional[PersistentModelT]:
+    if version is None:
+        version = get_current_version(pool)
+
     objs = list(query_records(pool, type_, where, set_id, 2, 
                               fields=(_JSON_FIELD, _ROW_ID_FIELD,
                                       _VALID_START_FIELD),
@@ -429,9 +433,12 @@ def find_objects(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], wher
                 set_id:int,
                 *, fetch_size: Optional[int] = None,
                 unwind:Tuple[str, ...] | str = tuple(),
-                version:int = 0,
+                version:int | None = None,
                 ref_date:date | None = None,
-                ) -> Iterator[PersistentModelT]:
+                ) -> Iterator[PersistentModelT]:    
+    if version is None:
+        version = get_current_version(pool)
+
     for record in query_records(pool, type_, where, set_id, fetch_size, 
                                 fields=(_JSON_FIELD, _ROW_ID_FIELD,
                                         _VALID_START_FIELD),
@@ -440,18 +447,6 @@ def find_objects(pool:DatabaseConnectionPool, type_:Type[PersistentModelT], wher
         model = _convert_model(type_, record, set_id)
 
         yield cast(PersistentModelT, model)
-
-
-def _convert_model(type_: Type[PersistentModelT], record: Dict[str, Any], set_id) -> PersistentModelT:
-    model = type_.parse_raw(record[_JSON_FIELD].encode())
-    model._set_id = set_id
-
-    model._row_id = record[_ROW_ID_FIELD]
-    model._valid_start = record[_VALID_START_FIELD]
-
-    model._after_load()
-
-    return model
 
 
 # In where or fields, the nested expression for json path can be used.
@@ -505,6 +500,50 @@ def query_records(pool: DatabaseConnectionPool,
 
         while results := cursor.fetchmany(fetch_size):
             yield from results
+
+
+def merge_model_set(pool:DatabaseConnectionPool, 
+              type_and_query_cond: Dict[Type, QueryConditionType],
+              src_id: int, dest_id: int, forced: bool,
+              version_info: VersionInfo):
+    with pool.open_cursor() as cursor:
+        new_version = allocate_audit_version(cursor, version_info)
+
+        for tp, where in type_and_query_cond.items():
+            fields = get_identifying_fields(tp)
+            query_and_param = get_query_and_args_for_reading(
+                tp, fields, to_normalize_query_condition(where),
+                version=new_version, set_id=src_id)
+
+            cursor.execute(*query_and_param)
+
+            for result in fetch_multiple_set(cursor):
+                sqls = get_query_for_copying_single_object(tp, result, src_id, dest_id)
+
+                cursor.execute(*sqls)
+
+                for row in fetch_multiple_set(cursor):
+                    if row[_AUDIT_DATA_VERSION_FIELD] == new_version and not forced:
+                        _logger.fatal(f'version of {row=} in destination is larger than source. '
+                            f'It means that the data of destination is latest. '
+                            f'If you would overwrite it, forced should be True.')
+                        raise RuntimeError(L('cannot copy object because the destination '
+                        'has new version of data. if you overwrite it, set forced as True.'))
+
+                    _update_audit_model(cursor, row)
+                    _upsert_parts_and_externals(cursor, row[_ROW_ID_FIELD], tp)
+
+
+def delete_model_set(pool:DatabaseConnectionPool,
+                     set_id: int,
+                     version_info: VersionInfo):
+    pass
+
+
+def purge_model_set(pool:DatabaseConnectionPool,
+                    set_id: int,
+                    version_info: VersionInfo):
+    pass
 
 
 def _traverse_all_part_types(type_:Type[ModelT]):
@@ -567,6 +606,19 @@ def _delete_parts_and_externals(cursor, root_deleted_ids:Tuple[int,...], type_:T
             cursor.execute(sql, args)
 
         _delete_parts_and_externals(cursor, root_deleted_ids, part_type)
+
+
+def _convert_model(type_: Type[PersistentModelT], record: Dict[str, Any], set_id) -> PersistentModelT:
+    model = type_.parse_raw(record[_JSON_FIELD].encode())
+    model._set_id = set_id
+
+    model._row_id = record[_ROW_ID_FIELD]
+    model._valid_start = record[_VALID_START_FIELD]
+
+    model._after_load()
+
+    return model
+
 
 def update_sequences(pool: DatabaseConnectionPool, 
                      types: Iterable[Type[PersistentModelT]]):

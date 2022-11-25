@@ -7,7 +7,7 @@ from pydantic import condecimal, constr, Field
 
 from ormdantic.schema import PersistentModel
 from ormdantic.database.queries import (
-    _get_sql_for_upserting, get_query_and_args_for_deleting, get_query_and_args_for_purging, get_sql_for_creating_version_info_table, get_sql_for_upserting_external_index, get_stored_fields, get_table_name, 
+    _get_sql_for_upserting_single_object, get_query_and_args_for_deleting, get_query_and_args_for_purging, get_sql_for_creating_version_info_table, get_sql_for_upserting_external_index, get_stored_fields, get_table_name, 
     get_sql_for_creating_table, _get_field_db_type, _generate_json_table_for_part_of,
     _build_query_and_fields_for_core_table, field_exprs,
     get_query_and_args_for_reading,
@@ -15,7 +15,8 @@ from ormdantic.database.queries import (
     join_line, 
     _build_namespace_types, _find_join_keys, _extract_fields,
     get_query_for_adjust_seq,
-    _ENGINE, _RELEVANCE_FIELD
+    _ENGINE, _RELEVANCE_FIELD,
+    _get_sql_for_copying_objects
 )
 from ormdantic.schema.base import (
     DatedMixin, IntegerArrayIndex, StringArrayIndex, FullTextSearchedStringIndex, 
@@ -71,7 +72,7 @@ def test_get_sql_for_create_table_for_version():
         '  `__valid_end` BIGINT DEFAULT 9223372036854775807,\n'
         '  `__squashed_from` BIGINT,\n'
         '  `id` VARCHAR(64),\n'
-        '  UNIQUE KEY `identifying_index` (`id`,`__valid_start`)\n'
+        '  UNIQUE KEY `identifying_index` (`__set_id`,`id`,`__valid_start`)\n'
         f'){_ENGINE}'
     ) == next(get_sql_for_creating_table(SimpleBaseModel))
 
@@ -123,7 +124,7 @@ def test_get_sql_for_create_table_for_version_date():
         '  `__squashed_from` BIGINT,\n'
         '  `applied_at` DATE,\n'
         '  `id` VARCHAR(64),\n'
-        '  UNIQUE KEY `identifying_index` (`applied_at`,`id`,`__valid_start`)\n'
+        '  UNIQUE KEY `identifying_index` (`__set_id`,`applied_at`,`id`,`__valid_start`)\n'
         f'){_ENGINE}'
     ) == next(get_sql_for_creating_table(VersionDateModel))
 
@@ -158,9 +159,9 @@ f"""CREATE TABLE IF NOT EXISTS `md_SampleModel` (
   `i8` DATE AS (JSON_VALUE(`__json`, '$.i8')) STORED,
   `i9` DATETIME(6) AS (JSON_VALUE(`__json`, '$.i9')) STORED,
   `i10` VARCHAR(64),
-  UNIQUE KEY `identifying_index` (`i10`),
+  UNIQUE KEY `identifying_index` (`__set_id`,`i10`),
   KEY `i2_index` (`i2`),
-  UNIQUE KEY `i3_index` (`i3`),
+  UNIQUE KEY `i3_index` (`__set_id`,`i3`),
   KEY `i4_index` (`i4`),
   KEY `i5_index` (`i5`),
   KEY `i6_index` (`i6`),
@@ -514,7 +515,7 @@ def test_get_sql_for_upserting():
     class SimpleModel(PersistentModel):
         order: StringIndex
         
-    sql = _get_sql_for_upserting(cast(Any, SimpleModel))
+    sql = _get_sql_for_upserting_single_object(cast(Any, SimpleModel))
 
     assert join_line(
         "INSERT INTO md_SimpleModel",
@@ -532,10 +533,10 @@ def test_get_sql_for_upserting():
         "RETURNING",
         "  `__set_id`,",
         "  `__row_id`,",
-        "  'UPSERTED' as op,",
-        "  'md_SimpleModel' as table_name,",
-        "  CONCAT_WS(',', '') as model_id,",
-        "  @VERSION as data_version"
+        "  'UPSERTED' as `op`,",
+        "  'md_SimpleModel' as `table_name`,",
+        "  CONCAT_WS(',', '') as `model_id`,",
+        "  @VERSION as `data_version`"
     ) == sql
 
 
@@ -544,7 +545,7 @@ def test_get_sql_for_upserting_versioning():
         id: Annotated[UuidStr, MetaIdentifyingField()]
         order: StringIndex
         
-    sql = _get_sql_for_upserting(cast(Any, VersionModel))
+    sql = _get_sql_for_upserting_single_object(cast(Any, VersionModel))
 
     assert join_line(
         "SELECT MIN(`__squashed_from`)",
@@ -583,10 +584,10 @@ def test_get_sql_for_upserting_versioning():
         "RETURNING",
         "  `__set_id`,",
         "  `__row_id`,",
-        "  CONCAT_WS(',', `id`,`__valid_start`) as model_id,",
-        "  'INSERTED' as op,",
-        "  'md_VersionModel' as table_name,",
-        "  @VERSION as data_version"
+        "  CONCAT_WS(',', `id`,`__valid_start`) as `model_id`,",
+        "  'INSERTED' as `op`,",
+        "  'md_VersionModel' as `table_name`,",
+        "  @VERSION as `data_version`"
     ) == sql
 
 
@@ -594,7 +595,7 @@ def test_get_sql_for_upserting_dated():
     class DatedModel(PersistentModel, DatedMixin):
         id: Annotated[UuidStr, MetaIdentifyingField()]
         
-    sql = _get_sql_for_upserting(cast(Any, DatedModel))
+    sql = _get_sql_for_upserting_single_object(cast(Any, DatedModel))
 
     assert join_line(
         "IF ( SELECT 1 = 1 FROM md_DatedModel WHERE   `__set_id` = %(__set_id)s",
@@ -612,10 +613,10 @@ def test_get_sql_for_upserting_dated():
         "  SELECT",
         "    `__set_id`,",
         "    `__row_id`,",
-        "    'INSERTED' as op,",
-        "    'md_DatedModel' as table_name,",
-        "    CONCAT_WS(',', `applied_at`,`id`) as model_id,",
-        "    @VERSION as data_version",
+        "    'INSERTED' as `op`,",
+        "    'md_DatedModel' as `table_name`,",
+        "    CONCAT_WS(',', `applied_at`,`id`) as `model_id`,",
+        "    @VERSION as `data_version`",
         "  FROM md_DatedModel",
         "  WHERE",
         "      `__set_id` = %(__set_id)s",
@@ -642,10 +643,10 @@ def test_get_sql_for_upserting_dated():
         "  RETURNING",
         "    `__set_id`,",
         "    `__row_id`,",
-        "    'INSERTED' as op,",
-        "    'md_DatedModel' as table_name,",
-        "    CONCAT_WS(',', `applied_at`,`id`) as model_id,",
-        "    @VERSION as data_version",
+        "    'INSERTED' as `op`,",
+        "    'md_DatedModel' as `table_name`,",
+        "    CONCAT_WS(',', `applied_at`,`id`) as `model_id`,",
+        "    @VERSION as `data_version`",
         "  ;",
         "END IF"
     ) == sql
@@ -655,7 +656,7 @@ def test_get_sql_for_upserting_versioned_dated():
     class VersionDateModel(PersistentModel, VersionMixin, DatedMixin):
         id: Annotated[UuidStr, MetaIdentifyingField()]
         
-    sql = _get_sql_for_upserting(cast(Any, VersionDateModel))
+    sql = _get_sql_for_upserting_single_object(cast(Any, VersionDateModel))
 
     assert join_line(
         "SELECT MIN(`__squashed_from`)",
@@ -698,10 +699,10 @@ def test_get_sql_for_upserting_versioned_dated():
         "RETURNING",
         "  `__set_id`,",
         "  `__row_id`,",
-        "  CONCAT_WS(',', `applied_at`,`id`,`__valid_start`) as model_id,",
-        "  'INSERTED' as op,",
-        "  'md_VersionDateModel' as table_name,",
-        "  @VERSION as data_version"
+        "  CONCAT_WS(',', `applied_at`,`id`,`__valid_start`) as `model_id`,",
+        "  'INSERTED' as `op`,",
+        "  'md_VersionDateModel' as `table_name`,",
+        "  @VERSION as `data_version`"
    ) == sql
 
 
@@ -950,7 +951,7 @@ def test_get_query_and_args_for_reading_for_matching():
 
     sql, args = get_query_and_args_for_reading(MyModel, ('order',), {'': ('match', '+FAST')}, set_id=1)
 
-    assert join_line (
+    assert join_line(
         "SELECT",
         "  `_MAIN`.`order`",
         "FROM",
@@ -1332,10 +1333,10 @@ def test_get_query_and_args_for_purging():
         "RETURNING",
         "  __row_id,",
         "  __set_id,",
-        "  'PURGED' as op,",
-        "  'md_SimpleBaseModel' as table_name,",
-        "  CONCAT_WS(',', `id`) as model_id,",
-        "  NULL as data_version"
+        "  'PURGED' as `op`,",
+        "  'md_SimpleBaseModel' as `table_name`,",
+        "  CONCAT_WS(',', `id`) as `model_id`,",
+        "  NULL as `data_version`"
     ) == sqls[0]
 
     assert {'id': '@', '__set_id':0} == sqls[1]
@@ -1359,10 +1360,10 @@ def test_get_query_and_args_for_deleting():
         "SELECT",
         "  __row_id,",
         "  __set_id,",
-        "  'DELETED' as op,", 
-        "  'md_SimpleBaseModel' as table_name,",
-        "  CONCAT_WS(',', `id`) as model_id,",
-        "  NULL as data_version",
+        "  'DELETED' as `op`,", 
+        "  'md_SimpleBaseModel' as `table_name`,",
+        "  CONCAT_WS(',', `id`) as `model_id`,",
+        "  NULL as `data_version`",
         "FROM md_SimpleBaseModel",
         "WHERE",
         "  `id` = %(id)s",
@@ -1388,4 +1389,173 @@ def test_get_query_for_adjust_seq():
         "FROM md_CodedModel);",
         "EXECUTE IMMEDIATE CONCAT('SELECT SETVAL(`sq_CodedModel_codes`, ', @MAX_VALUE, ')')",
     ) == sql
- 
+
+
+def test_get_sql_for_copying_objects():
+    class MyModel(PersistentModel):
+        code: Annotated[SequenceStr, MetaIdentifyingField()]
+        message: str
+
+    statements = _get_sql_for_copying_objects(MyModel)
+
+    assert join_line(
+        "IF ( SELECT 1 = 1 FROM md_MyModel WHERE",
+        "  `code` = %(code)s",
+        "  AND `__set_id` = %(dest_id)s) THEN",
+        "  REPLACE INTO md_MyModel",
+        "  (",
+        "    `__set_id`,",
+        "    `code`,",
+        "    `__json`,",
+        "    `__valid_start`",
+        "  )",
+        "  SELECT",
+        "    *",
+        "  FROM",
+        "  (",
+        "    SELECT",
+        "      `DEST`.`__set_id`,",
+        "      `code`,",
+        "      `SRC`.`__json`,",
+        "      IF(`SRC`.`__valid_start` - IFNULL(`DEST`.`__valid_start`, 0) < 0, @VERSION, `SRC`.`__valid_start`)",
+        "    FROM",
+        "      (",
+        "        SELECT",
+        "          `__json`,",
+        "          `__valid_start`,",
+        "          `code`",
+        "        FROM md_MyModel",
+        "        WHERE",
+        "          `code` = %(code)s",
+        "          AND `__set_id` = %(src_id)s",
+        "          AND `__valid_start` <= @VERSION",
+        "          AND `__valid_end` > @VERSION",
+        "      )",
+        "      AS SRC",
+        "      LEFT JOIN",
+        "      (",
+        "        SELECT",
+        "          `__set_id`,",
+        "          `__valid_start`,",
+        "          `code`",
+        "        FROM md_MyModel",
+        "        WHERE",
+        "          `__set_id` = %(dest_id)s",
+        "          AND `__valid_start` <= @VERSION",
+        "          AND `__valid_end` > @VERSION",
+        "      )",
+        "      AS DEST",
+        "      USING (`code`)",
+        "    WHERE `SRC`.`__valid_start` != IFNULL(`DEST`.`__valid_start`, 0)",
+        "  )",
+        "  AS _T",
+        "  RETURNING",
+        "    `__set_id`,",
+        "    `__row_id`,",
+        "    `__valid_start` as `data_version`,",
+        "    'INSERTED:MERGE_SET' as `op`,",
+        "    'md_MyModel' as `table_name`,",
+        "    CONCAT_WS(',', `code`) as `model_id`",
+        "  ;",
+        "  ELSE",
+        "    INSERT INTO md_MyModel",
+        "    (",
+        "      `__json`,",
+        "      `__set_id`,",
+        "      `code`,",
+        "      `__valid_start`",
+        "    )",
+        "    SELECT",
+        "      `__json`,",
+        "      %(dest_id)s,",
+        "      `code`,",
+        "      `__valid_start`",
+        "    FROM md_MyModel",
+        "    WHERE",
+        "      `code` = %(code)s",
+        "      AND `__set_id` = %(src_id)s",
+        "    RETURNING",
+        "      `__set_id`,",
+        "      `__row_id`,",
+        "      `__valid_start` as `data_version`,",
+        "      'INSERTED:MERGE_SET' as `op`,",
+        "      'md_MyModel' as `table_name`,",
+        "      CONCAT_WS(',', `code`) as `model_id`",
+        "    ;",
+        "  END IF"
+    ) == statements
+
+    class MyVersionModel(PersistentModel, VersionMixin):
+        code: Annotated[SequenceStr, MetaIdentifyingField()]
+        message: str
+
+    statements = _get_sql_for_copying_objects(MyVersionModel)
+
+    assert join_line(
+        "INSERT INTO md_MyVersionModel",
+        "(",
+        "  __set_id,",
+        "  __json,",
+        "  __valid_start,",
+        "  __squashed_from,",
+        "  `code`",
+        ")",
+        "SELECT",
+        "  %(dest_id)s,",
+        "  `SRC`.`__json`,",
+        "  IF(`SRC`.`__valid_start` - IFNULL(`DEST`.`__valid_start`, 0) < 0, @VERSION, `SRC`.`__valid_start`),",
+        "  `DEST`.`__squashed_from`,",
+        "  `code`",
+        "FROM",
+        "  (",
+        "    SELECT",
+        "      `__json`,",
+        "      `__valid_start`,",
+        "      `code`",
+        "    FROM md_MyVersionModel",
+        "    WHERE",
+        "      `code` = %(code)s",
+        "      AND `__set_id` = %(src_id)s",
+        "      AND `__valid_start` <= @VERSION",
+        "      AND `__valid_end` > @VERSION",
+        "  )",
+        "  AS SRC",
+        "  LEFT JOIN",
+        "  (",
+        "    SELECT",
+        "      `__set_id`,",
+        "      `__valid_start`,",
+        "      `__squashed_from`,",
+        "      `code`",
+        "    FROM md_MyVersionModel",
+        "    WHERE",
+        "      `__set_id` = %(dest_id)s",
+        "      AND `__valid_start` <= @VERSION",
+        "      AND `__valid_end` > @VERSION",
+        "  )",
+        "  AS DEST",
+        "  USING (`code`)",
+        "WHERE `SRC`.`__valid_start` != IFNULL(`DEST`.`__valid_start`, 0)",
+        "RETURNING",
+        "  `__row_id`,",
+        "  `__set_id`,",
+        "  CONCAT_WS(',', `code`,`__valid_start`,`__valid_end`) as `model_id`,",
+        "  'INSERTED:MERGE_SET' as `op`,",
+        "  'md_MyVersionModel' as `table_name`,",
+        "  `__valid_start` as `data_version`",
+        ";",
+        "UPDATE md_MyVersionModel JOIN (",
+        "  SELECT",
+        "    `__row_id`,",
+        "    IFNULL(LEAD(`__valid_start`) over (PARTITION BY `code` ORDER BY `__valid_start`), 9223372036854775807) as __NEW_VALID_END",
+        "  FROM md_MyVersionModel",
+        "  WHERE `__valid_end` = 9223372036854775807",
+        "  AND `__set_id` = %(dest_id)s",
+        ") as SRC USING (`__row_id`)",
+        "SET `__valid_end` = __NEW_VALID_END",
+        "WHERE",
+        "  `code` = %(code)s",
+        "  AND `__set_id` = %(dest_id)s",
+        ";"
+    ) == statements
+     

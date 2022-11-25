@@ -18,7 +18,6 @@ from ormdantic.schema import (
     PersistentModel, FullTextSearchedStringIndex, PartOfMixin, StringArrayIndex, 
     update_forward_refs, IdentifiedModel, UuidStr
 )
-from ormdantic.schema.paths import get_paths_for
 from ormdantic.schema.base import ( StringIndex, VersionMixin, MetaIdentifyingField)
 from ormdantic.schema.shareds import (
     ContentReferenceModel, PersistentSharedContentModel,

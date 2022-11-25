@@ -250,6 +250,12 @@ class ModelSource:
         for record in self.query_records(type_, query_condition, fields=fields, unwind=unwind):
             yield record
 
+    def copy_models_from(self, 
+                         type_and_query_condition: Dict[Type, QueryConditionType],
+                         dest_set_id:int, forced:bool):
+        raise NotImplementedError()
+
+
 def _is_op_equals(item:Tuple[str, Any] | ScalarType) -> bool:
     return not isinstance(item, tuple) or item[0] == '='
 

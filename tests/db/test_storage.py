@@ -22,7 +22,7 @@ from ormdantic.database.storage import (
     delete_objects, get_current_version, purge_objects, get_model_changes_of_version, get_version_info, query_records, 
     squash_objects, upsert_objects, find_object, 
     find_objects, build_where, load_object, delete_objects,
-    update_sequences
+    update_sequences, merge_model_set
 )
 
 from ormdantic.database.queries import get_query_for_next_seq
@@ -522,3 +522,247 @@ def test_update_sequences():
         assert 'N34' == second.code
             
 
+def test_merge_model_set():
+    class CodedModel(PersistentModel):
+        code:Annotated[SequenceStr, MetaIdentifyingField()]
+        message: str
+
+    with use_temp_database_pool_with_model(CodedModel) as pool:
+        first = CodedModel(code=SequenceStr('N1'), message='first')
+        upsert_objects(pool, first, 0, False, VersionInfo())
+
+        second = CodedModel(code=SequenceStr('N1'), message='second')
+        upsert_objects(pool, second, 1, False, VersionInfo())
+
+        found = find_object(pool, CodedModel, {'code':'N1'}, 1)
+        assert found
+        assert 2 == found._valid_start 
+
+        assert first == find_object(pool, CodedModel, {'code':'N1'}, 0)
+
+        merge_model_set(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
+
+        found = find_object(pool, CodedModel, {'code':'N1'}, 0)
+
+        assert found
+
+        assert second == found
+        assert 2 == found._valid_start 
+
+        assert [
+            {'version':3, 'data_version':2, 'op': 'INSERTED:MERGE_SET', 
+            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':3, 'model_id': 'N1'}
+        ] == list(get_model_changes_of_version(pool, 3)) 
+
+
+def test_merge_model_set_with_version():
+    class CodedModel(PersistentModel, VersionMixin):
+        code:Annotated[SequenceStr, MetaIdentifyingField()]
+        message: str
+
+    with use_temp_database_pool_with_model(CodedModel) as pool:
+        first = CodedModel(code=SequenceStr('N1'), message='first')
+        upsert_objects(pool, first, 0, False, VersionInfo())
+
+        second = CodedModel(code=SequenceStr('N1'), message='second')
+        upsert_objects(pool, second, 1, False, VersionInfo())
+
+        found = find_object(pool, CodedModel, {'code':'N1'}, 1)
+        assert found
+        assert 2 == found._valid_start 
+
+        assert first == find_object(pool, CodedModel, {'code':'N1'}, 0)
+
+        merge_model_set(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
+
+        found = find_object(pool, CodedModel, {'code':'N1'}, 0)
+
+        assert found
+
+        assert second == found
+        assert 2 == found._valid_start 
+
+        assert [
+            {'version':3, 'data_version':2, 'op': 'INSERTED:MERGE_SET', 
+            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':3, 'model_id': 'N1,2,9223372036854775807'}
+        ] == list(get_model_changes_of_version(pool, 3)) 
+
+
+def test_merge_model_set_from_empty():
+    class CodedModel(PersistentModel):
+        code:Annotated[SequenceStr, MetaIdentifyingField()]
+        message: str
+
+    with use_temp_database_pool_with_model(CodedModel) as pool:
+        first = CodedModel(code=SequenceStr('N1'), message='first')
+        upsert_objects(pool, first, 1, False, VersionInfo())
+
+        merge_model_set(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
+
+        found = find_object(pool, CodedModel, {'code':'N1'}, 0)
+
+        assert found
+
+        assert first == found
+        assert 1 == found._valid_start 
+
+        assert [
+            {'version':2, 'data_version':1, 'op': 'INSERTED:MERGE_SET', 
+            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':2, 'model_id': 'N1'}
+        ] == list(get_model_changes_of_version(pool, 2)) 
+
+
+def test_merge_model_set_versioned_from_empty():
+    class CodedModel(PersistentModel, VersionMixin):
+        code:Annotated[SequenceStr, MetaIdentifyingField()]
+        message: str
+
+    with use_temp_database_pool_with_model(CodedModel) as pool:
+        first = CodedModel(code=SequenceStr('N1'), message='first')
+        upsert_objects(pool, first, 1, False, VersionInfo())
+
+        merge_model_set(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
+
+        found = find_object(pool, CodedModel, {'code':'N1'}, 0)
+
+        assert found
+
+        assert first == found
+        assert 1 == found._valid_start 
+
+        assert [
+            {'version':2, 'data_version':1, 'op': 'INSERTED:MERGE_SET', 
+            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':2, 'model_id': 'N1,1,9223372036854775807'}
+        ] == list(get_model_changes_of_version(pool, 2)) 
+
+
+def test_merge_model_set_forced():
+    class CodedModel(PersistentModel):
+        code:Annotated[SequenceStr, MetaIdentifyingField()]
+        message: str
+
+    with use_temp_database_pool_with_model(CodedModel) as pool:
+        first = CodedModel(code=SequenceStr('N1'), message='first')
+        upsert_objects(pool, first, 0, False, VersionInfo())
+
+        second = CodedModel(code=SequenceStr('N1'), message='second')
+        upsert_objects(pool, second, 1, False, VersionInfo())
+
+        assert first == find_object(pool, CodedModel, {'code':'N1'}, 0)
+
+        first.message = 'third'
+
+        upsert_objects(pool, first, 0, False, VersionInfo())
+
+        with pytest.raises(RuntimeError, match='.*copy object because.* new version .*forced.*'):
+            merge_model_set(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
+
+        merge_model_set(pool, {CodedModel:{}}, 1, 0, True, VersionInfo())
+        found = find_object(pool, CodedModel, {'code':'N1'}, 0)
+
+        assert found
+        assert second == found
+
+        assert 5 == found._valid_start
+
+        assert [
+            {'version':5, 'data_version':5, 'op': 'INSERTED:MERGE_SET', 
+            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':4, 'model_id': 'N1'}
+        ] == list(get_model_changes_of_version(pool, 5)) 
+
+
+def test_merge_model_set_versioned_forced():
+    class CodedModel(PersistentModel, VersionMixin):
+        code:Annotated[SequenceStr, MetaIdentifyingField()]
+        message: str
+
+    with use_temp_database_pool_with_model(CodedModel) as pool:
+        first = CodedModel(code=SequenceStr('N1'), message='first')
+        upsert_objects(pool, first, 0, False, VersionInfo())
+
+        second = CodedModel(code=SequenceStr('N1'), message='second')
+        upsert_objects(pool, second, 1, False, VersionInfo())
+
+        assert first == find_object(pool, CodedModel, {'code':'N1'}, 0)
+
+        first.message = 'third'
+
+        upsert_objects(pool, first, 0, False, VersionInfo())
+
+        with pytest.raises(RuntimeError, match='.*copy object because.* new version .*forced.*'):
+            merge_model_set(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
+
+        merge_model_set(pool, {CodedModel:{}}, 1, 0, True, VersionInfo())
+        found = find_object(pool, CodedModel, {'code':'N1'}, 0)
+
+        assert found
+        assert second == found
+
+        assert 5 == found._valid_start
+
+        assert [
+            {'version':5, 'data_version':5, 'op': 'INSERTED:MERGE_SET', 
+            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':5, 'model_id': 'N1,5,9223372036854775807'}
+        ] == list(get_model_changes_of_version(pool, 5)) 
+
+
+
+def test_merge_model_set_does_not_copy_already_copied():
+    class CodedModel(PersistentModel):
+        code:Annotated[SequenceStr, MetaIdentifyingField()]
+        message: str
+
+    with use_temp_database_pool_with_model(CodedModel) as pool:
+        first = CodedModel(code=SequenceStr('N1'), message='first')
+        upsert_objects(pool, first, 0, False, VersionInfo())
+
+        second = CodedModel(code=SequenceStr('N1'), message='second')
+        upsert_objects(pool, second, 1, False, VersionInfo())
+
+        merge_model_set(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
+        merge_model_set(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
+        merge_model_set(pool, {CodedModel:{}}, 0, 1, False, VersionInfo())
+
+        found = find_object(pool, CodedModel, {'code':'N1'}, 0)
+
+        assert found
+
+        assert second == found
+        assert 2 == found._valid_start 
+
+        assert [
+            {'version':3, 'data_version':2, 'op': 'INSERTED:MERGE_SET', 
+            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':3, 'model_id': 'N1'}
+        ] == list(get_model_changes_of_version(pool, 3)) 
+
+        assert [
+        ] == list(get_model_changes_of_version(pool, 4)) 
+
+        assert [
+        ] == list(get_model_changes_of_version(pool, 5)) 
+
+        assert 5 == get_current_version(pool)
+
+
+def test_merge_model_set_affect_parts_and_external():
+    with use_temp_database_pool_with_model(ContainerModel) as pool:
+        upsert_objects(pool, model, 1, False, VersionInfo())
+
+        found = list(find_objects(pool, SubPartModel, {'codes':('like', '%code1%')}, 0, unwind='codes'))
+        assert not found 
+
+        merge_model_set(pool, {ContainerModel:{}}, 1, 0, False, VersionInfo())
+
+        found = list(find_objects(pool, PartModel, {}, 0))
+        assert found 
+
+        found = list(find_objects(pool, SubPartModel, {'codes':('like', '%code1%')}, 0, unwind='codes'))
+        assert found 
+
+# version start, end가 제대로 update되는지 확인.
+# destination의 version이 높을때, forced에 의해서 overwrite 혹은 raise가 되는지
+# version type에 대한 복사와 일반 type에 대한 복사 확인
+# Performance Test 1000여개 객체 move시 확인
+# Data Version이 제대로 set 되는지 확인하자.
+# external이나 partof가 제대로 update되는지 확인하자.
+# 

@@ -281,7 +281,7 @@ def get_sql_for_creating_table(type_:Type[PersistentModelT]):
             _get_part_table_fields(),
             _get_table_stored_fields(part_stored, False),
             _get_part_table_indexes(),
-            _get_table_indexes(type_, part_stored),
+            _get_table_indexes(type_, part_stored, True),
         )
 
         part_table_name = get_table_name(type_, _PART_BASE_TABLE)
@@ -341,7 +341,7 @@ def get_sql_for_creating_table(type_:Type[PersistentModelT]):
             _get_table_fields(),
             _get_table_version_fields(type_),
             _get_table_stored_fields(stored, True),
-            _get_table_indexes(type_, stored)
+            _get_table_indexes(type_, stored, False)
         )
 
         yield from _build_code_seq_statement(type_)
@@ -415,6 +415,254 @@ def get_query_for_adjust_seq(type_:Type[PersistentModel]) -> Iterator[str]:
                 ),
                 f"EXECUTE IMMEDIATE CONCAT('SELECT SETVAL({field_exprs(get_seq_name(type_, name))}, ', @MAX_VALUE, ')')"
             ])
+
+
+def get_query_for_copying_single_object(
+        tp: Type, id_field_and_value: Dict[str, Any],
+        src_id:int, dest_id:int) -> Tuple[str, Dict[str, Any]]:
+
+    assert src_id != dest_id
+
+    return _get_sql_for_copying_objects(tp), id_field_and_value | {'src_id':src_id, 'dest_id':dest_id}
+    
+
+def _get_sql_for_copying_objects(tp:Type):
+    id_fields = get_identifying_fields(tp)
+    table_name = get_table_name(tp)
+
+    for_id_fields= tuple((field_exprs(f), '=', f'%({f})s') for f in id_fields)
+
+    assert id_fields
+
+    dest_set_where = ((_SET_ID_FIELD, '=', '%(dest_id)s'),)
+    src_set_where = ((_SET_ID_FIELD, '=', '%(src_id)s'),)
+
+    if _is_version_type(tp):
+        return join_line(
+            f'INSERT INTO {table_name}',
+            f'(',
+            tab_each_line(
+                [_SET_ID_FIELD, _JSON_FIELD, _VALID_START_FIELD, _SQUASHED_FROM_FIELD],
+                field_exprs(id_fields),
+                use_comma=True
+            ),
+            f')',
+            f'SELECT',
+            tab_each_line(
+                f'%(dest_id)s',
+                field_exprs(_JSON_FIELD, 'SRC'),
+                f'IF({field_exprs(_VALID_START_FIELD, "SRC")} - IFNULL({field_exprs(_VALID_START_FIELD, "DEST")}, 0) < 0, @VERSION, {field_exprs(_VALID_START_FIELD, "SRC")})',
+                field_exprs(_SQUASHED_FROM_FIELD, 'DEST') if _is_version_type(tp) else '',
+                field_exprs(id_fields),
+                use_comma=True
+            ),
+            f'FROM',
+            tab_each_line(
+                _alias_table_or_query(join_line(
+                    f"SELECT",
+                    tab_each_line(
+                        field_exprs([_JSON_FIELD, _VALID_START_FIELD]),
+                        field_exprs(id_fields),
+                        use_comma=True
+                    ),
+                    f'FROM {table_name}',
+                    _build_where(
+                        for_id_fields,
+                        (
+                            (f'{_SET_ID_FIELD}', '=', '%(src_id)s'),
+                            (f'{_VALID_START_FIELD}', '<=', '@VERSION'),
+                            (f'{_VALID_END_FIELD}', '>', '@VERSION')
+                        )
+                    )
+                ), "SRC"),
+                f"LEFT JOIN",
+                _alias_table_or_query(join_line(
+                    f"SELECT",
+                    tab_each_line(
+                        field_exprs([_SET_ID_FIELD, _VALID_START_FIELD, _SQUASHED_FROM_FIELD]),
+                        field_exprs(id_fields),
+                        use_comma=True
+                    ),
+                    f'FROM {table_name}',
+                    _build_where(
+                        (
+                            (f'{_SET_ID_FIELD}', '=', '%(dest_id)s'),
+                            (f'{_VALID_START_FIELD}', '<=', '@VERSION'),
+                            (f'{_VALID_END_FIELD}', '>', '@VERSION')
+                        )
+                    )
+                ), "DEST"),
+                f"USING ({join_line(field_exprs(id_fields), use_comma=True, new_line=False)})"
+            ),
+            # if version of records are same, we don't need to copy them.
+            f'WHERE {field_exprs(_VALID_START_FIELD, "SRC")} != IFNULL({field_exprs(_VALID_START_FIELD, "DEST")}, 0)',
+            f'RETURNING',
+            tab_each_line(
+                field_exprs([_ROW_ID_FIELD, _SET_ID_FIELD]),
+                f"""CONCAT_WS(',', {
+                    join_line(
+                        field_exprs(
+                            itertools.chain(id_fields, 
+                            [_VALID_START_FIELD, _VALID_END_FIELD])
+                        ), use_comma=True, new_line=False
+                        )
+                }) as {field_exprs(_AUDIT_MODEL_ID_FIELD)}""",
+                f"'INSERTED:MERGE_SET' as {field_exprs('op')}",
+                f"'{table_name}' as {field_exprs('table_name')}",
+                f"{field_exprs(_VALID_START_FIELD)} as {field_exprs(_AUDIT_DATA_VERSION_FIELD)}",
+                use_comma=True
+            ),
+            f';',
+
+            # update __valid_end by lookup table.
+            f'UPDATE {table_name} JOIN (',
+            tab_each_line(
+                f'SELECT',
+                tab_each_line(
+                    f'{field_exprs(_ROW_ID_FIELD)}',
+                    f'IFNULL(LEAD({field_exprs(_VALID_START_FIELD)}) over '
+                    f'(PARTITION BY {join_line(field_exprs(id_fields), new_line=False)} '
+                    f'ORDER BY {field_exprs(_VALID_START_FIELD)}), {_BIG_INT_MAX}) as __NEW_VALID_END',
+                    use_comma=True
+                ),
+                f'FROM {table_name}',
+                f'WHERE {field_exprs(_VALID_END_FIELD)} = {_BIG_INT_MAX}',
+                f'AND {field_exprs(_SET_ID_FIELD)} = %(dest_id)s',
+            ),
+            f') as SRC USING ({field_exprs(_ROW_ID_FIELD)})',
+            f'SET {field_exprs(_VALID_END_FIELD)} = __NEW_VALID_END',
+            _build_where(
+                for_id_fields, dest_set_where
+            ),
+            f';',
+        )
+    else:
+        return join_line(
+            f'IF ( SELECT 1 = 1 FROM {table_name} {_build_where(for_id_fields, dest_set_where)}) THEN',
+            # update record
+            tab_each_line(
+                f'REPLACE INTO {table_name}', 
+                '(',
+                tab_each_line(
+                    field_exprs([_SET_ID_FIELD, *id_fields, _JSON_FIELD, _VALID_START_FIELD]),
+                    use_comma=True
+                ),
+                ')',
+                f'SELECT',
+                tab_each_line(
+                    '*'
+                ),
+                f'FROM',
+                _alias_table_or_query(
+                    join_line(
+                        f'SELECT',
+                        tab_each_line(
+                            field_exprs(_SET_ID_FIELD, 'DEST'),
+                            field_exprs(id_fields),
+                            field_exprs(_JSON_FIELD, 'SRC'),
+                            f'IF({field_exprs(_VALID_START_FIELD, "SRC")} - IFNULL({field_exprs(_VALID_START_FIELD, "DEST")}, 0) < 0, @VERSION, {field_exprs(_VALID_START_FIELD, "SRC")})',
+                            use_comma=True
+                        ),
+                        f'FROM',
+                        tab_each_line(
+                            _alias_table_or_query(join_line(
+                                f"SELECT",
+                                tab_each_line(
+                                    field_exprs([_JSON_FIELD, _VALID_START_FIELD]),
+                                    field_exprs(id_fields),
+                                    use_comma=True
+                                ),
+                                f'FROM {table_name}',
+                                _build_where(
+                                    for_id_fields,
+                                    (
+                                        (f'{field_exprs(_SET_ID_FIELD)}', '=', '%(src_id)s'),
+                                        (f'{field_exprs(_VALID_START_FIELD)}', '<=', '@VERSION'),
+                                        (f'{field_exprs(_VALID_END_FIELD)}', '>', '@VERSION')
+                                    )
+                                )
+                            ), "SRC"),
+                            f"LEFT JOIN",
+                            _alias_table_or_query(join_line(
+                                f"SELECT",
+                                tab_each_line(
+                                    field_exprs([_SET_ID_FIELD, _VALID_START_FIELD]),
+                                    field_exprs(id_fields),
+                                    use_comma=True
+                                ),
+                                f'FROM {table_name}',
+                                _build_where(
+                                    (
+                                        (f'{field_exprs(_SET_ID_FIELD)}', '=', '%(dest_id)s'),
+                                        (f'{field_exprs(_VALID_START_FIELD)}', '<=', '@VERSION'),
+                                        (f'{field_exprs(_VALID_END_FIELD)}', '>', '@VERSION')
+                                    )
+                                )
+                            ), "DEST"),
+                            f"USING ({join_line(field_exprs(id_fields), use_comma=True, new_line=False)})"
+                        ),
+                        f'WHERE {field_exprs(_VALID_START_FIELD, "SRC")} != IFNULL({field_exprs(_VALID_START_FIELD, "DEST")}, 0)',
+                    ),
+                    "_T"
+                ),
+                f'RETURNING',
+                tab_each_line(
+                    field_exprs(_SET_ID_FIELD),
+                    field_exprs(_ROW_ID_FIELD),
+                    f"{field_exprs(_VALID_START_FIELD)} as {field_exprs(_AUDIT_DATA_VERSION_FIELD)}",
+                    f"'INSERTED:MERGE_SET' as {field_exprs('op')}",
+                    f"'{table_name}' as {field_exprs('table_name')}",
+                    f"""CONCAT_WS(',', {
+                        join_line(field_exprs(id_fields), use_comma=True, new_line=False) 
+                        if id_fields
+                        else 
+                        "''"
+                    }) as {field_exprs(_AUDIT_MODEL_ID_FIELD)}""",
+                    use_comma=True
+                ),
+                f';',
+                f'ELSE', 
+                # insert record instead of using insert duplicate.
+                tab_each_line(
+                    f'INSERT INTO {table_name}', 
+                    '(',
+                    tab_each_line(
+                        field_exprs([_JSON_FIELD, _SET_ID_FIELD, *id_fields, _VALID_START_FIELD]),
+                        use_comma=True
+                    ),
+                    ')',
+                    f'SELECT',
+                    tab_each_line(
+                        field_exprs(_JSON_FIELD),
+                        f'%(dest_id)s',
+                        field_exprs(id_fields),
+                        field_exprs(_VALID_START_FIELD),
+                        use_comma=True
+                    ),
+                    f'FROM {table_name}',
+                    _build_where(
+                        for_id_fields, src_set_where
+                    ),
+                    f'RETURNING',
+                    tab_each_line(
+                        field_exprs(_SET_ID_FIELD),
+                        field_exprs(_ROW_ID_FIELD),
+                        f"{field_exprs(_VALID_START_FIELD)} as {field_exprs(_AUDIT_DATA_VERSION_FIELD)}",
+                        f"'INSERTED:MERGE_SET' as {field_exprs('op')}",
+                        f"'{table_name}' as {field_exprs('table_name')}",
+                        f"""CONCAT_WS(',', {
+                            join_line(field_exprs(id_fields), use_comma=True, new_line=False) 
+                            if id_fields
+                            else 
+                            "''"
+                        }) as {field_exprs(_AUDIT_MODEL_ID_FIELD)}""",
+                        use_comma=True
+                    ),
+                    f';',
+                ),
+                f'END IF', 
+            )
+        )
 
 
 def _build_part_of_model_view_statement(view_name:str, joined_table:str,
@@ -496,7 +744,7 @@ def _get_view_fields(fields:Dict[str, Tuple[str, ...]]) -> Iterator[str]:
             yield f'{field_exprs(field_name, table_name)}'
 
 
-def _get_table_indexes(type_:Type, stored_fields:StoredFieldDefinitions) -> Iterator[str]:
+def _get_table_indexes(type_:Type, stored_fields:StoredFieldDefinitions, for_part:bool) -> Iterator[str]:
     identified_fields = [field_name 
                         for field_name, (_, field_type) in stored_fields.items()
                         if has_metadata(field_type, MetaIdentifyingField)]
@@ -506,9 +754,10 @@ def _get_table_indexes(type_:Type, stored_fields:StoredFieldDefinitions) -> Iter
 
     if identified_fields:
         yield f"""UNIQUE KEY `identifying_index` ({join_line(
-            field_exprs(identified_fields), new_line=False, use_comma=True)})"""
+            field_exprs(
+                itertools.chain([] if for_part else [_SET_ID_FIELD], identified_fields)
+            ), new_line=False, use_comma=True)})"""
     
-
     for field_name, (_, field_type) in stored_fields.items():
         if has_metadata(field_type, MetaIdentifyingField):
             continue
@@ -516,8 +765,12 @@ def _get_table_indexes(type_:Type, stored_fields:StoredFieldDefinitions) -> Iter
         key_def = _generate_key_definition(field_type)
 
         if key_def: 
+            if key_def == 'UNIQUE KEY' and not for_part:
+                fields = [_SET_ID_FIELD, field_name]
+            else:
+                fields = field_name
             yield f"""{key_def} `{field_name}_index` ({join_line(
-                field_exprs(field_name), new_line=False, use_comma=True)})"""
+                field_exprs(fields), new_line=False, use_comma=True)})"""
 
     full_text_searched_fields = set(
         field_name for field_name, (_, field_type) in stored_fields.items()
@@ -660,7 +913,7 @@ def get_query_and_args_for_upserting(model:PersistentModel, set_id:int):
     query_args[_JSON_FIELD] = model.json()
     query_args[_SET_ID_FIELD] = set_id
 
-    return _get_sql_for_upserting(cast(Type, type(model))), query_args
+    return _get_sql_for_upserting_single_object(cast(Type, type(model))), query_args
 
 
 def get_query_and_args_for_squashing(type_:Type[PersistentModelT], identifier:Dict[str, Any], set_id:int):
@@ -668,11 +921,11 @@ def get_query_and_args_for_squashing(type_:Type[PersistentModelT], identifier:Di
         _logger.fatal(f'{type_=} is not derived from VersinoMixin. it suppport to squash VersionMixin objects only.')
         raise RuntimeError(L('to squash is not supported for non version type. check {0}', type_))
 
-    return _get_sql_for_squashing(cast(Type, type_)), identifier | {'__set_id': set_id}
+    return _get_sql_for_squashing_single_object(cast(Type, type_)), identifier | {'__set_id': set_id}
     
 
 @functools.lru_cache
-def _get_sql_for_squashing(model_type:Type):
+def _get_sql_for_squashing_single_object(model_type:Type):
     table_name = get_table_name(model_type)
     id_fields = get_identifying_fields(model_type)
     for_id_fields = [f'{field_exprs(f)} = %({f})s' for f in id_fields]
@@ -742,10 +995,10 @@ def _get_sql_for_squashing(model_type:Type):
                         [_VALID_START_FIELD, _VALID_END_FIELD])
                     ), use_comma=True, new_line=False
                     )
-            }) as {_AUDIT_MODEL_ID_FIELD}""",
-            "'PURGED:SQUASHED' as op",
-            f"'{table_name}' as table_name",
-            f"NULL as data_version",
+            }) as {field_exprs(_AUDIT_MODEL_ID_FIELD)}""",
+            f"'PURGED:SQUASHED' as {field_exprs('op')}",
+            f"'{table_name}' as {field_exprs('table_name')}",
+            f"NULL as {field_exprs(_AUDIT_DATA_VERSION_FIELD)}",
             use_comma=True
         ),
         ';',
@@ -776,7 +1029,7 @@ def _get_sql_for_squashing(model_type:Type):
 
 
 @functools.lru_cache
-def _get_sql_for_upserting(model_type:Type):
+def _get_sql_for_upserting_single_object(model_type:Type):
     table_name = get_table_name(model_type)
     id_fields = get_identifying_fields(model_type)
 
@@ -850,10 +1103,10 @@ def _get_sql_for_upserting(model_type:Type):
                     join_line(field_exprs(
                         itertools.chain(id_fields, [_VALID_START_FIELD])
                     ), use_comma=True, new_line=False)
-                }) as {_AUDIT_MODEL_ID_FIELD}""",
-                "'INSERTED' as op",
-                f"'{table_name}' as table_name",
-                f"@VERSION as data_version",
+                }) as {field_exprs(_AUDIT_MODEL_ID_FIELD)}""",
+                f"'INSERTED' as {field_exprs('op')}",
+                f"'{table_name}' as {field_exprs('table_name')}",
+                f"@VERSION as {field_exprs(_AUDIT_DATA_VERSION_FIELD)}",
                 use_comma=True
             )
         )
@@ -863,6 +1116,11 @@ def _get_sql_for_upserting(model_type:Type):
                 for_id_fields,
             )
         )
+
+        # Unique Index가 여러개 인 경우 INSERT INTO DUPLICATE를 하게 되면,
+        # 오류를 내야 함에도 불구하고 UPDATE가 되는 경우가 있어 아래와 같이 
+        # 해당 식별 필드에 대응하는 값이 있으면 UPDATE를 없으면 INSERT를
+        # 하도록 한다. 
 
         return join_line(
             f'IF ( SELECT 1 = 1 FROM {table_name} WHERE {where_cond}) THEN',
@@ -883,15 +1141,15 @@ def _get_sql_for_upserting(model_type:Type):
                 f'SELECT',
                 tab_each_line(
                     field_exprs([_SET_ID_FIELD, _ROW_ID_FIELD]),
-                    "'INSERTED' as op",
-                    f"'{table_name}' as table_name",
+                    f"'INSERTED' as {field_exprs('op')}",
+                    f"'{table_name}' as {field_exprs('table_name')}",
                     f"""CONCAT_WS(',', {
                         join_line(field_exprs(id_fields), use_comma=True, new_line=False) 
                         if id_fields
                         else 
                         "''"
-                    }) as {_AUDIT_MODEL_ID_FIELD}""",
-                    f"@VERSION as data_version",
+                    }) as {field_exprs(_AUDIT_MODEL_ID_FIELD)}""",
+                    f"@VERSION as {field_exprs(_AUDIT_DATA_VERSION_FIELD)}",
                     use_comma=True
                 ),
                 f'FROM {table_name}',
@@ -925,15 +1183,15 @@ def _get_sql_for_upserting(model_type:Type):
                 tab_each_line(
                     field_exprs(_SET_ID_FIELD),
                     field_exprs(_ROW_ID_FIELD),
-                    "'INSERTED' as op",
-                    f"'{table_name}' as table_name",
+                    f"'INSERTED' as {field_exprs('op')}",
+                    f"'{table_name}' as {field_exprs('table_name')}",
                     f"""CONCAT_WS(',', {
                         join_line(field_exprs(id_fields), use_comma=True, new_line=False) 
                         if id_fields
                         else 
                         "''"
-                    }) as {_AUDIT_MODEL_ID_FIELD}""",
-                    f"@VERSION as data_version",
+                    }) as {field_exprs(_AUDIT_MODEL_ID_FIELD)}""",
+                    f"@VERSION as {field_exprs(_AUDIT_DATA_VERSION_FIELD)}",
                     use_comma=True
                 ),
                 f';',
@@ -963,15 +1221,15 @@ def _get_sql_for_upserting(model_type:Type):
             tab_each_line(
                 field_exprs(_SET_ID_FIELD),
                 field_exprs(_ROW_ID_FIELD),
-                "'UPSERTED' as op",
-                f"'{table_name}' as table_name",
+                f"'UPSERTED' as {field_exprs('op')}",
+                f"'{table_name}' as {field_exprs('table_name')}",
                 f"""CONCAT_WS(',', {
                     join_line(field_exprs(id_fields), use_comma=True, new_line=False) 
                     if id_fields
                     else 
                     "''"
-                }) as {_AUDIT_MODEL_ID_FIELD}""",
-                f"@VERSION as data_version",
+                }) as {field_exprs(_AUDIT_MODEL_ID_FIELD)}""",
+                f"@VERSION as {field_exprs(_AUDIT_DATA_VERSION_FIELD)}",
                 use_comma=True
             )
         ) 
@@ -1530,14 +1788,14 @@ def _get_sql_for_purging(type_:Type, field_and_value:FieldOp):
         tab_each_line(
             _ROW_ID_FIELD, 
             _SET_ID_FIELD, 
-            "'PURGED' as op", 
-            f"'{table_name}' as table_name",
+            f"'PURGED' as {field_exprs('op')}", 
+            f"'{table_name}' as {field_exprs('table_name')}",
             f"""CONCAT_WS(',', {
                 join_line(field_exprs(id_fields), use_comma=True, new_line=False)
                 if id_fields else 
                 "''"
-            }) as {_AUDIT_MODEL_ID_FIELD}""",
-            f"NULL as data_version",
+            }) as {field_exprs(_AUDIT_MODEL_ID_FIELD)}""",
+            f"NULL as {field_exprs(_AUDIT_DATA_VERSION_FIELD)}",
             use_comma=True
         )
     )
@@ -1569,14 +1827,14 @@ def _get_sql_for_deleting(type_:Type, field_and_value:FieldOp):
         tab_each_line(
             _ROW_ID_FIELD, 
             _SET_ID_FIELD, 
-            f"'DELETED' as op", 
-            f"'{table_name}' as table_name",
+            f"'DELETED' as {field_exprs('op')}", 
+            f"'{table_name}' as {field_exprs('table_name')}",
             f"""CONCAT_WS(',', {
                     join_line(field_exprs(id_fields), use_comma=True, new_line=False)
                     if id_fields else 
                     "''"
-            }) as {_AUDIT_MODEL_ID_FIELD}""",
-            "NULL as data_version",
+            }) as {field_exprs(_AUDIT_MODEL_ID_FIELD)}""",
+            f"NULL as {field_exprs(_AUDIT_DATA_VERSION_FIELD)}",
             use_comma=True
         ),
         f"FROM {table_name}",
@@ -1584,18 +1842,21 @@ def _get_sql_for_deleting(type_:Type, field_and_value:FieldOp):
     )
 
 
-def _build_database_args(where:NormalizedQueryConditionType, set_id:int ) -> Dict[str, Any]:
+def _build_database_args(where:NormalizedQueryConditionType, set_id:int | None = None) -> Dict[str, Any]:
     return {
         _get_parameter_variable_for_multiple_fields(field):value for field, (_, value) in where.items()
-    } | {'__set_id': set_id}
+    } | ({} if set_id is None else {'__set_id': set_id} )
 
 
-def _build_where(field_and_ops:FieldOp | Tuple[Tuple[str, str, str],...], ns:str = '') -> str:
-    if field_and_ops:
+def _build_where(*items:Tuple[Tuple[str, str, str] | Tuple[str, str],...], ns:str = '') -> str:
+    
+    where_ops = [_build_where_op(item, ns) for item in itertools.chain(*items)]
+
+    if where_ops:
         return join_line(
             'WHERE',
             tab_each_line(
-                '\nAND '.join(_build_where_op(item, ns) for item in field_and_ops)
+                '\nAND '.join(where_ops),
             )
         )
 
@@ -1625,18 +1886,26 @@ def _build_order_by(order_by:Tuple[str,...]) -> str:
         )
     )
 
+def _drop_table_prefix(item:str)->str:
+    if '.' in item:
+       return item.split('.')[1].strip('`')
+
+    return item
+
 
 def _build_where_op(fields_op:Tuple[str, str] | Tuple[str, str, str], ns:str = '') -> str:
     ns  = ns + '.' if ns else ''
 
     field = fields_op[0]
-    op = fields_op[1]
-    variable = fields_op[2] if len(fields_op) == 3 else fields_op[0]
+    op = fields_op[1].lower()
 
-    if variable.lower() in [_SET_ID_FIELD, 'version']:
+    if field.lower() in [_SET_ID_FIELD, 'version']:
         ns = ''
 
-    variable = _normalize_database_object_name(ns + _normalize_database_object_name(variable))
+    if len(fields_op) == 3:
+        variable = fields_op[2]
+    else:
+        variable = f'%({_normalize_database_object_name(ns + _drop_table_prefix(fields_op[0]))})s'
 
     assert op != 'match'
 
@@ -1647,7 +1916,7 @@ def _build_where_op(fields_op:Tuple[str, str] | Tuple[str, str, str], ns:str = '
     #if op == 'match':
     #    return _build_match(fields_op[0], variable, variable)
     else:
-        return f'{field_exprs(field)} {op} %({variable})s'
+        return f'{field_exprs(field)} {op} {variable}'
 
 
 def _build_match(fields:str, variable:str, table_name:str = ''):
@@ -1694,7 +1963,7 @@ def _build_query_and_fields_for_core_table(
             prefix_fields[_get_alias_for_unwind(f, unwind)][f] = None
 
     field_op_var = tuple(
-        (field_exprs(f, _get_alias_for_unwind(f, unwind)), o, f)
+        (field_exprs(f, _get_alias_for_unwind(f, unwind)), o)
         for f, o in field_ops if o != 'match'
     )
 
@@ -1704,8 +1973,8 @@ def _build_query_and_fields_for_core_table(
     if _is_dated_type(target_type):
         if has_current_date:
             field_op_var = field_op_var + (
-                (field_exprs(_APPLIED_START_FIELD, '__ORG'), '<=', 'current_date'),
-                (field_exprs(_APPLIED_END_FIELD, '__ORG'), '>', 'current_date')
+                (field_exprs(_APPLIED_START_FIELD, '__ORG'), '<=', '%(current_date)s'),
+                (field_exprs(_APPLIED_END_FIELD, '__ORG'), '>', '%(current_date)s')
             )
 
         id_fields = [
@@ -1714,14 +1983,14 @@ def _build_query_and_fields_for_core_table(
         ]
 
         org_field_op_var: Tuple[Tuple[str, str, str],...]= (
-            (field_exprs(_SET_ID_FIELD), '=', '__set_id'),
+            (field_exprs(_SET_ID_FIELD), '=', '%(__set_id)s'),
         )
 
         # we should apply the version at first. then generate applied_end.
         if _is_version_type(get_root_container_type(target_type) or target_type):
             org_field_op_var += (
-                (field_exprs(_VALID_START_FIELD), '<=', 'version'),
-                (field_exprs(_VALID_END_FIELD), '>', 'version'),
+                (field_exprs(_VALID_START_FIELD), '<=', '%(version)s'),
+                (field_exprs(_VALID_END_FIELD), '>', '%(version)s'),
             )
  
         origin = _alias_table_or_query(join_line(
@@ -1741,17 +2010,17 @@ def _build_query_and_fields_for_core_table(
             ),
             "FROM",
             get_table_name(target_type),
-            _build_where(org_field_op_var, ns)
+            _build_where(org_field_op_var, ns=ns)
         ), '__ORG')
     else:
         field_op_var = field_op_var + (
-            (field_exprs(_SET_ID_FIELD, '__ORG'), '=', '__set_id'),
+            (field_exprs(_SET_ID_FIELD, '__ORG'), '=', '%(__set_id)s'),
         )
 
         if not is_derived_from(target_type, PersistentSharedContentModel):
             field_op_var = field_op_var + (
-                (field_exprs(_VALID_START_FIELD, '__ORG'), '<=', 'version'),
-                (field_exprs(_VALID_END_FIELD, '__ORG'), '>', 'version')
+                (field_exprs(_VALID_START_FIELD, '__ORG'), '<=', '%(version)s'),
+                (field_exprs(_VALID_END_FIELD, '__ORG'), '>', '%(version)s')
             )
          
     field_list = [] 
@@ -1788,7 +2057,7 @@ def _build_query_and_fields_for_core_table(
         tab_each_line(
             source
         ),
-        _build_where(field_op_var, ns)
+        _build_where(field_op_var, ns=ns)
     ), tuple(_add_namespace(f, ns) for f in itertools.chain(*prefix_fields.values()))
 
 
@@ -1837,7 +2106,7 @@ def _build_query_for_base_table(ns_types: Tuple[Tuple[str, PersistentModelT],...
                     )
                 ), "FOR_ORDERING"
             ),
-            _build_where(tuple(itertools.chain(field_ops, nested_where))),
+            _build_where(field_ops, nested_where),
             _build_order_by(order_by),
             _build_limit_and_offset(limit or _BIG_INT_MAX, offset)
         ), fields
