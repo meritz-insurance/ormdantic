@@ -27,10 +27,6 @@ from ormdantic.schema.base import (
     MetaReferenceField, MetaIdentifyingField
 )
 
-from .tools import (
-    use_temp_database_cursor_with_model, 
-)
-
 ConStr200 = constr(max_length=200)
 ConStr10 = constr(max_length=10)
 
@@ -1356,6 +1352,7 @@ def test_get_query_and_args_for_deleting():
         "WHERE",
         "  `id` = %(id)s",
         "  AND `__set_id` = %(__set_id)s",
+        "  AND `__valid_end` = 9223372036854775807",
         ";",
         "SELECT",
         "  __row_id,",
@@ -1368,6 +1365,7 @@ def test_get_query_and_args_for_deleting():
         "WHERE",
         "  `id` = %(id)s",
         "  AND `__set_id` = %(__set_id)s",
+        "  AND `__valid_end` = @VERSION",
     ) == sqls[0]
     assert {'id': '@', '__set_id':0} == sqls[1]
 
@@ -1414,7 +1412,7 @@ def test_get_sql_for_copying_objects():
         "  FROM",
         "  (",
         "    SELECT",
-        "      `DEST`.`__set_id`,",
+        "      %(dest_id)s,",
         "      `code`,",
         "      `SRC`.`__json`,",
         "      IF(`SRC`.`__valid_start` - IFNULL(`DEST`.`__valid_start`, 0) < 0, @VERSION, `SRC`.`__valid_start`)",

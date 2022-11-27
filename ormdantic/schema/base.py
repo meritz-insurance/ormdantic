@@ -1,6 +1,6 @@
 from typing import (
     Any, ForwardRef, Tuple, Dict, Type, Generic, TypeVar, Iterator, Callable, 
-    List, ClassVar, cast, Annotated, get_origin
+    List, ClassVar, cast, Annotated
 )
 import datetime
 import inspect

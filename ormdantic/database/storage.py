@@ -502,10 +502,10 @@ def query_records(pool: DatabaseConnectionPool,
             yield from results
 
 
-def merge_model_set(pool:DatabaseConnectionPool, 
-              type_and_query_cond: Dict[Type, QueryConditionType],
-              src_id: int, dest_id: int, forced: bool,
-              version_info: VersionInfo):
+def move_objects(pool:DatabaseConnectionPool, 
+                 type_and_query_cond: Dict[Type, QueryConditionType],
+                 src_id: int, dest_id: int, forced: bool,
+                 version_info: VersionInfo):
     with pool.open_cursor() as cursor:
         new_version = allocate_audit_version(cursor, version_info)
 
@@ -533,15 +533,23 @@ def merge_model_set(pool:DatabaseConnectionPool,
                     _update_audit_model(cursor, row)
                     _upsert_parts_and_externals(cursor, row[_ROW_ID_FIELD], tp)
 
+            cursor.execute(
+                *get_query_and_args_for_deleting(
+                    tp, to_normalize_query_condition(where), set_id=src_id))
+
+            for row in fetch_multiple_set(cursor):
+                row['op'] = row['op'] + ":MERGE_SET"
+                _update_audit_model(cursor, row)
+
 
 def delete_model_set(pool:DatabaseConnectionPool,
-                     set_id: int,
+                     set_id: int, forced:bool, 
                      version_info: VersionInfo):
     pass
 
 
 def purge_model_set(pool:DatabaseConnectionPool,
-                    set_id: int,
+                    set_id: int, forced:bool,
                     version_info: VersionInfo):
     pass
 

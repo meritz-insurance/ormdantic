@@ -557,7 +557,7 @@ def _get_sql_for_copying_objects(tp:Type):
                     join_line(
                         f'SELECT',
                         tab_each_line(
-                            field_exprs(_SET_ID_FIELD, 'DEST'),
+                            '%(dest_id)s',
                             field_exprs(id_fields),
                             field_exprs(_JSON_FIELD, 'SRC'),
                             f'IF({field_exprs(_VALID_START_FIELD, "SRC")} - IFNULL({field_exprs(_VALID_START_FIELD, "DEST")}, 0) < 0, @VERSION, {field_exprs(_VALID_START_FIELD, "SRC")})',
@@ -1811,6 +1811,117 @@ def get_query_and_args_for_deleting(type_:Type, where:NormalizedQueryConditionTy
 
 
 @functools.lru_cache
+def _get_sql_for_checking_model_set_can_be_deleted(tp:Type, set_id:int):
+    id_fields = get_identifying_fields(tp)
+    table_name = get_table_name(tp)
+
+    # check all deleted model was copied in other set.
+    return join_line(
+        f"SELECT",
+        tab_each_line(
+            field_exprs(id_fields),
+        ),
+        f"FROM",
+        _alias_table_or_query(
+            join_line(
+                f"SELECT",
+                tab_each_line(
+                    field_exprs(id_fields),
+                    use_comma=True
+                ),
+                f'FROM {table_name}',
+                _build_where(
+                    (
+                        (f'{field_exprs(_SET_ID_FIELD)}', '=', '%(set_id)s'),
+                        (f'{field_exprs(_VALID_START_FIELD)}', '<=', '@VERSION'),
+                        (f'{field_exprs(_VALID_END_FIELD)}', '>', '@VERSION')
+                    )
+                )
+            ), "SRC"),
+            f"LEFT JOIN",
+            _alias_table_or_query(join_line(
+                f"SELECT",
+                tab_each_line(
+                    field_exprs(id_fields),
+                    field_exprs(_SET_ID_FIELD),
+                    use_comma=True
+                ),
+                f'FROM {table_name}',
+                _build_where(
+                    (
+                        (f'{field_exprs(_SET_ID_FIELD)}', '!=', '%(set_id)s'),
+                        (f'{field_exprs(_VALID_START_FIELD)}', '<=', '@VERSION'),
+                        (f'{field_exprs(_VALID_END_FIELD)}', '>', '@VERSION')
+                    )
+                )
+            ), "DEST"
+        ),
+        f"USING ({join_line(field_exprs(id_fields), use_comma=True, new_line=False)})",
+        f"WHERE {field_exprs(_SET_ID_FIELD)} IS NULL"
+    )
+
+
+def get_query_and_args_for_deleting_model_set(table_name:str, set_id:int):
+    return _get_sql_for_deleting_model_set(table_name), {'set_id':set_id}
+
+@functools.lru_cache
+def _get_sql_for_deleting_model_set(table_name:str):
+    return join_line(
+        f"UPDATE {table_name}",
+        f"SET",
+        tab_each_line(
+            f'{field_exprs(_VALID_END_FIELD)} = @VERSION',
+        ),
+        f"WHERE",
+        tab_each_line(
+            f'{field_exprs(_SET_ID_FIELD)} = %(set_id)s',
+            f'AND {field_exprs(_VALID_START_FIELD)} <= @VERSION',
+            f'AND {field_exprs(_VALID_END_FIELD)} > @VERSION',
+        ),
+        ";",
+        "SELECT",
+        tab_each_line(
+            _ROW_ID_FIELD, 
+            _SET_ID_FIELD, 
+            f"'DELETED:DELETE_MODEL_SET' as {field_exprs('op')}", 
+            f"'{table_name}' as {field_exprs('table_name')}",
+            f"""'' as {field_exprs(_AUDIT_MODEL_ID_FIELD)}""",
+            f"NULL as {field_exprs(_AUDIT_DATA_VERSION_FIELD)}",
+            use_comma=True
+        ),
+        f"FROM {table_name}",
+        f"WHERE",
+        tab_each_line(
+            f'{field_exprs(_SET_ID_FIELD)} = %(set_id)s',
+            f'AND {field_exprs(_VALID_END_FIELD)} = @VERSION',
+        )
+    )
+
+def get_query_and_args_for_purging_model_set(table_name:str, set_id:int):
+    return _get_sql_for_purging_model_set(table_name), {'set_id':set_id}
+
+@functools.lru_cache
+def _get_sql_for_purging_model_set(table_name:str):
+    return join_line(
+        f"DELETE FROM {table_name}",
+        f"WHERE",
+        tab_each_line(
+            f'{field_exprs(_SET_ID_FIELD)} = %(set_id)s',
+        ),
+        "RETURNING",
+        tab_each_line(
+            _ROW_ID_FIELD, 
+            _SET_ID_FIELD, 
+            f"'PURGED:PURGE_MODEL_SET' as {field_exprs('op')}", 
+            f"'{table_name}' as {field_exprs('table_name')}",
+            f"""'' as {field_exprs(_AUDIT_MODEL_ID_FIELD)}""",
+            f"NULL as {field_exprs(_AUDIT_DATA_VERSION_FIELD)}",
+            use_comma=True
+        )
+    )
+
+
+@functools.lru_cache
 def _get_sql_for_deleting(type_:Type, field_and_value:FieldOp):
     table_name = get_table_name(type_)
     id_fields = get_identifying_fields(type_)
@@ -1821,7 +1932,7 @@ def _get_sql_for_deleting(type_:Type, field_and_value:FieldOp):
         tab_each_line(
             f'{field_exprs(_VALID_END_FIELD)} = @VERSION',
         ),
-        _build_where(field_and_value),
+        _build_where(field_and_value, ((_VALID_END_FIELD, '=', f'{_BIG_INT_MAX}'),)),
         ";",
         "SELECT",
         tab_each_line(
@@ -1838,7 +1949,7 @@ def _get_sql_for_deleting(type_:Type, field_and_value:FieldOp):
             use_comma=True
         ),
         f"FROM {table_name}",
-        _build_where(field_and_value),
+        _build_where(field_and_value, ((_VALID_END_FIELD, '=', '@VERSION'),)),
     )
 
 

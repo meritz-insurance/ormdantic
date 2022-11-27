@@ -22,7 +22,7 @@ from ormdantic.database.storage import (
     delete_objects, get_current_version, purge_objects, get_model_changes_of_version, get_version_info, query_records, 
     squash_objects, upsert_objects, find_object, 
     find_objects, build_where, load_object, delete_objects,
-    update_sequences, merge_model_set
+    update_sequences, move_objects
 )
 
 from ormdantic.database.queries import get_query_for_next_seq
@@ -522,7 +522,7 @@ def test_update_sequences():
         assert 'N34' == second.code
             
 
-def test_merge_model_set():
+def test_move_objects():
     class CodedModel(PersistentModel):
         code:Annotated[SequenceStr, MetaIdentifyingField()]
         message: str
@@ -540,7 +540,7 @@ def test_merge_model_set():
 
         assert first == find_object(pool, CodedModel, {'code':'N1'}, 0)
 
-        merge_model_set(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
+        move_objects(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
 
         found = find_object(pool, CodedModel, {'code':'N1'}, 0)
 
@@ -551,11 +551,13 @@ def test_merge_model_set():
 
         assert [
             {'version':3, 'data_version':2, 'op': 'INSERTED:MERGE_SET', 
-            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':3, 'model_id': 'N1'}
+            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':3, 'model_id': 'N1'},
+            {'version':3, 'data_version':None, 'op': 'DELETED:MERGE_SET', 
+            'table_name': 'md_CodedModel', '__set_id':1, '__row_id':2, 'model_id': 'N1'}
         ] == list(get_model_changes_of_version(pool, 3)) 
 
 
-def test_merge_model_set_with_version():
+def test_move_objects_with_version():
     class CodedModel(PersistentModel, VersionMixin):
         code:Annotated[SequenceStr, MetaIdentifyingField()]
         message: str
@@ -573,7 +575,7 @@ def test_merge_model_set_with_version():
 
         assert first == find_object(pool, CodedModel, {'code':'N1'}, 0)
 
-        merge_model_set(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
+        move_objects(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
 
         found = find_object(pool, CodedModel, {'code':'N1'}, 0)
 
@@ -584,11 +586,13 @@ def test_merge_model_set_with_version():
 
         assert [
             {'version':3, 'data_version':2, 'op': 'INSERTED:MERGE_SET', 
-            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':3, 'model_id': 'N1,2,9223372036854775807'}
+            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':3, 'model_id': 'N1,2,9223372036854775807'},
+            {'version':3, 'data_version':None, 'op': 'DELETED:MERGE_SET', 
+            'table_name': 'md_CodedModel', '__set_id':1, '__row_id':2, 'model_id': 'N1'}
         ] == list(get_model_changes_of_version(pool, 3)) 
 
 
-def test_merge_model_set_from_empty():
+def test_move_objects_from_empty():
     class CodedModel(PersistentModel):
         code:Annotated[SequenceStr, MetaIdentifyingField()]
         message: str
@@ -597,7 +601,7 @@ def test_merge_model_set_from_empty():
         first = CodedModel(code=SequenceStr('N1'), message='first')
         upsert_objects(pool, first, 1, False, VersionInfo())
 
-        merge_model_set(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
+        move_objects(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
 
         found = find_object(pool, CodedModel, {'code':'N1'}, 0)
 
@@ -608,11 +612,13 @@ def test_merge_model_set_from_empty():
 
         assert [
             {'version':2, 'data_version':1, 'op': 'INSERTED:MERGE_SET', 
-            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':2, 'model_id': 'N1'}
+            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':2, 'model_id': 'N1'},
+            {'version':2, 'data_version':None, 'op': 'DELETED:MERGE_SET', 
+            'table_name': 'md_CodedModel', '__set_id':1, '__row_id':1, 'model_id': 'N1'}
         ] == list(get_model_changes_of_version(pool, 2)) 
 
 
-def test_merge_model_set_versioned_from_empty():
+def test_move_objects_versioned_from_empty():
     class CodedModel(PersistentModel, VersionMixin):
         code:Annotated[SequenceStr, MetaIdentifyingField()]
         message: str
@@ -621,7 +627,7 @@ def test_merge_model_set_versioned_from_empty():
         first = CodedModel(code=SequenceStr('N1'), message='first')
         upsert_objects(pool, first, 1, False, VersionInfo())
 
-        merge_model_set(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
+        move_objects(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
 
         found = find_object(pool, CodedModel, {'code':'N1'}, 0)
 
@@ -632,11 +638,13 @@ def test_merge_model_set_versioned_from_empty():
 
         assert [
             {'version':2, 'data_version':1, 'op': 'INSERTED:MERGE_SET', 
-            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':2, 'model_id': 'N1,1,9223372036854775807'}
+            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':2, 'model_id': 'N1,1,9223372036854775807'},
+            {'version':2, 'data_version':None, 'op': 'DELETED:MERGE_SET', 
+            'table_name': 'md_CodedModel', '__set_id':1, '__row_id':1, 'model_id': 'N1'}
         ] == list(get_model_changes_of_version(pool, 2)) 
 
 
-def test_merge_model_set_forced():
+def test_move_objects_forced():
     class CodedModel(PersistentModel):
         code:Annotated[SequenceStr, MetaIdentifyingField()]
         message: str
@@ -655,9 +663,9 @@ def test_merge_model_set_forced():
         upsert_objects(pool, first, 0, False, VersionInfo())
 
         with pytest.raises(RuntimeError, match='.*copy object because.* new version .*forced.*'):
-            merge_model_set(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
+            move_objects(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
 
-        merge_model_set(pool, {CodedModel:{}}, 1, 0, True, VersionInfo())
+        move_objects(pool, {CodedModel:{}}, 1, 0, True, VersionInfo())
         found = find_object(pool, CodedModel, {'code':'N1'}, 0)
 
         assert found
@@ -667,11 +675,13 @@ def test_merge_model_set_forced():
 
         assert [
             {'version':5, 'data_version':5, 'op': 'INSERTED:MERGE_SET', 
-            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':4, 'model_id': 'N1'}
+            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':4, 'model_id': 'N1'},
+            {'version':5, 'data_version':None, 'op': 'DELETED:MERGE_SET', 
+            'table_name': 'md_CodedModel', '__set_id':1, '__row_id':2, 'model_id': 'N1'}
         ] == list(get_model_changes_of_version(pool, 5)) 
 
 
-def test_merge_model_set_versioned_forced():
+def test_move_objects_versioned_forced():
     class CodedModel(PersistentModel, VersionMixin):
         code:Annotated[SequenceStr, MetaIdentifyingField()]
         message: str
@@ -690,9 +700,9 @@ def test_merge_model_set_versioned_forced():
         upsert_objects(pool, first, 0, False, VersionInfo())
 
         with pytest.raises(RuntimeError, match='.*copy object because.* new version .*forced.*'):
-            merge_model_set(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
+            move_objects(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
 
-        merge_model_set(pool, {CodedModel:{}}, 1, 0, True, VersionInfo())
+        move_objects(pool, {CodedModel:{}}, 1, 0, True, VersionInfo())
         found = find_object(pool, CodedModel, {'code':'N1'}, 0)
 
         assert found
@@ -702,28 +712,39 @@ def test_merge_model_set_versioned_forced():
 
         assert [
             {'version':5, 'data_version':5, 'op': 'INSERTED:MERGE_SET', 
-            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':5, 'model_id': 'N1,5,9223372036854775807'}
+            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':5, 'model_id': 'N1,5,9223372036854775807'},
+            {'version':5, 'data_version':None, 'op': 'DELETED:MERGE_SET', 
+            'table_name': 'md_CodedModel', '__set_id':1, '__row_id':2, 'model_id': 'N1'}
         ] == list(get_model_changes_of_version(pool, 5)) 
 
 
 
-def test_merge_model_set_does_not_copy_already_copied():
+def test_move_objects_does_not_copy_already_copied():
     class CodedModel(PersistentModel):
         code:Annotated[SequenceStr, MetaIdentifyingField()]
         message: str
 
     with use_temp_database_pool_with_model(CodedModel) as pool:
+        # version 1
         first = CodedModel(code=SequenceStr('N1'), message='first')
         upsert_objects(pool, first, 0, False, VersionInfo())
 
+        # version 2
         second = CodedModel(code=SequenceStr('N1'), message='second')
         upsert_objects(pool, second, 1, False, VersionInfo())
 
-        merge_model_set(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
-        merge_model_set(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
-        merge_model_set(pool, {CodedModel:{}}, 0, 1, False, VersionInfo())
+        # version 3
+        move_objects(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
+        # version 4
+        move_objects(pool, {CodedModel:{}}, 1, 0, False, VersionInfo())
+        # version 5
+        move_objects(pool, {CodedModel:{}}, 0, 1, False, VersionInfo())
 
         found = find_object(pool, CodedModel, {'code':'N1'}, 0)
+
+        assert not found
+
+        found = find_object(pool, CodedModel, {'code':'N1'}, 1)
 
         assert found
 
@@ -732,26 +753,35 @@ def test_merge_model_set_does_not_copy_already_copied():
 
         assert [
             {'version':3, 'data_version':2, 'op': 'INSERTED:MERGE_SET', 
-            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':3, 'model_id': 'N1'}
+            'table_name': 'md_CodedModel', '__set_id':0, '__row_id':3, 'model_id': 'N1'},
+            {'version':3, 'data_version':None, 'op': 'DELETED:MERGE_SET', 
+            'table_name': 'md_CodedModel', '__set_id':1, '__row_id':2, 'model_id': 'N1'}
         ] == list(get_model_changes_of_version(pool, 3)) 
 
         assert [
         ] == list(get_model_changes_of_version(pool, 4)) 
 
         assert [
-        ] == list(get_model_changes_of_version(pool, 5)) 
+            {'version': 5, 'data_version': 2, 'op': 'INSERTED:MERGE_SET',
+             'table_name': 'md_CodedModel', '__set_id': 1, '__row_id': 4, 'model_id': 'N1'},
+            {'version': 5, 'data_version': None, 'op': 'DELETED:MERGE_SET',
+             'table_name': 'md_CodedModel', '__set_id': 0, '__row_id': 3, 'model_id': 'N1'}
+        ] == list(get_model_changes_of_version(pool, 5))
+
+        assert [
+        ] == list(get_model_changes_of_version(pool, 6))
 
         assert 5 == get_current_version(pool)
 
 
-def test_merge_model_set_affect_parts_and_external():
+def test_move_objects_affect_parts_and_external():
     with use_temp_database_pool_with_model(ContainerModel) as pool:
         upsert_objects(pool, model, 1, False, VersionInfo())
 
         found = list(find_objects(pool, SubPartModel, {'codes':('like', '%code1%')}, 0, unwind='codes'))
         assert not found 
 
-        merge_model_set(pool, {ContainerModel:{}}, 1, 0, False, VersionInfo())
+        move_objects(pool, {ContainerModel:{}}, 1, 0, False, VersionInfo())
 
         found = list(find_objects(pool, PartModel, {}, 0))
         assert found 
