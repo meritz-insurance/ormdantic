@@ -10,11 +10,10 @@ from .schema import (
     TypeNamedModel, PersistentModel, SharedContentModel, ContentReferenceModel,
     PersistentSharedContentModel, get_type_named_model_type, parse_object_for_model,
 
-    SharedModelSource, ModelSource,
+    SharedModelSource, ModelSource, ModelStorage,
     MemoryModelStorage, MemorySharedModelSource,
     ChainedSharedModelSource, ChainedModelSource
 )
-
 
 from .database import (
     DatabaseConnectionPool, 
@@ -56,6 +55,7 @@ __all__ = [
     "get_type_named_model_type",
     "parse_object_for_model",
     "ModelSource",
+    "ModelStorage",
     "SharedModelSource",
     "MemoryModelStorage",
     "MemorySharedModelSource",

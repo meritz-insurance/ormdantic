@@ -63,7 +63,7 @@ class SharedModelSource:
             if found:
                 yield found
 
-    def load(self, type_:Type, id:str | int):
+    def load(self, type_:Type[PersistentModelT], id:str | int) -> PersistentModelT:
         found = self.find(type_, id)
 
         if found is None:

@@ -24,7 +24,7 @@ from .typed import (
 )
 from .source import (
     SharedModelSource, ModelSource, MemoryModelStorage, MemorySharedModelSource,
-    ChainedModelSource, ChainedSharedModelSource
+    ChainedModelSource, ChainedSharedModelSource, ModelStorage
 )
 
 __all__ = [
@@ -73,4 +73,5 @@ __all__ = [
     "MemoryModelStorage",
     "ChainedModelSource",
     "ChainedSharedModelSource",
+    "ModelStorage",
 ]
