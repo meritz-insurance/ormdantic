@@ -8,7 +8,7 @@ from ormdantic.database.storage import allocate_audit_version
 from ormdantic.schema import PersistentModel, IdentifiedModel
 from ormdantic.database.queries import (
     get_query_and_args_for_deleting, get_query_and_args_for_upserting, get_query_and_args_for_reading,
-    get_query_and_args_for_purging,
+    get_query_and_args_for_purging, _BIG_INT_MAX
 )
 from ormdantic.schema.base import (
     PersistentModel, SequenceStr, StringArrayIndex, FullTextSearchedStringIndex, 
@@ -76,7 +76,7 @@ def test_get_query_and_args_for_purging():
         assert [{
             '__row_id':1, '__set_id': 0, 'op':'PURGED', 
             'table_name':'md_SimpleBaseModel', 'model_id': '@',
-            'data_version': None}
+            'data_version': None, '__valid_end': _BIG_INT_MAX }
         ] == cursor.fetchall()
 
         query_and_args = get_query_and_args_for_reading(

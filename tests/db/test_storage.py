@@ -183,10 +183,12 @@ def test_purge_objects():
         # multiple same object does not affect the database.
         where = build_where(get_identifer_of(upserted))
 
-        assert ['@'] == purge_objects(pool, ContainerModel, where, 0)
+        with pytest.raises(RuntimeError, match='The object was not deleted.*'):
+            assert ['@'] == purge_objects(pool, ContainerModel, where, 0)
+
+        assert ['@'] == purge_objects(pool, ContainerModel, where, 0, forced=True)
 
         found = find_object(pool, ContainerModel, where, 0)
-
         assert found is None
 
         found = list(find_objects(pool, PartModel, {}, 0))
@@ -194,6 +196,13 @@ def test_purge_objects():
 
         found = list(find_objects(pool, SubPartModel, {}, 0))
         assert not found
+
+        upserted = upsert_objects(pool, model, 0, False, VersionInfo())
+        delete_objects(pool, ContainerModel, where, 0)
+        assert ['@'] == purge_objects(pool, ContainerModel, where, 0)
+
+        found = find_object(pool, ContainerModel, where, 0)
+        assert found is None
 
         # check empty external table
         with pool.open_cursor() as cursor:

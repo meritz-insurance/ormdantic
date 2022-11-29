@@ -59,6 +59,7 @@ _AUDIT_WHY_FIELD = 'why'
 _AUDIT_WHERE_FIELD = 'where'
 _AUDIT_WHEN_FIELD = 'when'
 _AUDIT_TAG_FIELD = 'tag'
+_AUDIT_REVERT_FIELD = 'revert'
 
 _VERSION_INFO_TABLE = '_version_info'
 _VERSION_CHANGE_TABLE = '_model_changes'
@@ -179,6 +180,7 @@ def get_sql_for_creating_version_info_table():
             f'{field_exprs(_AUDIT_WHEN_FIELD)} DATETIME(6)',
             f'{field_exprs(_AUDIT_WHY_FIELD)} VARCHAR(256)',
             f'{field_exprs(_AUDIT_TAG_FIELD)} VARCHAR(80)',
+            f'{field_exprs(_AUDIT_REVERT_FIELD)} BOOL',
         ])
     )
 
@@ -232,7 +234,7 @@ def _get_sql_for_auditing_model():
 
  
 @functools.cache
-def _get_sql_for_allocating_version():
+def _get_sql_for_allocating_version(revert:bool = True):
     return join_line(
         f'INSERT INTO {field_exprs(_VERSION_INFO_TABLE)}',
         '(',
@@ -242,7 +244,8 @@ def _get_sql_for_allocating_version():
                 _AUDIT_WHERE_FIELD, 
                 _AUDIT_WHEN_FIELD, 
                 _AUDIT_WHY_FIELD, 
-                _AUDIT_TAG_FIELD
+                _AUDIT_TAG_FIELD,
+                _AUDIT_REVERT_FIELD,
             ]),
             use_comma=True
         ),
@@ -255,6 +258,7 @@ def _get_sql_for_allocating_version():
             'CURRENT_TIMESTAMP(6)',
             f'%({_AUDIT_WHY_FIELD})s',
             f'%({_AUDIT_TAG_FIELD})s',
+            f'{revert}',
             use_comma=True
         ),
         ')',
@@ -880,21 +884,32 @@ def _generate_key_definition(type_:Type) -> str:
     return ''
 
 
-def get_query_and_args_for_inserting_audit(audit:VersionInfo):
-    return _get_sql_for_allocating_version(), asdict(audit)
+def get_query_and_args_for_inserting_audit(revert:bool, audit:VersionInfo):
+    return _get_sql_for_allocating_version(revert), asdict(audit)
 
 
 def get_query_and_args_for_auditing(item:Dict[str, Any]):
     return _get_sql_for_auditing_model(), item
 
 
-def get_query_and_args_for_getting_version(when:datetime | None):
-    if when is None:
-        return f'SELECT MAX(version) as version FROM {field_exprs(_VERSION_INFO_TABLE)}', {}
+def get_query_and_args_for_getting_version(when:datetime | None, include_revert:bool = True):
+    if include_revert:
+        cond_for_revert = ''
     else:
+        cond_for_revert = f'{field_exprs("revert")} = 0'
+
+    if when is None:
+        if cond_for_revert:
+            cond_for_revert = 'WHERE ' + cond_for_revert
+
+        return f'SELECT MAX(version) as version FROM {field_exprs(_VERSION_INFO_TABLE)} {cond_for_revert}', {}
+    else:
+        if cond_for_revert:
+            cond_for_revert = ' AND ' + cond_for_revert
+
         return (
             f'SELECT MAX(version) as version FROM {field_exprs(_VERSION_INFO_TABLE)} '
-            f'WHERE `when` <= %(ref_date)s', 
+            f'WHERE `when` <= %(ref_date)s' + cond_for_revert,
             {'ref_date': when}
         )
 
@@ -1551,7 +1566,7 @@ def get_sql_for_purging_external_index(model_type:Type) -> Iterator[str]:
 def get_query_and_args_for_reading(type_:Type[PersistentModelT], 
                                    fields: Tuple[str, ...] | str, 
                                    where: NormalizedQueryConditionType,
-                                   set_id: int,
+                                   set_id: int | None = None,
                                    *,
                                    order_by: Tuple[str, ...] | str = tuple(), 
                                    offset : None | int = None, 
@@ -1598,7 +1613,9 @@ def get_query_and_args_for_reading(type_:Type[PersistentModelT],
             tuple((f, o) for f, (o, _) in where.items()), 
             order_by, offset, limit, 
             unwind, 
-            cast(Type, base_type), for_count, bool(current)), 
+            cast(Type, base_type), for_count, bool(current),
+            set_id is not None
+        ), 
         _build_database_args(where, set_id) | {'version':version, 'current_date':current}
     )
 
@@ -1635,7 +1652,8 @@ def _get_sql_for_reading(ns_types:Tuple[Tuple[str, Type]],
                          unwind: Tuple[str, ...],
                          base_type: Type[PersistentModelT] | None,
                          for_count: bool,
-                         has_current_date) -> str:
+                         has_current_date: bool,
+                         has_set_id:bool) -> str:
 
     # we will build the core table which has _row_id and fields which
     # is referenced from where clause or unwind.
@@ -1670,7 +1688,7 @@ def _get_sql_for_reading(ns_types:Tuple[Tuple[str, Type]],
 
         core_query_and_fields[ns] = _build_query_and_fields_for_core_table(
             ns, ns_type, core_fields,
-            field_ops, _extract_fields(unwind, ns), has_current_date)
+            field_ops, _extract_fields(unwind, ns), has_current_date, has_set_id)
 
     field_ops = tuple(field_ops_list)
 
@@ -1796,6 +1814,7 @@ def _get_sql_for_purging(type_:Type, field_and_value:FieldOp):
                 "''"
             }) as {field_exprs(_AUDIT_MODEL_ID_FIELD)}""",
             f"NULL as {field_exprs(_AUDIT_DATA_VERSION_FIELD)}",
+            f'{field_exprs(_VALID_END_FIELD)}',
             use_comma=True
         )
     )
@@ -1808,117 +1827,6 @@ def get_query_and_args_for_deleting(type_:Type, where:NormalizedQueryConditionTy
     field_and_op = tuple((f, o) for f, (o, _) in where.items()) + ((_SET_ID_FIELD, '='),)
 
     return _get_sql_for_deleting(type_, field_and_op), query_args
-
-
-@functools.lru_cache
-def _get_sql_for_checking_model_set_can_be_deleted(tp:Type, set_id:int):
-    id_fields = get_identifying_fields(tp)
-    table_name = get_table_name(tp)
-
-    # check all deleted model was copied in other set.
-    return join_line(
-        f"SELECT",
-        tab_each_line(
-            field_exprs(id_fields),
-        ),
-        f"FROM",
-        _alias_table_or_query(
-            join_line(
-                f"SELECT",
-                tab_each_line(
-                    field_exprs(id_fields),
-                    use_comma=True
-                ),
-                f'FROM {table_name}',
-                _build_where(
-                    (
-                        (f'{field_exprs(_SET_ID_FIELD)}', '=', '%(set_id)s'),
-                        (f'{field_exprs(_VALID_START_FIELD)}', '<=', '@VERSION'),
-                        (f'{field_exprs(_VALID_END_FIELD)}', '>', '@VERSION')
-                    )
-                )
-            ), "SRC"),
-            f"LEFT JOIN",
-            _alias_table_or_query(join_line(
-                f"SELECT",
-                tab_each_line(
-                    field_exprs(id_fields),
-                    field_exprs(_SET_ID_FIELD),
-                    use_comma=True
-                ),
-                f'FROM {table_name}',
-                _build_where(
-                    (
-                        (f'{field_exprs(_SET_ID_FIELD)}', '!=', '%(set_id)s'),
-                        (f'{field_exprs(_VALID_START_FIELD)}', '<=', '@VERSION'),
-                        (f'{field_exprs(_VALID_END_FIELD)}', '>', '@VERSION')
-                    )
-                )
-            ), "DEST"
-        ),
-        f"USING ({join_line(field_exprs(id_fields), use_comma=True, new_line=False)})",
-        f"WHERE {field_exprs(_SET_ID_FIELD)} IS NULL"
-    )
-
-
-def get_query_and_args_for_deleting_model_set(table_name:str, set_id:int):
-    return _get_sql_for_deleting_model_set(table_name), {'set_id':set_id}
-
-@functools.lru_cache
-def _get_sql_for_deleting_model_set(table_name:str):
-    return join_line(
-        f"UPDATE {table_name}",
-        f"SET",
-        tab_each_line(
-            f'{field_exprs(_VALID_END_FIELD)} = @VERSION',
-        ),
-        f"WHERE",
-        tab_each_line(
-            f'{field_exprs(_SET_ID_FIELD)} = %(set_id)s',
-            f'AND {field_exprs(_VALID_START_FIELD)} <= @VERSION',
-            f'AND {field_exprs(_VALID_END_FIELD)} > @VERSION',
-        ),
-        ";",
-        "SELECT",
-        tab_each_line(
-            _ROW_ID_FIELD, 
-            _SET_ID_FIELD, 
-            f"'DELETED:DELETE_MODEL_SET' as {field_exprs('op')}", 
-            f"'{table_name}' as {field_exprs('table_name')}",
-            f"""'' as {field_exprs(_AUDIT_MODEL_ID_FIELD)}""",
-            f"NULL as {field_exprs(_AUDIT_DATA_VERSION_FIELD)}",
-            use_comma=True
-        ),
-        f"FROM {table_name}",
-        f"WHERE",
-        tab_each_line(
-            f'{field_exprs(_SET_ID_FIELD)} = %(set_id)s',
-            f'AND {field_exprs(_VALID_END_FIELD)} = @VERSION',
-        )
-    )
-
-def get_query_and_args_for_purging_model_set(table_name:str, set_id:int):
-    return _get_sql_for_purging_model_set(table_name), {'set_id':set_id}
-
-@functools.lru_cache
-def _get_sql_for_purging_model_set(table_name:str):
-    return join_line(
-        f"DELETE FROM {table_name}",
-        f"WHERE",
-        tab_each_line(
-            f'{field_exprs(_SET_ID_FIELD)} = %(set_id)s',
-        ),
-        "RETURNING",
-        tab_each_line(
-            _ROW_ID_FIELD, 
-            _SET_ID_FIELD, 
-            f"'PURGED:PURGE_MODEL_SET' as {field_exprs('op')}", 
-            f"'{table_name}' as {field_exprs('table_name')}",
-            f"""'' as {field_exprs(_AUDIT_MODEL_ID_FIELD)}""",
-            f"NULL as {field_exprs(_AUDIT_DATA_VERSION_FIELD)}",
-            use_comma=True
-        )
-    )
 
 
 @functools.lru_cache
@@ -2049,7 +1957,8 @@ def _build_query_and_fields_for_core_table(
         fields: List[str],
         field_ops: Tuple[Tuple[str, str], ...],
         unwind: Tuple[str, ...],
-        has_current_date: bool) -> Tuple[str, Tuple[str, ...]]:
+        has_current_date: bool,
+        has_set_id:bool) -> Tuple[str, Tuple[str, ...]]:
 
     # in core table, following item will be handled.
     # 1. unwind
@@ -2095,7 +2004,7 @@ def _build_query_and_fields_for_core_table(
 
         org_field_op_var: Tuple[Tuple[str, str, str],...]= (
             (field_exprs(_SET_ID_FIELD), '=', '%(__set_id)s'),
-        )
+        ) if has_set_id else tuple()
 
         # we should apply the version at first. then generate applied_end.
         if _is_version_type(get_root_container_type(target_type) or target_type):

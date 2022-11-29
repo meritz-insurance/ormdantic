@@ -7,7 +7,9 @@ from pydantic import condecimal, constr, Field
 
 from ormdantic.schema import PersistentModel
 from ormdantic.database.queries import (
-    _get_sql_for_upserting_single_object, get_query_and_args_for_deleting, get_query_and_args_for_purging, get_sql_for_creating_version_info_table, get_sql_for_upserting_external_index, get_stored_fields, get_table_name, 
+    _get_sql_for_upserting_single_object, get_query_and_args_for_deleting, 
+    get_query_and_args_for_purging, get_sql_for_creating_version_info_table, 
+    get_sql_for_upserting_external_index, get_stored_fields, get_table_name, 
     get_sql_for_creating_table, _get_field_db_type, _generate_json_table_for_part_of,
     _build_query_and_fields_for_core_table, field_exprs,
     get_query_and_args_for_reading,
@@ -16,14 +18,15 @@ from ormdantic.database.queries import (
     _build_namespace_types, _find_join_keys, _extract_fields,
     get_query_for_adjust_seq,
     _ENGINE, _RELEVANCE_FIELD,
-    _get_sql_for_copying_objects
+    _get_sql_for_copying_objects,
+    get_query_and_args_for_getting_version
 )
 from ormdantic.schema.base import (
     DatedMixin, IntegerArrayIndex, StringArrayIndex, FullTextSearchedStringIndex, 
     FullTextSearchedString, PartOfMixin, VersionMixin, 
     UniqueStringIndex, StringIndex, DecimalIndex, IntIndex, DateIndex,
     DateTimeIndex, update_forward_refs, UuidStr, 
-    StoredFieldDefinitions, SequenceStr, MetaIndexField,
+    StoredFieldDefinitions, SequenceStr, 
     MetaReferenceField, MetaIdentifyingField
 )
 
@@ -327,7 +330,8 @@ def test_get_sql_for_creating_audit_version_table():
             '  `where` VARCHAR(80),',
             '  `when` DATETIME(6),',
             '  `why` VARCHAR(256),',
-            '  `tag` VARCHAR(80)',
+            '  `tag` VARCHAR(80),',
+            '  `revert` BOOL',
             ')'
         ),
         join_line(
@@ -344,6 +348,22 @@ def test_get_sql_for_creating_audit_version_table():
             ')'
         ),
     ] == list(get_sql_for_creating_version_info_table())
+
+
+def test_get_query_and_args_for_getting_version():
+    assert (
+        'SELECT MAX(version) as version FROM `_version_info` ', {}
+    ) == get_query_and_args_for_getting_version(None)
+
+    assert (
+        'SELECT MAX(version) as version FROM `_version_info` WHERE `revert` = 0', {}
+    ) == get_query_and_args_for_getting_version(None, False)
+
+
+    assert (
+        'SELECT MAX(version) as version FROM `_version_info` WHERE `when` <= %(ref_date)s AND `revert` = 0', 
+        {'ref_date': datetime(2000, 1, 1, 0, 0, 0)}
+    ) == get_query_and_args_for_getting_version(datetime(2000, 1, 1, 0, 0, 0), False)
 
 
 @pytest.mark.parametrize('type_, expected', [
@@ -847,7 +867,6 @@ def test_get_sql_for_upserting_parts_table_with_container_fields():
     ) == sqls[Part][1]
 
 
-
 def test_get_sql_for_upserting_external_index_table():
     class Part(PersistentModel, PartOfMixin['Container']):
         _stored_fields: StoredFieldDefinitions = {
@@ -1099,7 +1118,7 @@ def test_build_query_for_core_table():
     query, fields = _build_query_and_fields_for_core_table('', Model, 
         ['description'], 
         (('codes', '='), ('name', '!=')),
-        tuple(), False
+        tuple(), False, True
     )
 
     assert join_line(
@@ -1129,7 +1148,7 @@ def test_build_query_for_core_table_for_unwind():
     query, fields = _build_query_and_fields_for_core_table('ns', Model, 
         ['description'],
         (('codes', '='), ('name', '!=')),
-        ('codes',), False
+        ('codes',), False, True
     )
 
     assert join_line(
@@ -1161,7 +1180,7 @@ def test_build_query_for_core_table_for_match():
     query, fields = _build_query_and_fields_for_core_table('ns', Model, 
         [],
         (('codes', '='), ('name,description', 'match')),
-        ('codes',), False
+        ('codes',), False, True
     )
 
     assert join_line(
@@ -1191,7 +1210,7 @@ def test_build_query_for_core_table_for_multiple_match():
     query, fields = _build_query_and_fields_for_core_table('', Model, 
         [],
         (('name', 'match'), ('description', 'match',)),
-        tuple(), False
+        tuple(), False, True
     )
 
     assert join_line(
@@ -1332,7 +1351,8 @@ def test_get_query_and_args_for_purging():
         "  'PURGED' as `op`,",
         "  'md_SimpleBaseModel' as `table_name`,",
         "  CONCAT_WS(',', `id`) as `model_id`,",
-        "  NULL as `data_version`"
+        "  NULL as `data_version`,",
+        "  `__valid_end`"
     ) == sqls[0]
 
     assert {'id': '@', '__set_id':0} == sqls[1]

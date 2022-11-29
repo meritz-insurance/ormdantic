@@ -16,13 +16,14 @@ class VersionInfo():
     when: datetime | None = None
     where: str = ''
     tag: str = ''
+    revert: bool = False
 
     @staticmethod
-    def create(who:str = 'system', why:str='', where:str = 'system', tag:str = ''):
+    def create(who:str = 'system', why:str='', where:str = 'system', tag:str = '', revert:bool = False):
         return VersionInfo(None, who, why, None, where, tag)
 
     @staticmethod
     def from_dict(data:Dict[str, Any]):
         return VersionInfo(data['version'], data['who'], data['why'], 
-                           data['when'], data['where'], data['tag'])
+                           data['when'], data['where'], data['tag'], data['revert'])
 

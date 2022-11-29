@@ -47,8 +47,9 @@ from .queries import (
     get_query_and_args_for_purging,
     get_query_for_adjust_seq,
     get_query_for_copying_single_object,
-    _ROW_ID_FIELD, _JSON_FIELD, _AUDIT_VERSION_FIELD, _AUDIT_MODEL_ID_FIELD,
-    _VALID_START_FIELD, _AUDIT_DATA_VERSION_FIELD
+    _ROW_ID_FIELD, _JSON_FIELD, _VALID_START_FIELD, _VALID_END_FIELD, _BIG_INT_MAX,
+    _AUDIT_VERSION_FIELD, _AUDIT_MODEL_ID_FIELD, _AUDIT_DATA_VERSION_FIELD,
+    _AUDIT_TABLE_NAME_FIELD,
 )
 
 
@@ -212,9 +213,8 @@ def fetch_multiple_set(cursor:DictCursor) -> Iterator[Dict[str, Any]]:
         loop = cursor.nextset()
 
 
-
-def allocate_audit_version(cursor:DictCursor, audit:VersionInfo) -> int:
-    cursor.execute(*get_query_and_args_for_inserting_audit(audit))
+def allocate_audit_version(cursor:DictCursor, audit:VersionInfo, revert=False) -> int:
+    cursor.execute(*get_query_and_args_for_inserting_audit(revert, audit))
     fetched = cursor.fetchall()
 
     audit_version = fetched[0][_AUDIT_VERSION_FIELD]
@@ -300,13 +300,20 @@ def delete_objects(pool: DatabaseConnectionPool,
         allocate_audit_version(cursor, version_info)
 
         for where in wheres:
-            cursor.execute(
-                *get_query_and_args_for_deleting(
-                    type_, to_normalize_query_condition(where), set_id=set_id))
+            deleted.extend(_delete_objects(cursor, type_, where, set_id))
 
-            for row in fetch_multiple_set(cursor):
-                _update_audit_model(cursor, row)
-                deleted.append(row[_AUDIT_MODEL_ID_FIELD])
+    return deleted
+
+def _delete_objects(cursor: DictCursor, type_:Type, where:QueryConditionType, set_id:int):
+    deleted = []
+
+    cursor.execute(
+        *get_query_and_args_for_deleting(
+            type_, to_normalize_query_condition(where), set_id=set_id))
+
+    for row in fetch_multiple_set(cursor):
+        _update_audit_model(cursor, row)
+        deleted.append(row[_AUDIT_MODEL_ID_FIELD])
 
     return deleted
 
@@ -314,7 +321,7 @@ def delete_objects(pool: DatabaseConnectionPool,
 def purge_objects(pool: DatabaseConnectionPool,
                    type_: Type[PersistentModelT], wheres: List[QueryConditionType] | QueryConditionType,
                    set_id:int,
-                   version_info: VersionInfo = VersionInfo()) -> List[Dict[str, Any]]:
+                   version_info: VersionInfo = VersionInfo(), forced:bool = False) -> List[Dict[str, Any]]:
     if not is_derived_from(type_, PersistentModel):
         _logger.fatal(
             f"try to delete {type_=}. it is impossible. type should be dervied "
@@ -330,7 +337,7 @@ def purge_objects(pool: DatabaseConnectionPool,
         )
         raise RuntimeError(L('PersistentSharedContentModel could not be deleted. you tried to deleted {0}', type_.__name__))
 
-    deleted = []
+    purged = []
 
     wheres = convert_list(wheres)
 
@@ -338,33 +345,43 @@ def purge_objects(pool: DatabaseConnectionPool,
         allocate_audit_version(cursor, version_info)
 
         for where in wheres:
-            cursor.execute(*get_query_and_args_for_purging(type_, 
-                to_normalize_query_condition(where), set_id=set_id))
+            purged.extend(_check_and_purge_objects(cursor, type_, where, set_id, forced))
 
-            row_ids = []
-
-            for row in fetch_multiple_set(cursor):
-                _update_audit_model(cursor, row)
-                deleted.append(row[_AUDIT_MODEL_ID_FIELD])
-
-                row_ids.append(row[_ROW_ID_FIELD])
-
-            if row_ids:
-                _delete_parts_and_externals(cursor, tuple(row_ids), type_)
+    return purged
 
 
-    return deleted
+def _check_and_purge_objects(cursor: DictCursor, type_:Type, where:QueryConditionType, set_id:int, forced: bool):
+    purged = []
+
+    cursor.execute(*get_query_and_args_for_purging(type_, 
+        to_normalize_query_condition(where), set_id=set_id))
+
+    row_ids = []
+
+    for row in fetch_multiple_set(cursor):
+        if row[_VALID_END_FIELD] == _BIG_INT_MAX and not forced:
+            _logger.fatal(f'{row[_AUDIT_MODEL_ID_FIELD]=} of {type_=} is not deleted.')
+            raise RuntimeError(L('The object was not deleted. for purging record, object should be deleted before or use forced'))
+        _update_audit_model(cursor, row)
+        purged.append(row[_AUDIT_MODEL_ID_FIELD])
+        row_ids.append(row[_ROW_ID_FIELD])
+
+    if row_ids:
+        _delete_parts_and_externals(cursor, tuple(row_ids), type_)
+
+    return purged
 
 
-def get_current_version(pool:DatabaseConnectionPool)->int:
-    return get_version_info(pool).version or 0
+def get_current_version(pool:DatabaseConnectionPool, include_revert:bool = True)->int:
+    return get_version_info(pool, include_revert=include_revert).version or 0
 
 
 def get_version_info(pool:DatabaseConnectionPool, 
-                     version_or_datetime: datetime | None | int = None) -> VersionInfo:
+                     version_or_datetime: datetime | None | int = None,
+                     include_revert:bool = True) -> VersionInfo:
     with pool.open_cursor(True) as cursor:
         if isinstance(version_or_datetime, datetime) or version_or_datetime is None:
-            cursor.execute(*get_query_and_args_for_getting_version(version_or_datetime))
+            cursor.execute(*get_query_and_args_for_getting_version(version_or_datetime, include_revert))
             record = cursor.fetchone()
 
             assert record
@@ -542,16 +559,61 @@ def move_objects(pool:DatabaseConnectionPool,
                 _update_audit_model(cursor, row)
 
 
+def revert_objects(pool:DatabaseConnectionPool, 
+                   all_types:Dict[str, Type],
+                   version_info:VersionInfo):
+
+    with pool.open_cursor() as cursor:
+        new_version = allocate_audit_version(cursor, version_info, True)
+
+        target_version = get_current_version(pool, False)
+
+        if new_version < target_version:
+            raise RuntimeError(L('cannot revert object. target version is larger than new_version.'))
+
+        cursor.execute(*get_query_and_args_for_getting_model_changes_of_version(target_version))
+
+        for row in cursor.fetchall():
+            row[_AUDIT_TABLE_NAME_FIELD]
+            row[_ROW_ID_FIELD]
+            row[_AUDIT_MODEL_ID_FIELD]
+
+
 def delete_model_set(pool:DatabaseConnectionPool,
-                     set_id: int, forced:bool, 
+                     set_id: int, all_types:List[Type], forced:bool, 
                      version_info: VersionInfo):
-    pass
+    deleted = []
+
+    if set_id == 0:
+        _logger.fatal('The main model set could not deleted')
+        raise RuntimeError(L('cannot delete main model set'))
+
+    with pool.open_cursor() as cursor:
+        allocate_audit_version(cursor, version_info)
+
+        for type_ in all_types:
+            deleted.extend(_delete_objects(cursor, type_, {}, set_id))
+
+    return deleted
 
 
 def purge_model_set(pool:DatabaseConnectionPool,
-                    set_id: int, forced:bool,
+                    set_id: int, all_types:List[Type], forced:bool,
                     version_info: VersionInfo):
-    pass
+
+    purged = []
+
+    if set_id == 0:
+        _logger.fatal('The main model set.')
+        raise RuntimeError(L('cannot purge main model set'))
+
+    with pool.open_cursor() as cursor:
+        allocate_audit_version(cursor, version_info)
+
+        for type_ in all_types:
+            purged.extend(_check_and_purge_objects(cursor, type_, {}, set_id, forced))
+
+    return purged
 
 
 def _traverse_all_part_types(type_:Type[ModelT]):
